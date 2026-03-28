@@ -712,12 +712,12 @@ class NeurodivergentMemory {
 const memorySystem = new NeurodivergentMemory();
 
 /**
- * Create an MCP server with capabilities for resources (to list/read notes),
- * tools (to create new notes), and prompts (to summarize notes).
+ * Create an MCP server with capabilities for resources (to list/read memories),
+ * tools (to manage memory graph), and prompts (for memory exploration).
  */
 const server = new Server(
   {
-    name: "FractalStatMemory",
+    name: "neurodivergent-memory",
     version: "0.1.0",
   },
   {

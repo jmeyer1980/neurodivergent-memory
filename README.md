@@ -1,43 +1,86 @@
-# FractalStatMemory MCP Server
+# neurodivergent-memory MCP Server
 
-A Model Context Protocol server
+A Model Context Protocol server for knowledge graphs designed around neurodivergent thinking patterns.
 
-This is a TypeScript-based MCP server that implements a simple notes system. It demonstrates core MCP concepts by providing:
-
-- Resources representing text notes with URIs and metadata
-- Tools for creating new notes
-- Prompts for generating summaries of notes
+This TypeScript-based MCP server implements a sophisticated memory system inspired by neurodivergent cognitive styles. It organizes thoughts into five **districts** (knowledge domains), ranks search results using **BM25 semantic ranking**, and stores memories as a persistent knowledge graph with bidirectional connections.
 
 ## Features
 
-### Resources
-- List and access notes via `note://` URIs
-- Each note has a title, content and metadata
-- Plain text mime type for simple content access
+### Five Memory Districts
 
-### Tools
-- `create_note` - Create new text notes
-  - Takes title and content as required parameters
-  - Stores note in server state
+Memories are organized by cognitive domain:
+
+- **logical_analysis** — Structured thinking, problem solving, and analytical processes
+- **emotional_processing** — Feelings, emotional responses, and affective states
+- **practical_execution** — Action-oriented thoughts, tasks, and implementation
+- **vigilant_monitoring** — Awareness, safety concerns, and protective thinking
+- **creative_synthesis** — Novel connections, creative insights, and innovative thinking
+
+### Resources
+
+- Explore memory districts and individual memories via `memory://` URIs
+- Each memory includes content, tags, emotional metadata, and connection information
+- Access memories as JSON resources with full metadata
+
+### Tools (11 memory management operations)
+
+- **`store_memory`** — Create new memory nodes with optional emotional valence and intensity
+- **`retrieve_memory`** — Fetch a specific memory by ID and increment access count
+- **`update_memory`** — Modify content, tags, district, emotional_valence, or intensity
+- **`delete_memory`** — Remove a memory and all its connections
+- **`connect_memories`** — Create bidirectional edges between memory nodes
+- **`search_memories`** — BM25-ranked semantic search with optional filters (district, tags, emotional valence, intensity, min_score)
+- **`traverse_from`** — Graph traversal up to N hops from a starting memory
+- **`related_to`** — Find memories by graph proximity + BM25 semantic blend
+- **`list_memories`** — Paginated listing with optional district/archetype filters
+- **`memory_stats`** — Aggregate statistics (totals, per-district counts, most-accessed, orphans)
+- **`import_memories`** — Bulk-seed memories from JSON array
 
 ### Prompts
-- `summarize_notes` - Generate a summary of all stored notes
-  - Includes all note contents as embedded resources
-  - Returns structured prompt for LLM summarization
+
+- **`explore_memory_city`** — Guided exploration of districts and memory organization
+- **`synthesize_memories`** — Create new insights by connecting existing memories
+
+## Core Concepts
+
+### Memory Archetypes
+
+Each memory is assigned an archetype tied to its district:
+- **scholar** — logical_analysis
+- **merchant** — practical_execution
+- **mystic** — emotional_processing and creative_synthesis
+- **guard** — vigilant_monitoring
+
+### Semantic Ranking
+
+Search uses **Okapi BM25** ranking (k1=1.5, b=0.75) without requiring embeddings or cloud calls. Results are normalized to 0–1 score range.
+
+### Emotional Metadata
+
+Each memory can optionally carry:
+- **emotional_valence** (-1 to 1) — Emotional charge or affective tone
+- **intensity** (0–1) — Mental energy or importance weight
+
+### Knowledge Graph Persistence
+
+Memories are automatically persisted to `~/.neurodivergent-memory/memories.json` on every write. The graph is restored on server startup.
 
 ## Development
 
 Install dependencies:
+
 ```bash
 npm install
 ```
 
 Build the server:
+
 ```bash
 npm run build
 ```
 
 For development with auto-rebuild:
+
 ```bash
 npm run watch
 ```
@@ -52,8 +95,8 @@ On Windows: `%APPDATA%/Claude/claude_desktop_config.json`
 ```json
 {
   "mcpServers": {
-    "FractalStatMemory": {
-      "command": "/path/to/FractalStatMemory/build/index.js"
+    "neurodivergent-memory": {
+      "command": "/path/to/neurodivergent-memory/build/index.js"
     }
   }
 }

@@ -1,11 +1,11 @@
 {
-  "name": "fractalstatmemory",
+  "name": "neurodivergent-memory",
   "version": "0.1.0",
-  "description": "A Model Context Protocol server",
+  "description": "A Model Context Protocol server for knowledge graphs designed around neurodivergent thinking patterns",
   "private": true,
   "type": "module",
   "bin": {
-    "fractalstatmemory": "./build/index.js"
+    "neurodivergent-memory": "./build/index.js"
   },
   "files": [
     "build"
