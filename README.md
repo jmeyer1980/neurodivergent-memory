@@ -24,7 +24,35 @@
   </tr>
 </table>
 
+## Model Flow
 
+```mermaid
+flowchart LR
+  A[Client MCP Request] --> B[MCP Server Stdio Transport]
+  B --> C{Request Type}
+  C -->|Tools| D[Tool Handler]
+  C -->|Resources| E[Resource Handler]
+  C -->|Prompts| F[Prompt Handler]
+
+  D --> G[NeurodivergentMemory Core]
+  E --> G
+  F --> G
+
+  G --> H[Memory Graph Store]
+  G --> I[BM25 Index]
+  H --> J[Persisted JSON Snapshot]
+
+  D --> K[MCP JSON Response]
+  E --> K
+  F --> K
+  K --> A
+```
+
+Flow notes:
+
+- Memory operations update both graph state and BM25 index.
+- Persistence writes to the local snapshot file for restart continuity.
+- All MCP responses return through stdio transport.
 
 ## Features
 
