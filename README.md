@@ -5,29 +5,58 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Node 20 LTS](https://img.shields.io/badge/node-20_LTS-5FA04E?logo=node.js&logoColor=white)](https://nodejs.org/en/about/previous-releases)
 
-A Model Context Protocol server for knowledge graphs designed around neurodivergent thinking patterns.
+<table>
+  <tr>
+    <td width="360" valign="top">
+      <details>
+        <summary>📽️ Click to preview</summary>
+        <br />
+        <a href="./neurodivergent-memory.gif">
+          <img src="./neurodivergent-memory.gif" alt="neurodivergent-memory preview" width="320" />
+        </a>
+      </details>
+    </td>
+    <td valign="top">
+      <p><strong>Project Preview</strong></p>
+      <p>
+        This is a Model Context Protocol server for knowledge graphs designed around neurodivergent thinking patterns.
+      </p>
+      <p>
+        This TypeScript-based MCP server implements a sophisticated memory system inspired by neurodivergent cognitive styles. It organizes thoughts into five <strong>districts</strong> (knowledge domains), ranks search results using <strong>BM25 semantic ranking</strong>, and stores memories as a persistent knowledge graph with bidirectional connections.
+      </p>
+    </td>
+  </tr>
+</table>
 
-This TypeScript-based MCP server implements a sophisticated memory system inspired by neurodivergent cognitive styles. It organizes thoughts into five **districts** (knowledge domains), ranks search results using **BM25 semantic ranking**, and stores memories as a persistent knowledge graph with bidirectional connections.
+## Model Flow
 
-## Install
+```mermaid
+flowchart LR
+  A[Client MCP Request] --> B[MCP Server Stdio Transport]
+  B --> C{Request Type}
+  C -->|Tools| D[Tool Handler]
+  C -->|Resources| E[Resource Handler]
+  C -->|Prompts| F[Prompt Handler]
 
-### npm
+  D --> G[NeurodivergentMemory Core]
+  E --> G
+  F --> G
 
-```bash
-npm install -g neurodivergent-memory
+  G --> H[Memory Graph Store]
+  G --> I[BM25 Index]
+  H --> J[Persisted JSON Snapshot]
+
+  D --> K[MCP JSON Response]
+  E --> K
+  F --> K
+  K --> A
 ```
 
-### Docker
+Flow notes:
 
-```bash
-docker pull twgbellok/neurodivergent-memory:latest
-```
-
-## Cost and Access
-
-- No API key is required to use this project.
-- There is no usage fee for running this software.
-- Standard costs from third-party platforms (for example npm registry or Docker Hub account usage) are outside this project.
+- Memory operations update both graph state and BM25 index.
+- Persistence writes to the local snapshot file for restart continuity.
+- All MCP responses return through stdio transport.
 
 ## Features
 
