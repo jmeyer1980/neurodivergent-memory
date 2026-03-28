@@ -193,6 +193,7 @@ class NeurodivergentMemory {
   private memories: { [id: string]: MemoryNPC } = {};
   private nextMemoryId = 1;
   private bm25 = new BM25Index();
+  private saveTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor() {
     this.initializeDistricts();
@@ -229,19 +230,27 @@ class NeurodivergentMemory {
     }
   }
 
-  private saveToDisk(): void {
+  private scheduleSave(): void {
+    if (this.saveTimer !== null) clearTimeout(this.saveTimer);
+    this.saveTimer = setTimeout(() => {
+      this.saveTimer = null;
+      this.saveToDiskAsync().catch((err) => {
+        process.stderr.write(`[neurodivergent-memory] Failed to save snapshot: ${err}\n`);
+      });
+    }, 100);
+  }
+
+  private async saveToDiskAsync(): Promise<void> {
     try {
-      if (!fs.existsSync(PERSISTENCE_DIR)) {
-        fs.mkdirSync(PERSISTENCE_DIR, { recursive: true });
-      }
+      await fs.promises.mkdir(PERSISTENCE_DIR, { recursive: true });
       const snapshot: MemorySnapshot = {
         nextMemoryId: this.nextMemoryId,
         memories: this.memories,
       };
-      fs.writeFileSync(PERSISTENCE_FILE, JSON.stringify(snapshot, null, 2), "utf-8");
+      await fs.promises.writeFile(PERSISTENCE_FILE, JSON.stringify(snapshot, null, 2), "utf-8");
     } catch (err) {
-      // Non-fatal — log to stderr and continue
-      process.stderr.write(`[neurodivergent-memory] Failed to save snapshot: ${err}\n`);
+      // Re-throw so scheduleSave's .catch() can log it
+      throw err;
     }
   }
 
@@ -322,7 +331,7 @@ class NeurodivergentMemory {
     this.memories[id] = memory;
     this.districts[district].memories.push(id);
     this.bm25.addDocument(id, this.documentText(memory));
-    this.saveToDisk();
+    this.scheduleSave();
 
     return memory;
   }
@@ -332,7 +341,7 @@ class NeurodivergentMemory {
     if (memory) {
       memory.last_accessed = new Date();
       memory.access_count++;
-      this.saveToDisk();
+      this.scheduleSave();
     }
     return memory || null;
   }
@@ -360,7 +369,7 @@ class NeurodivergentMemory {
     // Rebuild BM25 entry with updated text
     this.bm25.removeDocument(id);
     this.bm25.addDocument(id, this.documentText(memory));
-    this.saveToDisk();
+    this.scheduleSave();
 
     return memory;
   }
@@ -379,7 +388,7 @@ class NeurodivergentMemory {
 
     this.bm25.removeDocument(id);
     delete this.memories[id];
-    this.saveToDisk();
+    this.scheduleSave();
   }
 
   connectMemories(memoryId1: string, memoryId2: string, bidirectional = true) {
@@ -395,7 +404,7 @@ class NeurodivergentMemory {
       this.memories[memoryId2].connections.push(memoryId1);
     }
 
-    this.saveToDisk();
+    this.scheduleSave();
   }
 
   // ── Search ─────────────────────────────────────────────────────────────────
