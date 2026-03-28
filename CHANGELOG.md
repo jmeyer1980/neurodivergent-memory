@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.1.4] - 2026-03-28
+
+### ⚠️ Research Preview Release
+
+This patch release adds MCP Registry publishing support.
+
+### Added
+
+- Added `mcpName` field to `package.json` required for MCP Registry namespace verification (`io.github.jmeyer1980/neurodivergent-memory`)
+- Added `server.json` for publishing to the official MCP Registry at `registry.modelcontextprotocol.io`
+
 ## [0.1.3] - 2026-03-28
 
 ### ⚠️ Research Preview Release

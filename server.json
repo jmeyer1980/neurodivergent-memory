@@ -1,0 +1,20 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.jmeyer1980/neurodivergent-memory",
+  "description": "A Model Context Protocol server for persistent knowledge graphs designed around neurodivergent thinking patterns. Stores and retrieves memories as a graph with BM25 semantic ranking, five knowledge districts, and a canonical tag schema (topic/scope/kind/layer namespaces). No embedding model or cloud LLM required.",
+  "repository": {
+    "url": "https://github.com/jmeyer1980/neurodivergent-memory",
+    "source": "github"
+  },
+  "version": "0.1.4",
+  "packages": [
+    {
+      "registryType": "npm",
+      "identifier": "neurodivergent-memory",
+      "version": "0.1.4",
+      "transport": {
+        "type": "stdio"
+      }
+    }
+  ]
+}
