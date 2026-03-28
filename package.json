@@ -1,11 +1,11 @@
 {
-  "name": "FractalStatMemory",
+  "name": "fractalstatmemory",
   "version": "0.1.0",
   "description": "A Model Context Protocol server",
   "private": true,
   "type": "module",
   "bin": {
-    "FractalStatMemory": "./build/index.js"
+    "fractalstatmemory": "./build/index.js"
   },
   "files": [
     "build"
