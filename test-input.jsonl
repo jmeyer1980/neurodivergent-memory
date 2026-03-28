@@ -9,5 +9,5 @@
 {"jsonrpc":"2.0","id":9,"method":"tools/call","params":{"name":"search_memories","arguments":{"query":"time blindness dopamine task initiation amygdala","min_score":0.1}}}
 {"jsonrpc":"2.0","id":10,"method":"tools/call","params":{"name":"search_memories","arguments":{"query":"perfectionism risk shame spiral","tag":"topic:adhd-risks","min_score":0.05}}}
 {"jsonrpc":"2.0","id":11,"method":"tools/call","params":{"name":"search_memories","arguments":{"query":"systems design chaos feedback","district":"creative_synthesis","min_score":0.1}}}
-{"jsonrpc":"2.0","id":12,"method":"tools/call","params":{"name":"list_memories","arguments":{"limit":50,"offset":0}}}
+{"jsonrpc":"2.0","id":12,"method":"tools/call","params":{"name":"list_memories","arguments":{"page":1,"page_size":50}}}
 {"jsonrpc":"2.0","id":13,"method":"tools/call","params":{"name":"memory_stats","arguments":{}}}
