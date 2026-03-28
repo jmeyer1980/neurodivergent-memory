@@ -1,6 +1,5 @@
 # neurodivergent-memory MCP Server
 
-[![CI](https://img.shields.io/github/actions/workflow/status/jmeyer1980/neurodivergent-memory/release.yml?branch=release&label=ci)](https://github.com/jmeyer1980/neurodivergent-memory/actions/workflows/release.yml)
 [![npm version](https://img.shields.io/npm/v/neurodivergent-memory?logo=npm)](https://www.npmjs.com/package/neurodivergent-memory)
 [![Docker Image Version](https://img.shields.io/docker/v/twgbellok/neurodivergent-memory?logo=docker&label=docker)](https://hub.docker.com/r/twgbellok/neurodivergent-memory)
 ![License: UNLICENSED](https://img.shields.io/badge/license-UNLICENSED-lightgrey)
