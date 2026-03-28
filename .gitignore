@@ -3,3 +3,9 @@ build/
 *.log
 .env*
 .history/
+.cline/
+.github/
+.vscode/
+
+# template from gitignore.io for Node.js projects, with additions for build output and logs.
+# https://github.com/github/gitignore
