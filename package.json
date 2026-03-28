@@ -20,7 +20,7 @@
     "@modelcontextprotocol/sdk": "1.26.0"
   },
   "devDependencies": {
-    "@types/node": "^20.11.24",
+    "@types/node": "^25.5.0",
     "typescript": "^6.0.2"
   }
 }
