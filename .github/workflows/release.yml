@@ -10,6 +10,7 @@ on:
 env:
   NODE_VERSION: "20"
   IMAGE_NAME: docker.io/twgbellok/neurodivergent-memory
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
 jobs:
   ci:
@@ -22,10 +23,10 @@ jobs:
       artifact-metadata: write
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
@@ -86,10 +87,10 @@ jobs:
       artifact-metadata: write
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
@@ -123,7 +124,18 @@ jobs:
           subject-path: ${{ steps.pack.outputs.tarball }}
 
       - name: Publish package to npm
-        run: npm publish "${{ steps.pack.outputs.tarball }}" --provenance --access public
+        run: |
+          set +e
+          publish_log="$(mktemp)"
+          npm publish "${{ steps.pack.outputs.tarball }}" --provenance --access public 2> >(tee "$publish_log" >&2)
+          status=$?
+          set -e
+
+          if [ "$status" -ne 0 ] && grep -q "EOTP" "$publish_log"; then
+            echo "::error::npm publish failed with EOTP (2FA challenge). Use an npm Automation token for NPM_TOKEN (recommended), or configure npm Trusted Publishing for this repo."
+          fi
+
+          exit "$status"
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
