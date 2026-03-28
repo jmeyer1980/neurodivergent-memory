@@ -209,6 +209,8 @@ class NeurodivergentMemory {
   private nextMemoryId = 1;
   private bm25 = new BM25Index();
   private saveTimer: ReturnType<typeof setTimeout> | null = null;
+  // Promise chain that ensures saves never run concurrently
+  private saveChain: Promise<void> = Promise.resolve();
 
   constructor() {
     this.initializeDistricts();
@@ -239,11 +241,14 @@ class NeurodivergentMemory {
           created: safeCreated,
           last_accessed: safeLastAccessed,
         };
+        if (!this.districts[mem.district]) {
+          const valid = Object.keys(this.districts).join(", ");
+          process.stderr.write(`[neurodivergent-memory] Skipping memory ${id}: unknown district "${mem.district}". Valid districts are: ${valid}\n`);
+          continue;
+        }
         this.memories[id] = mem;
-        if (this.districts[mem.district]) {
-          if (!this.districts[mem.district].memories.includes(id)) {
-            this.districts[mem.district].memories.push(id);
-          }
+        if (!this.districts[mem.district].memories.includes(id)) {
+          this.districts[mem.district].memories.push(id);
         }
         this.bm25.addDocument(id, this.documentText(mem));
       }
@@ -257,32 +262,34 @@ class NeurodivergentMemory {
     if (this.saveTimer !== null) clearTimeout(this.saveTimer);
     this.saveTimer = setTimeout(() => {
       this.saveTimer = null;
-      this.saveToDiskAsync().catch((err) => {
-        process.stderr.write(`[neurodivergent-memory] Failed to save snapshot: ${err}\n`);
-      });
+      // Chain onto the previous save so concurrent writes are serialized
+      this.saveChain = this.saveChain
+        .then(() => this.saveToDiskAsync())
+        .catch((err) => {
+          process.stderr.write(`[neurodivergent-memory] Failed to save snapshot: ${err}\n`);
+        });
     }, 100);
   }
 
   private async saveToDiskAsync(): Promise<void> {
-    try {
-      await fs.promises.mkdir(PERSISTENCE_DIR, { recursive: true });
-      const persistedMemories: { [id: string]: PersistedMemoryNPC } = {};
-      for (const [id, mem] of Object.entries(this.memories)) {
-        persistedMemories[id] = {
-          ...mem,
-          created: mem.created.toISOString(),
-          last_accessed: mem.last_accessed.toISOString(),
-        };
-      }
-      const snapshot: MemorySnapshot = {
-        nextMemoryId: this.nextMemoryId,
-        memories: persistedMemories,
+    await fs.promises.mkdir(PERSISTENCE_DIR, { recursive: true });
+    const persistedMemories: { [id: string]: PersistedMemoryNPC } = {};
+    for (const [id, mem] of Object.entries(this.memories)) {
+      persistedMemories[id] = {
+        ...mem,
+        created: mem.created.toISOString(),
+        last_accessed: mem.last_accessed.toISOString(),
       };
-      await fs.promises.writeFile(PERSISTENCE_FILE, JSON.stringify(snapshot, null, 2), "utf-8");
-    } catch (err) {
-      // Re-throw so scheduleSave's .catch() can log it
-      throw err;
     }
+    const snapshot: MemorySnapshot = {
+      nextMemoryId: this.nextMemoryId,
+      memories: persistedMemories,
+    };
+    // Write to a temp file first, then rename for an atomic swap so a partial
+    // write can never corrupt the live snapshot.
+    const tmp = PERSISTENCE_FILE + ".tmp";
+    await fs.promises.writeFile(tmp, JSON.stringify(snapshot, null, 2), "utf-8");
+    await fs.promises.rename(tmp, PERSISTENCE_FILE);
   }
 
   private documentText(memory: MemoryNPC): string {
