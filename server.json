@@ -6,12 +6,12 @@
     "url": "https://github.com/jmeyer1980/neurodivergent-memory",
     "source": "github"
   },
-  "version": "0.1.4",
+  "version": "0.1.5",
   "packages": [
     {
       "registryType": "npm",
       "identifier": "neurodivergent-memory",
-      "version": "0.1.4",
+      "version": "0.1.5",
       "transport": {
         "type": "stdio"
       }
