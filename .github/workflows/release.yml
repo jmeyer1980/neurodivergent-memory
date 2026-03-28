@@ -90,6 +90,8 @@ jobs:
           images: |
             ${{ env.IMAGE_NAME }}
             ${{ env.GHCR_IMAGE_NAME }}
+          flavor: |
+            latest=false
           tags: |
             type=ref,event=branch
             type=sha
@@ -209,6 +211,8 @@ jobs:
           images: |
             ${{ env.IMAGE_NAME }}
             ${{ env.GHCR_IMAGE_NAME }}
+          flavor: |
+            latest=false
           tags: |
             type=semver,pattern={{version}}
             type=sha

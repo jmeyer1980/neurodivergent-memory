@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.1.6] - 2026-03-28
+
+### ⚠️ Research Preview Release
+
+This patch release disables Docker `latest` tag generation to comply with immutable tag settings.
+
+### Fixed
+
+- Release workflow now sets Docker metadata `flavor.latest=false` to avoid pushing immutable `latest`
+- Prevents Docker Hub publish failures caused by immutable floating tags
+
 ## [0.1.5] - 2026-03-28
 
 ### ⚠️ Research Preview Release
