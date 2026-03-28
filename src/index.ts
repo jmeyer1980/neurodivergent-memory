@@ -398,7 +398,6 @@ class NeurodivergentMemory {
     if (updates.intensity !== undefined) memory.intensity = updates.intensity;
 
     // Rebuild BM25 entry with updated text
-    this.bm25.removeDocument(id);
     this.bm25.addDocument(id, this.documentText(memory));
     this.scheduleSave();
 
