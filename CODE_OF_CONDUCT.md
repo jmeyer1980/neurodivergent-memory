@@ -30,8 +30,9 @@ This Code of Conduct applies in all project spaces, including issues, pull reque
 
 ## Reporting
 
-To report abusive or unacceptable behavior, open a private security advisory or an issue on GitHub for this repository, depending on sensitivity.
-No email channel is provided.
+To report abusive or unacceptable behavior, you can use the following channels:
+- For non-sensitive concerns or general questions, open an issue or start a Discussion in this repository.
+- For sensitive, urgent, or safety-related concerns, use GitHub's built-in reporting tools (such as "Report abuse" or "Contact GitHub Support") associated with the relevant content or user.
 
 ## Attribution
 
