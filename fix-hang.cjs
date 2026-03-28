@@ -56,11 +56,6 @@ Response Summary:
 }`;
 
 code = code.replace(
-  'function sendRequest(req: MCPRequest): void {',
-  'function sendRequest(req: MCPRequest): void {'
-);
-
-code = code.replace(
   /(\})\s+async function runTests/,
   helpers + '\n\nasync function runTests'
 );
