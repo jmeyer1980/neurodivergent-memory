@@ -1,0 +1,13 @@
+{"jsonrpc":"2.0","id":20,"method":"tools/call","params":{"name":"connect_memories","arguments":{"memory_id_1":"memory_1","memory_id_2":"memory_2","bidirectional":true}}}
+{"jsonrpc":"2.0","id":21,"method":"tools/call","params":{"name":"connect_memories","arguments":{"memory_id_1":"memory_2","memory_id_2":"memory_4","bidirectional":true}}}
+{"jsonrpc":"2.0","id":22,"method":"tools/call","params":{"name":"connect_memories","arguments":{"memory_id_1":"memory_1","memory_id_2":"memory_3","bidirectional":true}}}
+{"jsonrpc":"2.0","id":23,"method":"tools/call","params":{"name":"connect_memories","arguments":{"memory_id_1":"memory_4","memory_id_2":"memory_3","bidirectional":true}}}
+{"jsonrpc":"2.0","id":24,"method":"tools/call","params":{"name":"connect_memories","arguments":{"memory_id_1":"memory_5","memory_id_2":"memory_3","bidirectional":true}}}
+{"jsonrpc":"2.0","id":25,"method":"tools/call","params":{"name":"connect_memories","arguments":{"memory_id_1":"memory_4","memory_id_2":"memory_7","bidirectional":false}}}
+{"jsonrpc":"2.0","id":26,"method":"tools/call","params":{"name":"memory_stats","arguments":{}}}
+{"jsonrpc":"2.0","id":27,"method":"tools/call","params":{"name":"traverse_from","arguments":{"memory_id":"memory_1","max_hops":2}}}
+{"jsonrpc":"2.0","id":28,"method":"tools/call","params":{"name":"related_to","arguments":{"memory_id":"memory_3"}}}
+{"jsonrpc":"2.0","id":29,"method":"tools/call","params":{"name":"update_memory","arguments":{"memory_id":"memory_4","new_content":"RISKS: (1) Perfectionism trap - setting unrealistic standards = paralysis renewal; (2) Dependency on external deadlines leads to crisis mode; (3) Shame spiral if setback occurs; (4) Over-commitment from hyperfocus enthusiasm; (5) NEW: Burnout from unsustainable deadline-driven cycles and lack of recovery practices.","new_intensity":9}}}
+{"jsonrpc":"2.0","id":30,"method":"tools/call","params":{"name":"search_memories","arguments":{"query":"burnout deadline recovery","min_score":0.1}}}
+{"jsonrpc":"2.0","id":31,"method":"tools/call","params":{"name":"list_memories","arguments":{"limit":50,"offset":0}}}
+{"jsonrpc":"2.0","id":32,"method":"tools/call","params":{"name":"memory_stats","arguments":{}}}
