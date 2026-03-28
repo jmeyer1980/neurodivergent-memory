@@ -8,8 +8,8 @@
 <table>
   <tr>
     <td width="360" valign="top">
-      <a href="https://drive.google.com/file/d/1I74yHgGZaDXvbFaM9G6yHZTLSjgyO1DZ/preview">
-        <img src="https://drive.google.com/thumbnail?id=1I74yHgGZaDXvbFaM9G6yHZTLSjgyO1DZ&sz=w1000" alt="neurodivergent-memory preview" width="320" />
+      <a href="https://github.com/jmeyer1980/neurodivergent-memory/blob/update-readme/neurodivergent-memory.gif">
+        <img src="https://github.com/jmeyer1980/neurodivergent-memory/blob/update-readme/neurodivergent-memory.gif?raw=true&sz=w1000" alt="neurodivergent-memory preview" width="320" />
       </a>
     </td>
     <td valign="top">
