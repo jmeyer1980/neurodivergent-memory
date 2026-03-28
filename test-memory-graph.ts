@@ -258,8 +258,8 @@ async function runTests(): Promise<void> {
     params: {
       name: 'list_memories',
       arguments: {
-        limit: 50,
-        offset: 0,
+        page: 1,
+        page_size: 50,
       },
     },
   });
