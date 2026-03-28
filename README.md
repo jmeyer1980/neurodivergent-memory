@@ -22,7 +22,7 @@
         This is a Model Context Protocol server for knowledge graphs designed around neurodivergent thinking patterns.
       </p>
       <p>
-        This TypeScript-based MCP server implements a sophisticated memory system inspired by neurodivergent cognitive styles. It organizes thoughts into five <strong>districts</strong> (knowledge domains), ranks search results using <strong>BM25 semantic ranking</strong>, and stores memories as a persistent knowledge graph with bidirectional connections.
+        This TypeScript-based MCP server implements a memory system inspired by neurodivergent cognitive styles. It organizes thoughts into five <strong>districts</strong> (knowledge domains), ranks search results using <strong>BM25 semantic ranking</strong>, and stores memories as a persistent knowledge graph with bidirectional connections.
       </p>
     </td>
   </tr>
