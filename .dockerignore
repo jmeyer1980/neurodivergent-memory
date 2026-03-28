@@ -1,0 +1,9 @@
+.git
+.github
+.cline
+.history
+build
+node_modules
+npm-debug.log
+README.md
+neurodivergent-memory.code-workspace

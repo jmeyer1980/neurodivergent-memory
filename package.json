@@ -1,9 +1,28 @@
 {
   "name": "neurodivergent-memory",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "A Model Context Protocol server for knowledge graphs designed around neurodivergent thinking patterns",
-  "private": true,
+  "license": "UNLICENSED",
   "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jmeyer1980/neurodivergent-memory.git"
+  },
+  "bugs": {
+    "url": "https://github.com/jmeyer1980/neurodivergent-memory/issues"
+  },
+  "homepage": "https://github.com/jmeyer1980/neurodivergent-memory#readme",
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "knowledge-graph",
+    "memory",
+    "neurodivergent"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
   "bin": {
     "neurodivergent-memory": "./build/index.js"
   },
