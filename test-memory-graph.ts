@@ -240,7 +240,7 @@ async function runTests(): Promise<void> {
       name: 'search_memories',
       arguments: {
         query: 'perfectionism risk',
-        tag: 'topic:adhd-risks',
+        tags: ['topic:adhd-risks'],
         min_score: 0.05,
       },
     },
