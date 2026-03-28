@@ -82,6 +82,8 @@ class BM25Index {
   private docFreq: Map<string, number> = new Map();
   // docLengths[docId] = total tokens in doc
   private docLengths: Map<string, number> = new Map();
+  // Running sum of all doc lengths — kept in sync on add/remove to avoid O(N) rescan
+  private totalDocLength = 0;
   private avgDocLength = 0;
 
   private tokenize(text: string): string[] {
@@ -102,6 +104,7 @@ class BM25Index {
 
     this.termFreqs.set(docId, tf);
     this.docLengths.set(docId, tokens.length);
+    this.totalDocLength += tokens.length;
 
     for (const term of tf.keys()) {
       this.docFreq.set(term, (this.docFreq.get(term) ?? 0) + 1);
@@ -113,6 +116,10 @@ class BM25Index {
   removeDocument(docId: string): void {
     const oldTf = this.termFreqs.get(docId);
     if (!oldTf) return;
+
+    // Capture and subtract length while the document is confirmed to exist
+    const oldLen = this.docLengths.get(docId) ?? 0;
+    this.totalDocLength -= oldLen;
 
     for (const term of oldTf.keys()) {
       const df = this.docFreq.get(term) ?? 1;
@@ -129,10 +136,8 @@ class BM25Index {
   }
 
   private recalcAvgDocLength(): void {
-    const lengths = Array.from(this.docLengths.values());
-    this.avgDocLength = lengths.length > 0
-      ? lengths.reduce((a, b) => a + b, 0) / lengths.length
-      : 0;
+    const count = this.docLengths.size;
+    this.avgDocLength = count > 0 ? this.totalDocLength / count : 0;
   }
 
   score(docId: string, queryTerms: string[]): number {
@@ -220,7 +225,8 @@ class NeurodivergentMemory {
 
       this.nextMemoryId = snapshot.nextMemoryId ?? 1;
 
-      for (const [id, raw_mem] of Object.entries(snapshot.memories)) {
+      const memoriesMap = snapshot.memories ?? {};
+      for (const [id, raw_mem] of Object.entries(memoriesMap)) {
         const mem: MemoryNPC = {
           ...raw_mem,
           created: new Date(raw_mem.created),
@@ -410,9 +416,8 @@ class NeurodivergentMemory {
   }
 
   connectMemories(memoryId1: string, memoryId2: string, bidirectional = true) {
-    if (!this.memories[memoryId1] || !this.memories[memoryId2]) {
-      throw new Error("Memory not found");
-    }
+    if (!this.memories[memoryId1]) throw new Error(`Memory not found: ${memoryId1}`);
+    if (!this.memories[memoryId2]) throw new Error(`Memory not found: ${memoryId2}`);
 
     if (!this.memories[memoryId1].connections.includes(memoryId2)) {
       this.memories[memoryId1].connections.push(memoryId2);
@@ -582,7 +587,7 @@ class NeurodivergentMemory {
     if (district) all = all.filter(m => m.district === district);
     if (archetype) all = all.filter(m => m.archetype === archetype);
 
-    all.sort((a, b) => new Date(b.created).getTime() - new Date(a.created).getTime());
+    all.sort((a, b) => b.created.getTime() - a.created.getTime());
 
     const total = all.length;
     const total_pages = Math.max(1, Math.ceil(total / page_size));
@@ -1172,7 +1177,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     case "update_memory": {
       const { memory_id, content, district, tags, emotional_valence, intensity } = request.params.arguments as any;
       try {
-        const updates: any = {};
+      const updates: Partial<Pick<MemoryNPC, "content" | "tags" | "emotional_valence" | "intensity" | "district">> = {};
         if (content !== undefined) updates.content = content;
         if (district !== undefined) updates.district = district;
         if (tags !== undefined) updates.tags = tags;
