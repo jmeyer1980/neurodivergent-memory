@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.1.3] - 2026-03-28
+
+### ⚠️ Research Preview Release
+
+This patch release improves package visibility in GitHub by publishing container images to GitHub Container Registry (GHCR) in addition to Docker Hub.
+
+### Fixed
+
+- Release workflow now publishes container images to `ghcr.io/jmeyer1980/neurodivergent-memory`
+- Added `packages: write` workflow permissions required for GHCR publishing
+- GitHub Packages listing now available through GHCR package pages linked to this repository
+
 ## [0.1.2] - 2026-03-28
 
 ### ⚠️ Research Preview Release
