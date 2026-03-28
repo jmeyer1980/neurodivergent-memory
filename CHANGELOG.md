@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.1.2] - 2026-03-28
+
+### ⚠️ Research Preview Release
+
+This patch release focuses on release pipeline reliability and publish resiliency.
+
+### Fixed
+
+- Release workflow now syncs `release` with `main` on version tag pushes
+- Release workflow now skips npm publish when the version already exists on npm (rerun-safe)
+- Continued hardening for GitHub Actions JavaScript runtime migration to Node 24
+
 ## [0.1.1] - 2026-03-28
 
 ### ⚠️ Research Preview Release

@@ -153,6 +153,13 @@ jobs:
 
       - name: Publish package to npm
         run: |
+          version="$(node -p "require('./package.json').version")"
+
+          if npm view "neurodivergent-memory@$version" version >/dev/null 2>&1; then
+            echo "neurodivergent-memory@$version already exists on npm; skipping publish."
+            exit 0
+          fi
+
           set +e
           publish_log="$(mktemp)"
           npm publish "${{ steps.pack.outputs.tarball }}" --provenance --access public 2> >(tee "$publish_log" >&2)
