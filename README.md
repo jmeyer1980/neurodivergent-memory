@@ -8,9 +8,13 @@
 <table>
   <tr>
     <td width="360" valign="top">
-      <a href="https://github.com/jmeyer1980/neurodivergent-memory/blob/update-readme/neurodivergent-memory.gif">
-        <img src="https://github.com/jmeyer1980/neurodivergent-memory/blob/update-readme/neurodivergent-memory.gif?raw=true&sz=w1000" alt="neurodivergent-memory preview" width="320" />
-      </a>
+      <details>
+        <summary>📽️ Click to preview</summary>
+        <br />
+        <a href="./neurodivergent-memory.gif">
+          <img src="./neurodivergent-memory.gif" alt="neurodivergent-memory preview" width="320" />
+        </a>
+      </details>
     </td>
     <td valign="top">
       <p><strong>Project Preview</strong></p>
@@ -18,7 +22,7 @@
         This is a Model Context Protocol server for knowledge graphs designed around neurodivergent thinking patterns.
       </p>
       <p>
-        This TypeScript-based MCP server implements a sophisticated memory system inspired by neurodivergent cognitive styles. It organizes thoughts into five **districts** (knowledge domains), ranks search results using **BM25 semantic ranking**, and stores memories as a persistent knowledge graph with bidirectional connections.
+        This TypeScript-based MCP server implements a sophisticated memory system inspired by neurodivergent cognitive styles. It organizes thoughts into five <strong>districts</strong> (knowledge domains), ranks search results using <strong>BM25 semantic ranking</strong>, and stores memories as a persistent knowledge graph with bidirectional connections.
       </p>
     </td>
   </tr>
