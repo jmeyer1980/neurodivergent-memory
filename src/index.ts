@@ -178,11 +178,21 @@ const PERSISTENCE_DIR = path.join(os.homedir(), ".neurodivergent-memory");
 const PERSISTENCE_FILE = path.join(PERSISTENCE_DIR, "memories.json");
 
 /**
+ * On-disk representation of a MemoryNPC: identical to MemoryNPC except that
+ * Date fields are stored as ISO-8601 strings so the shape round-trips through
+ * JSON without ambiguity.
+ */
+interface PersistedMemoryNPC extends Omit<MemoryNPC, "created" | "last_accessed"> {
+  created: string;
+  last_accessed: string;
+}
+
+/**
  * Serialisable snapshot of the memory system state.
  */
 interface MemorySnapshot {
   nextMemoryId: number;
-  memories: { [id: string]: MemoryNPC };
+  memories: { [id: string]: PersistedMemoryNPC };
 }
 
 /**
@@ -243,9 +253,17 @@ class NeurodivergentMemory {
   private async saveToDiskAsync(): Promise<void> {
     try {
       await fs.promises.mkdir(PERSISTENCE_DIR, { recursive: true });
+      const persistedMemories: { [id: string]: PersistedMemoryNPC } = {};
+      for (const [id, mem] of Object.entries(this.memories)) {
+        persistedMemories[id] = {
+          ...mem,
+          created: mem.created.toISOString(),
+          last_accessed: mem.last_accessed.toISOString(),
+        };
+      }
       const snapshot: MemorySnapshot = {
         nextMemoryId: this.nextMemoryId,
-        memories: this.memories,
+        memories: persistedMemories,
       };
       await fs.promises.writeFile(PERSISTENCE_FILE, JSON.stringify(snapshot, null, 2), "utf-8");
     } catch (err) {
@@ -452,12 +470,13 @@ class NeurodivergentMemory {
       score: this.bm25.score(m.id, queryTerms),
     }));
 
-    // Normalise scores to 0-1 range
+    // Normalise scores to 0-1 range; return empty if no terms matched
     const maxScore = scored.reduce((mx, s) => Math.max(mx, s.score), 0);
-    if (maxScore > 0) {
-      for (const s of scored) {
-        s.score = s.score / maxScore;
-      }
+    if (maxScore === 0) {
+      return [];
+    }
+    for (const s of scored) {
+      s.score = s.score / maxScore;
     }
 
     // Apply min_score filter after normalisation (score >= 0 naturally passes a 0 threshold)
@@ -1121,7 +1140,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         return {
           content: [{
             type: "text",
-            text: `❌ Failed to store memory: ${error}`
+            text: `❌ Failed to store memory: ${error instanceof Error ? error.message : String(error)}`
           }],
           isError: true
         };
@@ -1169,7 +1188,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         };
       } catch (error) {
         return {
-          content: [{ type: "text", text: `❌ Failed to update memory: ${error}` }],
+          content: [{ type: "text", text: `❌ Failed to update memory: ${error instanceof Error ? error.message : String(error)}` }],
           isError: true
         };
       }
@@ -1184,7 +1203,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         };
       } catch (error) {
         return {
-          content: [{ type: "text", text: `❌ Failed to delete memory: ${error}` }],
+          content: [{ type: "text", text: `❌ Failed to delete memory: ${error instanceof Error ? error.message : String(error)}` }],
           isError: true
         };
       }
@@ -1205,7 +1224,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         return {
           content: [{
             type: "text",
-            text: `❌ Failed to connect memories: ${error}`
+            text: `❌ Failed to connect memories: ${error instanceof Error ? error.message : String(error)}`
           }],
           isError: true
         };
@@ -1260,7 +1279,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         ).join('\n');
         return { content: [{ type: "text", text: `🕸️ Traversal from ${memory_id} (depth ${depth}) — ${results.length} results:\n${text}` }] };
       } catch (error) {
-        return { content: [{ type: "text", text: `❌ Traversal failed: ${error}` }], isError: true };
+        return { content: [{ type: "text", text: `❌ Traversal failed: ${error instanceof Error ? error.message : String(error)}` }], isError: true };
       }
     }
 
@@ -1276,7 +1295,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         ).join('\n');
         return { content: [{ type: "text", text: `🔗 Related memories for ${memory_id} (${results.length} results):\n${text}` }] };
       } catch (error) {
-        return { content: [{ type: "text", text: `❌ related_to failed: ${error}` }], isError: true };
+        return { content: [{ type: "text", text: `❌ related_to failed: ${error instanceof Error ? error.message : String(error)}` }], isError: true };
       }
     }
 
@@ -1329,7 +1348,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         };
       } catch (error) {
         return {
-          content: [{ type: "text", text: `❌ Import failed: ${error}` }],
+          content: [{ type: "text", text: `❌ Import failed: ${error instanceof Error ? error.message : String(error)}` }],
           isError: true
         };
       }
