@@ -350,7 +350,6 @@ class NeurodivergentMemory {
       this.districts[memory.district].memories = this.districts[memory.district].memories.filter(mid => mid !== id);
       this.districts[updates.district].memories.push(id);
       memory.district = updates.district;
-      memory.archetype = this.districts[updates.district].archetype;
     }
 
     if (updates.content !== undefined) memory.content = updates.content;
