@@ -46,6 +46,7 @@ Memories are organized by cognitive domain:
 ### Memory Archetypes
 
 Each memory is assigned an archetype tied to its district:
+
 - **scholar** — logical_analysis
 - **merchant** — practical_execution
 - **mystic** — emotional_processing and creative_synthesis
@@ -58,6 +59,7 @@ Search uses **Okapi BM25** ranking (k1=1.5, b=0.75) without requiring embeddings
 ### Emotional Metadata
 
 Each memory can optionally carry:
+
 - **emotional_valence** (-1 to 1) — Emotional charge or affective tone
 - **intensity** (0–1) — Mental energy or importance weight
 
