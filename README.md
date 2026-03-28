@@ -5,29 +5,26 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Node 20 LTS](https://img.shields.io/badge/node-20_LTS-5FA04E?logo=node.js&logoColor=white)](https://nodejs.org/en/about/previous-releases)
 
-A Model Context Protocol server for knowledge graphs designed around neurodivergent thinking patterns.
+<table>
+  <tr>
+    <td width="360" valign="top">
+      <a href="https://drive.google.com/file/d/1I74yHgGZaDXvbFaM9G6yHZTLSjgyO1DZ/preview">
+        <img src="https://drive.google.com/thumbnail?id=1I74yHgGZaDXvbFaM9G6yHZTLSjgyO1DZ&sz=w1000" alt="neurodivergent-memory preview" width="320" />
+      </a>
+    </td>
+    <td valign="top">
+      <p><strong>Project Preview</strong></p>
+      <p>
+        This is a Model Context Protocol server for knowledge graphs designed around neurodivergent thinking patterns.
+      </p>
+      <p>
+        This TypeScript-based MCP server implements a sophisticated memory system inspired by neurodivergent cognitive styles. It organizes thoughts into five **districts** (knowledge domains), ranks search results using **BM25 semantic ranking**, and stores memories as a persistent knowledge graph with bidirectional connections.
+      </p>
+    </td>
+  </tr>
+</table>
 
-This TypeScript-based MCP server implements a sophisticated memory system inspired by neurodivergent cognitive styles. It organizes thoughts into five **districts** (knowledge domains), ranks search results using **BM25 semantic ranking**, and stores memories as a persistent knowledge graph with bidirectional connections.
 
-## Install
-
-### npm
-
-```bash
-npm install -g neurodivergent-memory
-```
-
-### Docker
-
-```bash
-docker pull twgbellok/neurodivergent-memory:latest
-```
-
-## Cost and Access
-
-- No API key is required to use this project.
-- There is no usage fee for running this software.
-- Standard costs from third-party platforms (for example npm registry or Docker Hub account usage) are outside this project.
 
 ## Features
 
