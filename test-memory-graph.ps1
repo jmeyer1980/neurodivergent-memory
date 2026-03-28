@@ -289,8 +289,8 @@ $mcp_commands += @{
     params = @{
         name = "list_memories"
         arguments = @{
-            limit = 50
-            offset = 0
+            page_size = 50
+            page = 1
         }
     }
 }
