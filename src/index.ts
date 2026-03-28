@@ -227,10 +227,17 @@ class NeurodivergentMemory {
 
       const memoriesMap = snapshot.memories ?? {};
       for (const [id, raw_mem] of Object.entries(memoriesMap)) {
+        const now = new Date();
+        const createdDate = new Date((raw_mem as any).created);
+        const lastAccessedDate = new Date((raw_mem as any).last_accessed);
+        const safeCreated =
+          isNaN(createdDate.getTime()) ? now : createdDate;
+        const safeLastAccessed =
+          isNaN(lastAccessedDate.getTime()) ? safeCreated : lastAccessedDate;
         const mem: MemoryNPC = {
           ...raw_mem,
-          created: new Date(raw_mem.created),
-          last_accessed: new Date(raw_mem.last_accessed),
+          created: safeCreated,
+          last_accessed: safeLastAccessed,
         };
         this.memories[id] = mem;
         if (this.districts[mem.district]) {
