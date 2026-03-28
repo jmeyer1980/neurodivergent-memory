@@ -34,6 +34,8 @@ const rl = readline.createInterface({
 
 const results: Map<number, MCPResponse> = new Map();
 const testLog: string[] = [];
+let totalRequestsExpected = 0;
+let completionTimeout: NodeJS.Timeout | null = null;
 
 function log(msg: string) {
   console.error(`[${new Date().toISOString()}] ${msg}`);
@@ -46,7 +48,52 @@ function sendRequest(req: MCPRequest): void {
   log(`→ Sent: ${req.method} (id=${req.id})`);
 }
 
-async function runTests(): Promise<void> {
+
+function checkCompletion(): boolean {
+  return results.size >= totalRequestsExpected;
+}
+
+function resetCompletionTimeout(): void {
+  if (completionTimeout) {
+    clearTimeout(completionTimeout);
+  }
+  completionTimeout = setTimeout(() => {
+    log('\nCompletion timeout reached. Writing results...');
+    writeResultsAndExit();
+  }, 10000);
+}
+
+function writeResultsAndExit(): void {
+  if (completionTimeout) {
+    clearTimeout(completionTimeout);
+    completionTimeout = null;
+  }
+  
+  log('\nTest completed. Writing results to test-results.txt...');
+
+  const summary = `
+=============================================================================
+SMOKE TEST RESULTS: "Executive Function Support Network" Memory Graph
+=============================================================================
+
+Total Requests Sent: ${totalRequestsExpected}
+Total Responses Received: ${results.size}
+
+Response Summary:
+${Array.from(results.values())
+  .map(r => `  ID ${r.id}: ${r.result ? '✓ SUCCESS' : '✗ ERROR: ' + r.error?.message}`)
+  .join('\n')}
+
+${testLog.join('\n')}
+=============================================================================
+`;
+
+  fs.writeFileSync('test-results.txt', summary);
+  console.error('\nResults written to test-results.txt');
+  process.exit(0);
+}
+
+async function runTests(): Promise<number> {
   const requests: MCPRequest[] = [];
 
   log('=== PHASE 1: Creating Memory Graph (All 5 Districts) ===');
@@ -268,6 +315,7 @@ async function runTests(): Promise<void> {
   // Send all requests
   // ========================================================================
   log(`\nSending ${requests.length} test commands to MCP server...`);
+  totalRequestsExpected = requests.length;
 
   for (const req of requests) {
     sendRequest(req);
@@ -275,6 +323,7 @@ async function runTests(): Promise<void> {
   }
 
   log('\nAll test commands sent. Waiting for responses...');
+  return totalRequestsExpected;
 }
 
 // Start test
@@ -291,31 +340,15 @@ rl.on('line', (line: string) => {
 });
 
 rl.on('close', () => {
-  log('\nTest completed. Writing results to test-results.txt...');
-
-  const summary = `
-=============================================================================
-SMOKE TEST RESULTS: "Executive Function Support Network" Memory Graph
-=============================================================================
-
-Total Requests Sent: 101
-Total Responses Received: ${results.size}
-
-Response Summary:
-${Array.from(results.values())
-  .map(r => `  ID ${r.id}: ${r.result ? '✓ SUCCESS' : '✗ ERROR: ' + r.error?.message}`)
-  .join('\n')}
-
-${testLog.join('\n')}
-=============================================================================
-`;
-
-  fs.writeFileSync('test-results.txt', summary);
-  console.error('\nResults written to test-results.txt');
+  log('\nReadline interface closed.');
+  writeResultsAndExit();
 });
 
 // Run tests
-runTests().catch(err => {
+runTests().then(expected => {
+  log(`Waiting for ${expected} responses...`);
+  resetCompletionTimeout();
+}).catch(err => {
   log(`Test error: ${err}`);
   process.exit(1);
 });
