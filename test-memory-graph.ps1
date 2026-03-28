@@ -31,7 +31,7 @@ $mcp_commands += @{
             district = "logical_analysis"
             tags = @("topic:adhd-executive-function", "scope:concept", "kind:insight", "layer:research")
             emotional_valence = 0
-            intensity = 8
+            intensity = 0.8
         }
     }
 }
@@ -48,7 +48,7 @@ $mcp_commands += @{
             district = "emotional_processing"
             tags = @("topic:adhd-shame-cycles", "scope:concept", "kind:pattern", "layer:implementation")
             emotional_valence = -1
-            intensity = 9
+            intensity = 0.9
         }
     }
 }
@@ -65,7 +65,7 @@ $mcp_commands += @{
             district = "practical_execution"
             tags = @("topic:adhd-strategies", "scope:project", "kind:pattern", "layer:implementation")
             emotional_valence = 1
-            intensity = 7
+            intensity = 0.7
         }
     }
 }
@@ -82,7 +82,7 @@ $mcp_commands += @{
             district = "vigilant_monitoring"
             tags = @("topic:adhd-risks", "scope:project", "kind:pattern", "layer:architecture")
             emotional_valence = -1
-            intensity = 8
+            intensity = 0.8
         }
     }
 }
@@ -99,7 +99,7 @@ $mcp_commands += @{
             district = "creative_synthesis"
             tags = @("topic:adhd-systems-thinking", "scope:concept", "kind:insight", "layer:architecture")
             emotional_valence = 1
-            intensity = 9
+            intensity = 0.9
         }
     }
 }
@@ -120,7 +120,7 @@ $mcp_commands += @{
             district = "practical_execution"
             tags = @("topic:project-neurodivergent-memory", "scope:session", "kind:task", "layer:implementation")
             emotional_valence = 1
-            intensity = 6
+            intensity = 0.6
         }
     }
 }
@@ -137,7 +137,7 @@ $mcp_commands += @{
             district = "vigilant_monitoring"
             tags = @("topic:project-neurodivergent-memory", "scope:project", "kind:decision", "layer:architecture")
             emotional_valence = 0
-            intensity = 7
+            intensity = 0.7
         }
     }
 }
@@ -154,7 +154,7 @@ $mcp_commands += @{
             district = "logical_analysis"
             tags = @("topic:devops-github-mcp", "scope:session", "kind:decision", "layer:debugging")
             emotional_valence = 0
-            intensity = 5
+            intensity = 0.5
         }
     }
 }
@@ -321,7 +321,7 @@ $mcp_commands += @{
         name = "traverse_from"
         arguments = @{
             memory_id = "mem_1"
-            max_hops = 2
+            depth = 2
         }
     }
 }

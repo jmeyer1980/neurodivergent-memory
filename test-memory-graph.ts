@@ -3,10 +3,10 @@
  * Comprehensive MCP Server Smoke Test
  * 
  * Scenario: "Executive Function Support Network"
- * Tests all 5 memory districts, canonical tagging, connections, search, and graph traversal
+ * Tests all 5 memory districts, canonical tagging, search, listing, and summary statistics
  * 
  * This creates a realistic memory graph for managing executive dysfunction,
- * exercising all major MCP server capabilities.
+ * exercising core MCP server capabilities related to memory storage and retrieval.
  */
 
 import * as readline from 'readline';
@@ -65,7 +65,7 @@ async function runTests(): Promise<void> {
         district: 'logical_analysis',
         tags: ['topic:adhd-executive-function', 'scope:concept', 'kind:insight', 'layer:research'],
         emotional_valence: 0,
-        intensity: 8,
+        intensity: 0.8,
       },
     },
   });
@@ -84,7 +84,7 @@ async function runTests(): Promise<void> {
         district: 'emotional_processing',
         tags: ['topic:adhd-shame-cycles', 'scope:concept', 'kind:pattern', 'layer:implementation'],
         emotional_valence: -1,
-        intensity: 9,
+        intensity: 0.9,
       },
     },
   });
@@ -103,7 +103,7 @@ async function runTests(): Promise<void> {
         district: 'practical_execution',
         tags: ['topic:adhd-strategies', 'scope:project', 'kind:pattern', 'layer:implementation'],
         emotional_valence: 1,
-        intensity: 7,
+        intensity: 0.7,
       },
     },
   });
@@ -122,7 +122,7 @@ async function runTests(): Promise<void> {
         district: 'vigilant_monitoring',
         tags: ['topic:adhd-risks', 'scope:project', 'kind:pattern', 'layer:architecture'],
         emotional_valence: -1,
-        intensity: 8,
+        intensity: 0.8,
       },
     },
   });
@@ -141,7 +141,7 @@ async function runTests(): Promise<void> {
         district: 'creative_synthesis',
         tags: ['topic:adhd-systems-thinking', 'scope:concept', 'kind:insight', 'layer:architecture'],
         emotional_valence: 1,
-        intensity: 9,
+        intensity: 0.9,
       },
     },
   });
@@ -162,7 +162,7 @@ async function runTests(): Promise<void> {
         district: 'practical_execution',
         tags: ['topic:project-neurodivergent-memory', 'scope:session', 'kind:task', 'layer:implementation'],
         emotional_valence: 1,
-        intensity: 6,
+        intensity: 0.6,
       },
     },
   });
@@ -178,7 +178,7 @@ async function runTests(): Promise<void> {
         district: 'vigilant_monitoring',
         tags: ['topic:project-neurodivergent-memory', 'scope:project', 'kind:decision', 'layer:architecture'],
         emotional_valence: 0,
-        intensity: 7,
+        intensity: 0.7,
       },
     },
   });
@@ -194,7 +194,7 @@ async function runTests(): Promise<void> {
         district: 'logical_analysis',
         tags: ['topic:devops-github-mcp', 'scope:session', 'kind:decision', 'layer:debugging'],
         emotional_valence: 0,
-        intensity: 5,
+        intensity: 0.5,
       },
     },
   });
