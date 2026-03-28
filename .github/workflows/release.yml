@@ -1,0 +1,195 @@
+name: release
+
+on:
+  push:
+    branches:
+      - release
+    tags:
+      - v*
+
+env:
+  NODE_VERSION: "20"
+  IMAGE_NAME: docker.io/twgbellok/neurodivergent-memory
+
+jobs:
+  ci:
+    if: github.ref == 'refs/heads/release'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+      artifact-metadata: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build package
+        run: npm run build
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v4
+        with:
+          username: twgbellok
+          password: ${{ secrets.DOCKER_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Compute Docker metadata
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ env.IMAGE_NAME }}
+          tags: |
+            type=ref,event=branch
+            type=sha
+
+      - name: Build and push container image
+        id: docker_build
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          platforms: linux/amd64,linux/arm64
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          annotations: ${{ steps.meta.outputs.annotations }}
+          provenance: mode=max
+          sbom: true
+
+      - name: Attest container image
+        uses: actions/attest@v4
+        with:
+          subject-name: ${{ env.IMAGE_NAME }}
+          subject-digest: ${{ steps.docker_build.outputs.digest }}
+          push-to-registry: true
+          create-storage-record: false
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+      artifact-metadata: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          registry-url: https://registry.npmjs.org
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Verify release version matches tag
+        run: |
+          package_version="v$(node -p "require('./package.json').version")"
+          if [ "$package_version" != "$GITHUB_REF_NAME" ]; then
+            echo "Tag $GITHUB_REF_NAME does not match package version $package_version"
+            exit 1
+          fi
+
+      - name: Build package
+        run: npm run build
+
+      - name: Pack npm artifact
+        id: pack
+        run: |
+          tarball="$(npm pack | tail -n 1)"
+          echo "tarball=$tarball" >> "$GITHUB_OUTPUT"
+          sha256sum "$tarball" > checksums.txt
+
+      - name: Attest npm package tarball
+        id: package_attest
+        uses: actions/attest@v4
+        with:
+          subject-path: ${{ steps.pack.outputs.tarball }}
+
+      - name: Publish package to npm
+        run: npm publish "${{ steps.pack.outputs.tarball }}" --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v4
+        with:
+          username: twgbellok
+          password: ${{ secrets.DOCKER_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Compute Docker metadata
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ env.IMAGE_NAME }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha
+
+      - name: Build and push container image
+        id: docker_build
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          platforms: linux/amd64,linux/arm64
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          annotations: ${{ steps.meta.outputs.annotations }}
+          provenance: mode=max
+          sbom: true
+
+      - name: Attest container image
+        id: image_attest
+        uses: actions/attest@v4
+        with:
+          subject-name: ${{ env.IMAGE_NAME }}
+          subject-digest: ${{ steps.docker_build.outputs.digest }}
+          push-to-registry: true
+          create-storage-record: false
+
+      - name: Collect attestation bundles
+        run: |
+          cp "${{ steps.package_attest.outputs.bundle-path }}" npm-package.attestation.json
+          cp "${{ steps.image_attest.outputs.bundle-path }}" docker-image.attestation.json
+
+      - name: Create or update GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" \
+              "${{ steps.pack.outputs.tarball }}" \
+              checksums.txt \
+              npm-package.attestation.json \
+              docker-image.attestation.json \
+              --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" \
+              "${{ steps.pack.outputs.tarball }}" \
+              checksums.txt \
+              npm-package.attestation.json \
+              docker-image.attestation.json \
+              --generate-notes
+          fi
