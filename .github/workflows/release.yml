@@ -122,7 +122,7 @@ jobs:
           subject-path: ${{ steps.pack.outputs.tarball }}
 
       - name: Publish package to npm
-        run: npm publish --provenance --access public
+        run: npm publish "${{ steps.pack.outputs.tarball }}" --provenance --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
