@@ -333,6 +333,13 @@ rl.on('line', (line: string) => {
     if (response.id !== undefined) {
       results.set(response.id, response);
       log(`← Response id=${response.id}: ${response.result ? 'SUCCESS' : response.error?.message || 'ERROR'}`);
+      
+          if (checkCompletion()) {
+            log(`\nAll ${totalRequestsExpected} responses received!`);
+            writeResultsAndExit();
+          } else {
+            resetCompletionTimeout();
+          }
     }
   } catch (e) {
     log(`Error parsing response: ${e}`);
