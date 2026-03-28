@@ -504,8 +504,9 @@ class NeurodivergentMemory {
     const queue: Array<{ id: string; level: number }> = [{ id: memoryId, level: 0 }];
     const results: MemoryNPC[] = [];
 
-    while (queue.length > 0) {
-      const { id, level } = queue.shift()!;
+    let i = 0;
+    while (i < queue.length) {
+      const { id, level } = queue[i++]!;
       if (visited.has(id)) continue;
       visited.add(id);
 
