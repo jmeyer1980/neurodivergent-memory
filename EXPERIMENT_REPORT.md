@@ -1,248 +1,81 @@
-# Smoke Test Experiment: "Executive Function Support Network"
+# Smoke Test Experiment: Executive Function Support Network (0.1.8)
 
 ## Overview
 
-A real-world test of the neurodivergent-memory MCP server, designed as a realistic scenario for managing ADHD executive dysfunction.
+This experiment reruns the narrative memory-graph scenario used for earlier releases, updated for current server behavior and release context.
 
-## Experiment Design Philosophy
+Date: 2026-03-29
+Version under test: 0.1.8
+Run mode: isolated persistence for deterministic results
 
-Rather than testing features in isolation, this experiment creates a **coherent narrative memory graph** that reflects how neurodivergent individuals actually think:
+## Goals
 
-1. **Non-linear** - Jumps between emotional, logical, practical, and risk perspectives
-2. **Associative** - Memories connected by semantic relationship, not hierarchy
-3. **Multi-domain** - Integrates insights from psychology, systems design, and project management
-4. **Actionable** - Bridges abstract concepts to concrete interventions
+1. Reconfirm that the MCP server still supports the end-to-end cognitive workflow.
+2. Validate that recent release/tooling updates did not break core memory operations.
+3. Replace stale 0.1.1-era evidence with current run artifacts.
 
-## The Scenario: Breaking the Executive Dysfunction Cycle
+## Scenario Design
 
-**Problem Statement**: Executive dysfunction (task initiation paralysis) manifests as:
-- Amygdala hyperactivation in response to task ambiguity
-- Time blindness (no dopamine gradient) preventing task urgency perception
-- Perfectionism creating fear-based goal setting
-- Shame spirals from perceived laziness
+The test models executive-function support using five districts:
+- `logical_analysis`
+- `emotional_processing`
+- `practical_execution`
+- `vigilant_monitoring`
+- `creative_synthesis`
 
-**Solution Approach**: 
-- Understand root causes (logical_analysis)
-- Acknowledge emotional impact (emotional_processing)
-- Design practical interventions (practical_execution)
-- Identify and monitor risks (vigilant_monitoring)
-- Connect insights across domains (creative_synthesis)
+It creates and links memories, runs search queries, mutates one node, traverses graph edges, and verifies final stats.
 
-## Memory Graph Structure
+## Execution Snapshot
 
-### Phase 1: Core Knowledge (8 memories established)
+Requests executed: 19
+Successful responses: 19
+Tool-level failures: 0
 
-```
-┌─ Logical Analysis (root causes)
-│  ├─ Executive dysfunction manifesto (amygdala + dopamine)
-│  └─ Debugging lessons (GitHub auth troubleshooting)
-│
-├─ Emotional Processing (impact & experience)
-│  └─ Shame cycle dynamics (avoidance → guilt → identity)
-│
-├─ Practical Execution (actionable strategies)
-│  ├─ Time-box micro-task intervention
-│  └─ Current project status tracking
-│
-├─ Vigilant Monitoring (risks & dependencies)
-│  ├─ Risk assessment (4 failure modes identified)
-│  └─ Critical path dependencies
-│
-└─ Creative Synthesis (cross-domain insights)
-   └─ ADHD ≈ Systems Design failure (insufficient feedback loops)
-```
+Phases exercised:
+1. Create 8 memories with canonical tags.
+2. Create graph connections.
+3. Run semantic and filtered searches.
+4. Update one memory (`memory_4`).
+5. List memories and generate aggregate statistics.
+6. Traverse from an anchor memory and run `related_to`.
 
-### Phase 2: Connections (6 edges establish relationships)
+## Key Outcomes
 
-```
-Executive Dysfunction (mem_1)
-  ├─→ Shame Cycle (mem_2)
-  │    └─→ Risk Assessment (mem_4)
-  │
-  ├─→ Intervention Strategy (mem_3)
-  │    ├─→ Systems Insight (mem_5)
-  │    └─→ Risk Assessment (mem_4)
-  │
-  └─→ Systems Insight (mem_5)
-       └─→ Intervention Strategy (mem_3)
+1. Storage and district assignment
+- 8 memories stored, all districts represented.
 
-Risk Assessment (mem_4)
-  └──→ Dependency Chain (mem_7) [unidirectional]
-```
+2. Search behavior
+- BM25 ranking produced coherent results for scenario-specific queries.
+- Tag and district constraints returned focused subsets.
 
-## Test Execution Results
+3. Graph behavior
+- Connections were created and later surfaced by traversal/related queries.
+- Traversal from `memory_1` returned reachable nodes within depth 2.
 
-### 1. Memory Creation Phase
-```
-✅ 8 memories stored
-✅ Correct district assignment (all 5 districts represented)
-✅ Archetype generation (scholar, mystic, merchant, guard)
-✅ Tag canonicalization (topic, scope, kind, layer)
-✅ Content preservation (full text intact)
-```
+4. Update behavior
+- `update_memory` accepted current API shape (`content`, `intensity`) and completed successfully.
 
-### 2. Search & Retrieval Phase
-```
-Query: "time blindness dopamine task initiation"
-→ Found: 5 memories ranked by relevance
-→ Top result: Executive dysfunction (score: 1.000)
-✅ BM25 semantic ranking working
+5. System stats
+- Final run snapshot:
+  - total memories: 8
+  - total connections: 3
+  - district split: 2 / 1 / 2 / 2 / 1
 
-Query: "perfectionism risk" with tag filter: topic:adhd-risks
-→ Found: 4 memories in ADHD risk domain
-→ Top result: RISKS assessment (score: 1.000)
-✅ Tag filtering working
+## Findings
 
-Query: "systems design chaos" in creative_synthesis district
-→ Found: 2 memories (domain-specific search)
-✅ District filtering working
-```
+The run confirms current operational health for the tested workflow on 0.1.8.
 
-### 3. Connection Phase
-```
-✅ 5 bidirectional connections
-✅ 1 unidirectional connection
-✅ Total: 6 edges, 9 connected nodes, 7 orphaned nodes
-✅ Connection integrity verified
-```
+Additionally, this revalidation surfaced and fixed stale harness assumptions from older versions:
+- old memory IDs (`mem_*`) were updated to `memory_*`
+- legacy update fields were aligned with current tool schema
+- test narrative references updated to Node 24 and v0.1.8 context
 
-### 4. Graph Traversal Phase
-```
-Starting from: memory_1 (Executive dysfunction)
-Depth: 2 hops
+## Evidence
 
-Results:
-  Hop 1: memory_2 (shame), memory_3 (intervention)
-  Hop 2: memory_4 (risks), memory_5 (insights)
-
-Total: 4 memories reachable within 2 hops
-✅ BFS traversal working
-✅ Edge directionality respected
-```
-
-### 5. Associative Retrieval Phase
-```
-Query: What memories relate to memory_3 (intervention)?
-
-Results (ranked by: hop-proximity + BM25 blend):
-  1. memory_1 [1.000] - Direct connection (root cause)
-  2. memory_5 [0.849] - Direct connection (systems insight)
-  3. memory_4 [0.603] - Connected via memory_2
-  4. memory_2 [0.153] - Semantic relevance (emotional impact)
-  5. memory_7 [0.153] - Semantic relevance (dependencies)
-
-✅ Hybrid ranking (proximity + semantics) working
-```
-
-### 6. Mutation Phase
-```
-Update: memory_4 adds new risk #5 (burnout from deadline cycles)
-Intensity: 8 → 9 (increased severity)
-
-Search validation: "burnout deadline recovery" finds updated memory_4
-✅ Mutations persisted
-✅ Search index refreshed
-```
-
-### 7. Analytics Phase
-```
-Total Memories: 16 (ran twice - 8 original + 8 from rerun)
-Total Connections: 6
-Per-district:
-  - logical_analysis: 4 ✅
-  - practical_execution: 4 ✅
-  - vigilant_monitoring: 4 ✅
-  - emotional_processing: 2 ✅
-  - creative_synthesis: 2 ✅
-
-Orphaned memories: 10 ✅
-Connected subgraph: 9 nodes (core cluster + dependencies)
-✅ Statistics accurate
-```
-
-## Key Discoveries
-
-### 1. Semantic Understanding
-The BM25 search doesn't just keyword-match. It understands:
-- Shame cycle is semantically related to perfectionism → risk
-- Time blindness relates to dopamine gradient → task initiation
-- Systems failures (insufficient feedback) map to ADHD symptoms
-
-### 2. Narrative Coherence
-The 5-district system provides natural storytelling:
-- **Scholar** (logical_analysis) diagnoses the problem
-- **Mystic** (emotional_processing) acknowledges the pain
-- **Merchant** (practical_execution) proposes solutions  
-- **Guard** (vigilant_monitoring) identifies threats
-- **Mystic** (creative_synthesis) connects across domains
-
-This mirrors how neurodivergent cognition actually works - associative, multi-perspective, integrative.
-
-### 3. Non-linear Organization
-Memories aren't hierarchical trees. They're a knowledge graph where:
-- Root causes connect to emotional impacts
-- Emotional impacts inform risks
-- Risks motivate interventions
-- Interventions generate systems insights
-- Insights loop back to reframe root causes
-
-## Performance Metrics
-
-| Operation | Time | Status |
-|-----------|------|--------|
-| Store memory | ~50ms | ✅ Fast |
-| Search (10 results) | ~30ms | ✅ Fast |
-| Create connection | ~20ms | ✅ V. Fast |
-| Traverse 2 hops | ~40ms | ✅ Fast |
-| Update memory | ~15ms | ✅ V. Fast |
-| Generate stats | ~25ms | ✅ Fast |
-
-**Total test time**: ~5 seconds  
-**Success rate**: 100% (32/32 operations)
-
-## Validation Against Design Goals
-
-✅ **Neurodivergent-friendly**: Supports non-linear, associative thinking  
-✅ **Multi-dimensional**: All 5 districts equally represented  
-✅ **Canonical tagging**: 4-namespace system applied consistently  
-✅ **Semantic search**: BM25 finds conceptually related memories  
-✅ **Graph connectivity**: Supports both simple and complex relationships  
-✅ **Persistence}: Survives server restarts  
-✅ **Performant**: All operations sub-100ms  
-✅ **MCP compliant**: Proper JSON-RPC 2.0 protocol adherence  
-
-## Recommended Next Steps
-
-### For Users
-1. Import this memory graph as a personal knowledge base template
-2. Add specific work projects with their own memory networks
-3. Use related_to for serendipitous discovery of forgotten insights
-
-### For Development
-1. Export functionality (YAML/JSON graphs)
-2. Batch operations (apply to all memories matching criteria)
-3. Time-series analytics (usage patterns over time)
-4. Visual graph rendering (ASCII or browser-based)
+Primary artifact: `test-results-full.jsonl`
+Supporting summary: `TEST_SUMMARY.md`
+Detailed pass report: `SMOKE_TEST_REPORT.md`
 
 ## Conclusion
 
-The neurodivergent-memory MCP server demonstrates:
-
-1. **Conceptual soundness**: The 5-district + canonical tagging model works elegantly
-2. **Technical robustness**: 100% operation success rate, proper MCP protocol adherence
-3. **Real-world utility**: The memory graph solves a genuine neurodivergent cognition challenge
-4. **Performance adequacy**: Sub-100ms operations support interactive use
-
-The system appears ready for v0.1.1 release and real-world adoption.
-
----
-
-**Test Conducted**: March 28, 2026  
-**Server Version**: 0.1.1  
-**Total Memories Tested**: 16  
-**Total Connections**: 6  
-**Success Rate**: 100%  
-**Memory Usage**: ~2MB  
-**Execution Time**: ~5 seconds  
-
-**Status**: ✅ APPEARS READY FOR v0.1.1 RELEASE
+The experiment supports continued research-preview use on 0.1.8 and provides current, reproducible test evidence after recent release and registry milestones.

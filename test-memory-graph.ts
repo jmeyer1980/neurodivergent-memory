@@ -205,7 +205,7 @@ async function runTests(): Promise<number> {
     params: {
       name: 'store_memory',
       arguments: {
-        content: `CURRENT TASK: Ship neurodivergent-memory v0.1.1. Status: Release tests in progress. Dependencies: TypeScript build ✓, Docker image ✓, npm attestation ✓. Blocker: None. Deadline: EOD today. Next: PR merge + tag push.`,
+        content: `CURRENT TASK: Validate neurodivergent-memory v0.1.8 after release pipeline and MCP registry updates. Status: Smoke tests in progress. Dependencies: TypeScript build ✓, Docker image ✓, npm attestation ✓, registry listing ✓. Blocker: None. Next: confirm report refresh.`,
         district: 'practical_execution',
         tags: ['topic:project-neurodivergent-memory', 'scope:session', 'kind:task', 'layer:implementation'],
         emotional_valence: 1,
@@ -221,7 +221,7 @@ async function runTests(): Promise<number> {
     params: {
       name: 'store_memory',
       arguments: {
-        content: `DEPENDENCY CHAIN: MCP protocol (stdio newline-delimited JSON) → Node.js runtime (v20 LTS) → TypeScript compilation → Docker containerization. Each layer has critical path implications.`,
+        content: `DEPENDENCY CHAIN: MCP protocol (stdio newline-delimited JSON) → Node.js runtime (v24 LTS) → TypeScript compilation → Docker containerization. Each layer has critical path implications.`,
         district: 'vigilant_monitoring',
         tags: ['topic:project-neurodivergent-memory', 'scope:project', 'kind:decision', 'layer:architecture'],
         emotional_valence: 0,

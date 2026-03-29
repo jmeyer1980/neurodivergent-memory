@@ -116,7 +116,7 @@ $mcp_commands += @{
     params = @{
         name = "store_memory"
         arguments = @{
-            content = "CURRENT TASK: Ship neurodivergent-memory v0.1.1. Status: Release tests in progress. Dependencies: TypeScript build ✓, Docker image ✓, npm attestation ✓. Blocker: None. Deadline: EOD today. Next: PR merge + tag push."
+            content = "CURRENT TASK: Validate neurodivergent-memory v0.1.8 after release pipeline and MCP registry updates. Status: Smoke tests in progress. Dependencies: TypeScript build ✓, Docker image ✓, npm attestation ✓, registry listing ✓. Blocker: None. Next: confirm report refresh."
             district = "practical_execution"
             tags = @("topic:project-neurodivergent-memory", "scope:session", "kind:task", "layer:implementation")
             emotional_valence = 1
@@ -133,7 +133,7 @@ $mcp_commands += @{
     params = @{
         name = "store_memory"
         arguments = @{
-            content = "DEPENDENCY CHAIN: MCP protocol (stdio newline-delimited JSON) → Node.js runtime (v20 LTS) → TypeScript compilation → Docker containerization. Each layer has critical path implications."
+            content = "DEPENDENCY CHAIN: MCP protocol (stdio newline-delimited JSON) → Node.js runtime (v24 LTS) → TypeScript compilation → Docker containerization. Each layer has critical path implications."
             district = "vigilant_monitoring"
             tags = @("topic:project-neurodivergent-memory", "scope:project", "kind:decision", "layer:architecture")
             emotional_valence = 0
@@ -173,8 +173,8 @@ $mcp_commands += @{
     params = @{
         name = "connect_memories"
         arguments = @{
-            memory_id_1 = "mem_1"
-            memory_id_2 = "mem_2"
+            memory_id_1 = "memory_1"
+            memory_id_2 = "memory_2"
             bidirectional = $true
         }
     }
@@ -188,8 +188,8 @@ $mcp_commands += @{
     params = @{
         name = "connect_memories"
         arguments = @{
-            memory_id_1 = "mem_4"
-            memory_id_2 = "mem_3"
+            memory_id_1 = "memory_4"
+            memory_id_2 = "memory_3"
             bidirectional = $true
         }
     }
@@ -203,8 +203,8 @@ $mcp_commands += @{
     params = @{
         name = "connect_memories"
         arguments = @{
-            memory_id_1 = "mem_5"
-            memory_id_2 = "mem_3"
+            memory_id_1 = "memory_5"
+            memory_id_2 = "memory_3"
             bidirectional = $true
         }
     }
@@ -274,9 +274,9 @@ $mcp_commands += @{
     params = @{
         name = "update_memory"
         arguments = @{
-            memory_id = "mem_4"
-            new_content = "RISKS: (1) Perfectionism trap - setting unrealistic standards = paralysis renewal; (2) Dependency on external deadlines leads to crisis mode; (3) Shame spiral if setback occurs; (4) Over-commitment from hyperfocus enthusiasm; (5) NEW: Burnout from unsustainable deadline-driven cycles."
-            new_intensity = 9
+            memory_id = "memory_4"
+            content = "RISKS: (1) Perfectionism trap - setting unrealistic standards = paralysis renewal; (2) Dependency on external deadlines leads to crisis mode; (3) Shame spiral if setback occurs; (4) Over-commitment from hyperfocus enthusiasm; (5) NEW: Burnout from unsustainable deadline-driven cycles."
+            intensity = 0.9
         }
     }
 }
@@ -320,7 +320,7 @@ $mcp_commands += @{
     params = @{
         name = "traverse_from"
         arguments = @{
-            memory_id = "mem_1"
+            memory_id = "memory_1"
             depth = 2
         }
     }
@@ -334,7 +334,7 @@ $mcp_commands += @{
     params = @{
         name = "related_to"
         arguments = @{
-            memory_id = "mem_3"
+            memory_id = "memory_3"
         }
     }
 }
