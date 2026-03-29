@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.1.7] - 2026-03-28
+
+### ⚠️ Research Preview Release
+
+This patch release fixes README GIF and link rendering on Docker Hub and GHCR.
+
+### Fixed
+
+- Replaced relative GIF paths with absolute `raw.githubusercontent.com` URLs so Docker Hub and GHCR can render the preview image and link correctly
+
 ## [0.1.6] - 2026-03-28
 
 ### ⚠️ Research Preview Release

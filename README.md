@@ -11,8 +11,8 @@
       <details>
         <summary>📽️ Click to preview</summary>
         <br />
-        <a href="./neurodivergent-memory.gif">
-          <img src="./neurodivergent-memory.gif" alt="neurodivergent-memory preview" width="320" />
+        <a href="https://raw.githubusercontent.com/jmeyer1980/neurodivergent-memory/main/neurodivergent-memory.gif">
+          <img src="https://raw.githubusercontent.com/jmeyer1980/neurodivergent-memory/main/neurodivergent-memory.gif" alt="neurodivergent-memory preview" width="320" />
         </a>
       </details>
     </td>
