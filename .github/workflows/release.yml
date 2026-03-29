@@ -6,9 +6,10 @@ on:
       - release
     tags:
       - v*
+  workflow_dispatch:
 
 env:
-  NODE_VERSION: "20"
+  NODE_VERSION: "24"
   IMAGE_NAME: docker.io/twgbellok/neurodivergent-memory
   GHCR_IMAGE_NAME: ghcr.io/jmeyer1980/neurodivergent-memory
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
@@ -109,6 +110,14 @@ jobs:
           annotations: ${{ steps.meta.outputs.annotations }}
           provenance: mode=max
           sbom: true
+
+      - name: Update Docker Hub description
+        uses: peter-evans/dockerhub-description@v4
+        with:
+          username: twgbellok
+          password: ${{ secrets.DOCKER_TOKEN }}
+          repository: twgbellok/neurodivergent-memory
+          readme-filepath: ./README.md
 
       - name: Attest container image
         uses: actions/attest@v4

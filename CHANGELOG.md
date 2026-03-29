@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.1.8] - 2026-03-28
+
+### ⚠️ Research Preview Release
+
+This patch release forces Docker Hub README refresh on each release and upgrades Node to 24.
+
+### Fixed
+
+- Added `peter-evans/dockerhub-description@v4` step in the release workflow so Docker Hub description is always updated from `README.md`
+- Added `workflow_dispatch` to allow manual README refresh runs when needed
+
+### Security
+
+- Upgraded workflow Node runtime from 20 to 24
+- Upgraded Docker build/runtime base images from `node:20-alpine` to `node:24-alpine`
+
 ## [0.1.7] - 2026-03-28
 
 ### ⚠️ Research Preview Release
