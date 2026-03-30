@@ -616,12 +616,15 @@ class NeurodivergentMemory {
       outdated: 0,
       unset: 0,
     };
+    const KNOWN_EPISTEMIC_STATUSES: EpistemicStatus[] = ["draft", "validated", "outdated", "unset"];
     for (const key of Object.keys(this.districts)) perDistrict[key] = 0;
     for (const m of allMems) perDistrict[m.district] = (perDistrict[m.district] ?? 0) + 1;
     for (const m of allMems) {
       const agentKey = m.agent_id ?? "unassigned";
       perAgent[agentKey] = (perAgent[agentKey] ?? 0) + 1;
-      const statusKey = m.epistemic_status ?? "unset";
+      const rawStatus = m.epistemic_status ?? "unset";
+      const statusKey: EpistemicStatus =
+        (KNOWN_EPISTEMIC_STATUSES as string[]).includes(rawStatus) ? (rawStatus as EpistemicStatus) : "unset";
       epistemicStatusBreakdown[statusKey] = (epistemicStatusBreakdown[statusKey] ?? 0) + 1;
     }
 
