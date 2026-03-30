@@ -156,11 +156,34 @@ To use with Claude Desktop, add the server config:
 On MacOS: `~/Library/Application Support/Claude/claude_desktop_config.json`
 On Windows: `%APPDATA%/Claude/claude_desktop_config.json`
 
+For npm:
+
 ```json
 {
   "mcpServers": {
     "neurodivergent-memory": {
-      "command": "/path/to/neurodivergent-memory/build/index.js"
+      "command": "npx",
+      "args": ["neurodivergent-memory"]
+    }
+  }
+}
+```
+
+For Docker:
+
+```json
+{
+  "mcpServers": {
+    "neurodivergent-memory": {
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "-v",
+        "neurodivergent-memory-data:/root/.nd-memory",
+        "docker.io/twgbellok/neurodivergent-memory:latest"
+      ]
     }
   }
 }
