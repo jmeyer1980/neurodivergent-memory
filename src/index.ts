@@ -24,32 +24,8 @@ import {
 import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
-
-/**
- * Memory types representing different thought patterns
- */
-type MemoryArchetype = "scholar" | "merchant" | "mystic" | "guard";
-
-/**
- * Memory entity representing a stored thought/memory
- */
-interface MemoryNPC {
-  id: string;
-  name: string;
-  archetype: MemoryArchetype;
-  agent_id?: string;
-  district: string;
-  content: string;
-  traits: string[];
-  concerns: string[];
-  connections: string[]; // IDs of connected memories
-  tags: string[];
-  created: Date;
-  last_accessed: Date;
-  access_count: number;
-  emotional_valence?: number; // -1 to 1, representing emotional charge
-  intensity?: number; // 0-1, representing mental energy/importance
-}
+import { logger } from "./core/logger.js";
+import type { EpistemicStatus, EpistemicStatusFilter, MemoryArchetype, MemoryNPC } from "./core/types.js";
 
 /**
  * Memory district representing a knowledge domain
@@ -244,7 +220,7 @@ class NeurodivergentMemory {
         };
         if (!this.districts[mem.district]) {
           const valid = Object.keys(this.districts).join(", ");
-          process.stderr.write(`[neurodivergent-memory] Skipping memory ${id}: unknown district "${mem.district}". Valid districts are: ${valid}\n`);
+          logger.warn({ memoryId: id, district: mem.district, validDistricts: valid }, "Skipping memory with unknown district during snapshot load");
           continue;
         }
         this.memories[id] = mem;
@@ -255,7 +231,7 @@ class NeurodivergentMemory {
       }
     } catch (err) {
       // Corrupt or missing snapshot — start fresh
-      process.stderr.write(`[neurodivergent-memory] Failed to load snapshot: ${err}\n`);
+      logger.warn({ err }, "Failed to load snapshot; starting with empty memory state");
     }
   }
 
@@ -267,7 +243,7 @@ class NeurodivergentMemory {
       this.saveChain = this.saveChain
         .then(() => this.saveToDiskAsync())
         .catch((err) => {
-          process.stderr.write(`[neurodivergent-memory] Failed to save snapshot: ${err}\n`);
+          logger.error({ err }, "Failed to save snapshot");
         });
     }, 100);
   }
@@ -341,7 +317,15 @@ class NeurodivergentMemory {
 
   // ── Core CRUD ──────────────────────────────────────────────────────────────
 
-  storeMemory(content: string, district: string, tags: string[] = [], emotional_valence?: number, intensity = 0.5, agent_id?: string): MemoryNPC {
+  storeMemory(
+    content: string,
+    district: string,
+    tags: string[] = [],
+    emotional_valence?: number,
+    intensity = 0.5,
+    agent_id?: string,
+    epistemic_status?: EpistemicStatus
+  ): MemoryNPC {
     if (!this.districts[district]) {
       throw new Error(`Unknown district: ${district}`);
     }
@@ -365,7 +349,8 @@ class NeurodivergentMemory {
       last_accessed: new Date(),
       access_count: 1,
       emotional_valence,
-      intensity
+      intensity,
+      epistemic_status
     };
 
     this.memories[id] = memory;
@@ -386,7 +371,7 @@ class NeurodivergentMemory {
     return memory || null;
   }
 
-  updateMemory(id: string, updates: Partial<Pick<MemoryNPC, "content" | "tags" | "emotional_valence" | "intensity" | "district">>): MemoryNPC {
+  updateMemory(id: string, updates: Partial<Pick<MemoryNPC, "content" | "tags" | "emotional_valence" | "intensity" | "district" | "epistemic_status">>): MemoryNPC {
     const memory = this.memories[id];
     if (!memory) throw new Error(`Memory not found: ${id}`);
 
@@ -405,6 +390,7 @@ class NeurodivergentMemory {
     if (updates.tags !== undefined) memory.tags = updates.tags;
     if (updates.emotional_valence !== undefined) memory.emotional_valence = updates.emotional_valence;
     if (updates.intensity !== undefined) memory.intensity = updates.intensity;
+    if (updates.epistemic_status !== undefined) memory.epistemic_status = updates.epistemic_status;
 
     // Rebuild BM25 entry with updated text
     this.bm25.addDocument(id, this.documentText(memory));
@@ -451,6 +437,7 @@ class NeurodivergentMemory {
     query: string,
     district?: string,
     tags?: string[],
+    epistemic_statuses?: EpistemicStatusFilter[],
     min_score?: number,
     emotional_valence_min?: number,
     emotional_valence_max?: number,
@@ -467,6 +454,13 @@ class NeurodivergentMemory {
       candidates = candidates.filter(m =>
         tags.some(tag => m.tags.includes(tag))
       );
+    }
+
+    if (epistemic_statuses && epistemic_statuses.length > 0) {
+      candidates = candidates.filter(m => {
+        const status = m.epistemic_status ?? "unset";
+        return epistemic_statuses.includes(status);
+      });
     }
 
     if (emotional_valence_min !== undefined) {
@@ -619,11 +613,22 @@ class NeurodivergentMemory {
     const perAgent: { [key: string]: number } = {};
 
     const perDistrict: { [key: string]: number } = {};
+    const epistemicStatusBreakdown: { [key: string]: number } = {
+      draft: 0,
+      validated: 0,
+      outdated: 0,
+      unset: 0,
+    };
+    const KNOWN_EPISTEMIC_STATUSES: EpistemicStatusFilter[] = ["draft", "validated", "outdated", "unset"];
     for (const key of Object.keys(this.districts)) perDistrict[key] = 0;
     for (const m of allMems) perDistrict[m.district] = (perDistrict[m.district] ?? 0) + 1;
     for (const m of allMems) {
       const agentKey = m.agent_id ?? "unassigned";
       perAgent[agentKey] = (perAgent[agentKey] ?? 0) + 1;
+      const rawStatus = m.epistemic_status ?? "unset";
+      const statusKey: EpistemicStatusFilter =
+        (KNOWN_EPISTEMIC_STATUSES as string[]).includes(rawStatus) ? (rawStatus as EpistemicStatusFilter) : "unset";
+      epistemicStatusBreakdown[statusKey] = (epistemicStatusBreakdown[statusKey] ?? 0) + 1;
     }
 
     // Count unique directed edges (sum of all connections arrays).
@@ -638,7 +643,7 @@ class NeurodivergentMemory {
 
     const orphans = allMems.filter(m => m.connections.length === 0).map(m => ({ id: m.id, name: m.name }));
 
-    return { totalMemories, perDistrict, perAgent, totalConnections, mostAccessed, orphans };
+    return { totalMemories, perDistrict, perAgent, epistemicStatusBreakdown, totalConnections, mostAccessed, orphans };
   }
 
   // ── Helpers ────────────────────────────────────────────────────────────────
@@ -705,7 +710,7 @@ class NeurodivergentMemory {
    * Each entry must have: content, district. Optional: tags, emotional_valence, intensity.
    * Returns the list of newly created memory IDs.
    */
-  importMemories(entries: Array<{ content: string; district: string; tags?: string[]; emotional_valence?: number; intensity?: number; agent_id?: string }>, default_agent_id?: string): string[] {
+  importMemories(entries: Array<{ content: string; district: string; tags?: string[]; emotional_valence?: number; intensity?: number; agent_id?: string; epistemic_status?: EpistemicStatus }>, default_agent_id?: string): string[] {
     const ids: string[] = [];
     for (const entry of entries) {
       const mem = this.storeMemory(
@@ -714,7 +719,8 @@ class NeurodivergentMemory {
         entry.tags ?? [],
         entry.emotional_valence,
         entry.intensity ?? 0.5,
-        entry.agent_id ?? default_agent_id
+        entry.agent_id ?? default_agent_id,
+        entry.epistemic_status
       );
       ids.push(mem.id);
     }
@@ -893,6 +899,11 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             agent_id: {
               type: "string",
               description: "Optional creator agent identifier"
+            },
+            epistemic_status: {
+              type: "string",
+              enum: ["draft", "validated", "outdated"],
+              description: "Optional epistemic status for planning memories"
             }
           },
           required: ["content", "district"]
@@ -914,7 +925,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: "update_memory",
-        description: "Update an existing memory's content, tags, district, emotional_valence, or intensity",
+        description: "Update an existing memory's content, tags, district, emotional_valence, intensity, or epistemic_status",
         inputSchema: {
           type: "object",
           properties: {
@@ -947,6 +958,11 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
               minimum: 0,
               maximum: 1,
               description: "New intensity (optional)"
+            },
+            epistemic_status: {
+              type: "string",
+              enum: ["draft", "validated", "outdated"],
+              description: "New epistemic status (optional)"
             }
           },
           required: ["memory_id"]
@@ -1012,6 +1028,11 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
               type: "array",
               items: { type: "string" },
               description: "Optional tag filters (OR logic)"
+            },
+            epistemic_statuses: {
+              type: "array",
+              items: { type: "string", enum: ["draft", "validated", "outdated", "unset"] },
+              description: "Optional epistemic status filters"
             },
             min_score: {
               type: "number",
@@ -1130,7 +1151,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: "import_memories",
-        description: "Bulk-import memories from a JSON array. Each entry requires content and district; tags, emotional_valence, and intensity are optional.",
+        description: "Bulk-import memories from a JSON array. Each entry requires content and district; tags, emotional_valence, intensity, and epistemic_status are optional.",
         inputSchema: {
           type: "object",
           properties: {
@@ -1147,7 +1168,8 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
                   tags: { type: "array", items: { type: "string" } },
                   emotional_valence: { type: "number", minimum: -1, maximum: 1 },
                   intensity: { type: "number", minimum: 0, maximum: 1 },
-                  agent_id: { type: "string" }
+                  agent_id: { type: "string" },
+                  epistemic_status: { type: "string", enum: ["draft", "validated", "outdated"] }
                 },
                 required: ["content", "district"]
               },
@@ -1172,14 +1194,14 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
 server.setRequestHandler(CallToolRequestSchema, async (request) => {
   switch (request.params.name) {
     case "store_memory": {
-      const { content, district, tags = [], emotional_valence, intensity = 0.5, agent_id } = request.params.arguments as any;
+      const { content, district, tags = [], emotional_valence, intensity = 0.5, agent_id, epistemic_status } = request.params.arguments as any;
 
       try {
-        const memory = memorySystem.storeMemory(content, district, tags, emotional_valence, intensity, agent_id);
+        const memory = memorySystem.storeMemory(content, district, tags, emotional_valence, intensity, agent_id, epistemic_status);
         return {
           content: [{
             type: "text",
-            text: `🧠 Stored memory "${memory.name}" in ${memorySystem.getAllDistricts().find(d => d.name.toLowerCase().replace(/\s+/g, '_') === district)?.name || district}\nID: ${memory.id}\nArchetype: ${memory.archetype}\nAgent: ${memory.agent_id ?? "unassigned"}`
+            text: `🧠 Stored memory "${memory.name}" in ${memorySystem.getAllDistricts().find(d => d.name.toLowerCase().replace(/\s+/g, '_') === district)?.name || district}\nID: ${memory.id}\nArchetype: ${memory.archetype}\nAgent: ${memory.agent_id ?? "unassigned"}\nEpistemic status: ${memory.epistemic_status ?? "unset"}`
           }]
         };
       } catch (error) {
@@ -1210,26 +1232,27 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       return {
         content: [{
           type: "text",
-          text: `🧠 Retrieved memory "${memory.name}"\nDistrict: ${memory.district}\nAgent: ${memory.agent_id ?? 'unassigned'}\nContent: ${memory.content}\nTags: ${memory.tags.join(', ')}\nEmotional valence: ${memory.emotional_valence ?? 'unset'}\nIntensity: ${memory.intensity ?? 'unset'}\nAccess count: ${memory.access_count}`
+          text: `🧠 Retrieved memory "${memory.name}"\nDistrict: ${memory.district}\nAgent: ${memory.agent_id ?? 'unassigned'}\nEpistemic status: ${memory.epistemic_status ?? 'unset'}\nContent: ${memory.content}\nTags: ${memory.tags.join(', ')}\nEmotional valence: ${memory.emotional_valence ?? 'unset'}\nIntensity: ${memory.intensity ?? 'unset'}\nAccess count: ${memory.access_count}`
         }]
       };
     }
 
     case "update_memory": {
-      const { memory_id, content, district, tags, emotional_valence, intensity } = request.params.arguments as any;
+      const { memory_id, content, district, tags, emotional_valence, intensity, epistemic_status } = request.params.arguments as any;
       try {
-      const updates: Partial<Pick<MemoryNPC, "content" | "tags" | "emotional_valence" | "intensity" | "district">> = {};
+      const updates: Partial<Pick<MemoryNPC, "content" | "tags" | "emotional_valence" | "intensity" | "district" | "epistemic_status">> = {};
         if (content !== undefined) updates.content = content;
         if (district !== undefined) updates.district = district;
         if (tags !== undefined) updates.tags = tags;
         if (emotional_valence !== undefined) updates.emotional_valence = emotional_valence;
         if (intensity !== undefined) updates.intensity = intensity;
+        if (epistemic_status !== undefined) updates.epistemic_status = epistemic_status;
 
         const memory = memorySystem.updateMemory(memory_id, updates);
         return {
           content: [{
             type: "text",
-            text: `✏️ Updated memory "${memory.name}" (${memory_id})\nDistrict: ${memory.district}\nTags: ${memory.tags.join(', ')}`
+            text: `✏️ Updated memory "${memory.name}" (${memory_id})\nDistrict: ${memory.district}\nEpistemic status: ${memory.epistemic_status ?? 'unset'}\nTags: ${memory.tags.join(', ')}`
           }]
         };
       } catch (error) {
@@ -1279,14 +1302,14 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
     case "search_memories": {
       const {
-        query, district, tags,
+        query, district, tags, epistemic_statuses,
         min_score,
         emotional_valence_min, emotional_valence_max,
         intensity_min, intensity_max
       } = request.params.arguments as any;
 
       const results = memorySystem.searchMemories(
-        query, district, tags,
+        query, district, tags, epistemic_statuses,
         min_score,
         emotional_valence_min, emotional_valence_max,
         intensity_min, intensity_max
@@ -1370,6 +1393,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       const perAgentLines = Object.entries(stats.perAgent)
         .map(([k, v]) => `  ${k}: ${v}`)
         .join('\n');
+      const epistemicLines = Object.entries(stats.epistemicStatusBreakdown)
+        .map(([k, v]) => `  ${k}: ${v}`)
+        .join('\n');
       const topAccessed = stats.mostAccessed
         .map((m: any) => `  ${m.id} — ${m.name} (${m.access_count} accesses)`)
         .join('\n');
@@ -1380,7 +1406,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       return {
         content: [{
           type: "text",
-          text: `📊 Memory Stats\nTotal memories: ${stats.totalMemories}\nTotal connections: ${stats.totalConnections}\n\nPer district:\n${districtLines}\n\nPer agent:\n${perAgentLines || '  (none)'}\n\nMost accessed:\n${topAccessed}\n\nOrphans (no connections):\n${orphanList}`
+          text: `📊 Memory Stats\nTotal memories: ${stats.totalMemories}\nTotal connections: ${stats.totalConnections}\n\nPer district:\n${districtLines}\n\nPer agent:\n${perAgentLines || '  (none)'}\n\nEpistemic status:\n${epistemicLines || '  (none)'}\n\nMost accessed:\n${topAccessed}\n\nOrphans (no connections):\n${orphanList}`
         }]
       };
     }
