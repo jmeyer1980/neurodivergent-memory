@@ -37,6 +37,7 @@ interface MemoryNPC {
   id: string;
   name: string;
   archetype: MemoryArchetype;
+  agent_id?: string;
   district: string;
   content: string;
   traits: string[];
@@ -340,7 +341,7 @@ class NeurodivergentMemory {
 
   // ── Core CRUD ──────────────────────────────────────────────────────────────
 
-  storeMemory(content: string, district: string, tags: string[] = [], emotional_valence?: number, intensity = 0.5): MemoryNPC {
+  storeMemory(content: string, district: string, tags: string[] = [], emotional_valence?: number, intensity = 0.5, agent_id?: string): MemoryNPC {
     if (!this.districts[district]) {
       throw new Error(`Unknown district: ${district}`);
     }
@@ -353,6 +354,7 @@ class NeurodivergentMemory {
       id,
       name,
       archetype,
+      agent_id,
       district,
       content,
       traits: this.generateTraits(archetype),
@@ -428,7 +430,7 @@ class NeurodivergentMemory {
     this.scheduleSave();
   }
 
-  connectMemories(memoryId1: string, memoryId2: string, bidirectional = true) {
+  connectMemories(memoryId1: string, memoryId2: string, bidirectional = true, _agent_id?: string) {
     if (!this.memories[memoryId1]) throw new Error(`Memory not found: ${memoryId1}`);
     if (!this.memories[memoryId2]) throw new Error(`Memory not found: ${memoryId2}`);
 
@@ -614,10 +616,15 @@ class NeurodivergentMemory {
   memoryStats(): object {
     const allMems = Object.values(this.memories);
     const totalMemories = allMems.length;
+    const perAgent: { [key: string]: number } = {};
 
     const perDistrict: { [key: string]: number } = {};
     for (const key of Object.keys(this.districts)) perDistrict[key] = 0;
     for (const m of allMems) perDistrict[m.district] = (perDistrict[m.district] ?? 0) + 1;
+    for (const m of allMems) {
+      const agentKey = m.agent_id ?? "unassigned";
+      perAgent[agentKey] = (perAgent[agentKey] ?? 0) + 1;
+    }
 
     // Count unique directed edges (sum of all connections arrays).
     // Bidirectional edges appear in both endpoints, so the raw sum over-counts
@@ -631,7 +638,7 @@ class NeurodivergentMemory {
 
     const orphans = allMems.filter(m => m.connections.length === 0).map(m => ({ id: m.id, name: m.name }));
 
-    return { totalMemories, perDistrict, totalConnections, mostAccessed, orphans };
+    return { totalMemories, perDistrict, perAgent, totalConnections, mostAccessed, orphans };
   }
 
   // ── Helpers ────────────────────────────────────────────────────────────────
@@ -698,10 +705,17 @@ class NeurodivergentMemory {
    * Each entry must have: content, district. Optional: tags, emotional_valence, intensity.
    * Returns the list of newly created memory IDs.
    */
-  importMemories(entries: Array<{ content: string; district: string; tags?: string[]; emotional_valence?: number; intensity?: number }>): string[] {
+  importMemories(entries: Array<{ content: string; district: string; tags?: string[]; emotional_valence?: number; intensity?: number; agent_id?: string }>, default_agent_id?: string): string[] {
     const ids: string[] = [];
     for (const entry of entries) {
-      const mem = this.storeMemory(entry.content, entry.district, entry.tags ?? [], entry.emotional_valence, entry.intensity ?? 0.5);
+      const mem = this.storeMemory(
+        entry.content,
+        entry.district,
+        entry.tags ?? [],
+        entry.emotional_valence,
+        entry.intensity ?? 0.5,
+        entry.agent_id ?? default_agent_id
+      );
       ids.push(mem.id);
     }
     return ids;
@@ -875,6 +889,10 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
               minimum: 0,
               maximum: 1,
               description: "Mental energy/importance (0-1)"
+            },
+            agent_id: {
+              type: "string",
+              description: "Optional creator agent identifier"
             }
           },
           required: ["content", "district"]
@@ -966,6 +984,10 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
               type: "boolean",
               description: "Whether connection goes both ways",
               default: true
+            },
+            agent_id: {
+              type: "string",
+              description: "Optional agent identifier performing the connection"
             }
           },
           required: ["memory_id_1", "memory_id_2"]
@@ -1124,11 +1146,16 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
                   },
                   tags: { type: "array", items: { type: "string" } },
                   emotional_valence: { type: "number", minimum: -1, maximum: 1 },
-                  intensity: { type: "number", minimum: 0, maximum: 1 }
+                  intensity: { type: "number", minimum: 0, maximum: 1 },
+                  agent_id: { type: "string" }
                 },
                 required: ["content", "district"]
               },
               description: "Array of memory entries to import"
+            },
+            agent_id: {
+              type: "string",
+              description: "Optional default agent identifier applied to entries without agent_id"
             }
           },
           required: ["entries"]
@@ -1145,14 +1172,14 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
 server.setRequestHandler(CallToolRequestSchema, async (request) => {
   switch (request.params.name) {
     case "store_memory": {
-      const { content, district, tags = [], emotional_valence, intensity = 0.5 } = request.params.arguments as any;
+      const { content, district, tags = [], emotional_valence, intensity = 0.5, agent_id } = request.params.arguments as any;
 
       try {
-        const memory = memorySystem.storeMemory(content, district, tags, emotional_valence, intensity);
+        const memory = memorySystem.storeMemory(content, district, tags, emotional_valence, intensity, agent_id);
         return {
           content: [{
             type: "text",
-            text: `🧠 Stored memory "${memory.name}" in ${memorySystem.getAllDistricts().find(d => d.name.toLowerCase().replace(/\s+/g, '_') === district)?.name || district}\nID: ${memory.id}\nArchetype: ${memory.archetype}`
+            text: `🧠 Stored memory "${memory.name}" in ${memorySystem.getAllDistricts().find(d => d.name.toLowerCase().replace(/\s+/g, '_') === district)?.name || district}\nID: ${memory.id}\nArchetype: ${memory.archetype}\nAgent: ${memory.agent_id ?? "unassigned"}`
           }]
         };
       } catch (error) {
@@ -1183,7 +1210,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       return {
         content: [{
           type: "text",
-          text: `🧠 Retrieved memory "${memory.name}"\nDistrict: ${memory.district}\nContent: ${memory.content}\nTags: ${memory.tags.join(', ')}\nEmotional valence: ${memory.emotional_valence ?? 'unset'}\nIntensity: ${memory.intensity ?? 'unset'}\nAccess count: ${memory.access_count}`
+          text: `🧠 Retrieved memory "${memory.name}"\nDistrict: ${memory.district}\nAgent: ${memory.agent_id ?? 'unassigned'}\nContent: ${memory.content}\nTags: ${memory.tags.join(', ')}\nEmotional valence: ${memory.emotional_valence ?? 'unset'}\nIntensity: ${memory.intensity ?? 'unset'}\nAccess count: ${memory.access_count}`
         }]
       };
     }
@@ -1229,14 +1256,14 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     }
 
     case "connect_memories": {
-      const { memory_id_1, memory_id_2, bidirectional = true } = request.params.arguments as any;
+      const { memory_id_1, memory_id_2, bidirectional = true, agent_id } = request.params.arguments as any;
 
       try {
-        memorySystem.connectMemories(memory_id_1, memory_id_2, bidirectional);
+        memorySystem.connectMemories(memory_id_1, memory_id_2, bidirectional, agent_id);
         return {
           content: [{
             type: "text",
-            text: `🔗 Connected memories ${memory_id_1} and ${memory_id_2}${bidirectional ? ' (bidirectional)' : ' (unidirectional)'}`
+            text: `🔗 Connected memories ${memory_id_1} and ${memory_id_2}${bidirectional ? ' (bidirectional)' : ' (unidirectional)'}\nAgent: ${agent_id ?? 'unassigned'}`
           }]
         };
       } catch (error) {
@@ -1340,6 +1367,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       const districtLines = Object.entries(stats.perDistrict)
         .map(([k, v]) => `  ${k}: ${v}`)
         .join('\n');
+      const perAgentLines = Object.entries(stats.perAgent)
+        .map(([k, v]) => `  ${k}: ${v}`)
+        .join('\n');
       const topAccessed = stats.mostAccessed
         .map((m: any) => `  ${m.id} — ${m.name} (${m.access_count} accesses)`)
         .join('\n');
@@ -1350,15 +1380,15 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       return {
         content: [{
           type: "text",
-          text: `📊 Memory Stats\nTotal memories: ${stats.totalMemories}\nTotal connections: ${stats.totalConnections}\n\nPer district:\n${districtLines}\n\nMost accessed:\n${topAccessed}\n\nOrphans (no connections):\n${orphanList}`
+          text: `📊 Memory Stats\nTotal memories: ${stats.totalMemories}\nTotal connections: ${stats.totalConnections}\n\nPer district:\n${districtLines}\n\nPer agent:\n${perAgentLines || '  (none)'}\n\nMost accessed:\n${topAccessed}\n\nOrphans (no connections):\n${orphanList}`
         }]
       };
     }
 
     case "import_memories": {
-      const { entries } = request.params.arguments as any;
+      const { entries, agent_id } = request.params.arguments as any;
       try {
-        const ids = memorySystem.importMemories(entries);
+        const ids = memorySystem.importMemories(entries, agent_id);
         return {
           content: [{
             type: "text",
