@@ -25,7 +25,7 @@ import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
 import { logger } from "./core/logger.js";
-import type { EpistemicStatus, MemoryArchetype, MemoryNPC } from "./core/types.js";
+import type { EpistemicStatus, EpistemicStatusFilter, MemoryArchetype, MemoryNPC } from "./core/types.js";
 
 /**
  * Memory district representing a knowledge domain
@@ -437,7 +437,7 @@ class NeurodivergentMemory {
     query: string,
     district?: string,
     tags?: string[],
-    epistemic_statuses?: EpistemicStatus[],
+    epistemic_statuses?: EpistemicStatusFilter[],
     min_score?: number,
     emotional_valence_min?: number,
     emotional_valence_max?: number,
@@ -457,7 +457,10 @@ class NeurodivergentMemory {
     }
 
     if (epistemic_statuses && epistemic_statuses.length > 0) {
-      candidates = candidates.filter(m => m.epistemic_status !== undefined && epistemic_statuses.includes(m.epistemic_status));
+      candidates = candidates.filter(m => {
+        const status = m.epistemic_status ?? "unset";
+        return epistemic_statuses.includes(status);
+      });
     }
 
     if (emotional_valence_min !== undefined) {
@@ -616,15 +619,15 @@ class NeurodivergentMemory {
       outdated: 0,
       unset: 0,
     };
-    const KNOWN_EPISTEMIC_STATUSES: EpistemicStatus[] = ["draft", "validated", "outdated", "unset"];
+    const KNOWN_EPISTEMIC_STATUSES: EpistemicStatusFilter[] = ["draft", "validated", "outdated", "unset"];
     for (const key of Object.keys(this.districts)) perDistrict[key] = 0;
     for (const m of allMems) perDistrict[m.district] = (perDistrict[m.district] ?? 0) + 1;
     for (const m of allMems) {
       const agentKey = m.agent_id ?? "unassigned";
       perAgent[agentKey] = (perAgent[agentKey] ?? 0) + 1;
       const rawStatus = m.epistemic_status ?? "unset";
-      const statusKey: EpistemicStatus =
-        (KNOWN_EPISTEMIC_STATUSES as string[]).includes(rawStatus) ? (rawStatus as EpistemicStatus) : "unset";
+      const statusKey: EpistemicStatusFilter =
+        (KNOWN_EPISTEMIC_STATUSES as string[]).includes(rawStatus) ? (rawStatus as EpistemicStatusFilter) : "unset";
       epistemicStatusBreakdown[statusKey] = (epistemicStatusBreakdown[statusKey] ?? 0) + 1;
     }
 
@@ -1028,7 +1031,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             },
             epistemic_statuses: {
               type: "array",
-              items: { type: "string", enum: ["draft", "validated", "outdated"] },
+              items: { type: "string", enum: ["draft", "validated", "outdated", "unset"] },
               description: "Optional epistemic status filters"
             },
             min_score: {

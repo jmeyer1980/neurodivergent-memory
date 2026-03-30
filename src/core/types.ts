@@ -2,6 +2,8 @@ export type MemoryArchetype = "scholar" | "merchant" | "mystic" | "guard";
 
 export type EpistemicStatus = "draft" | "validated" | "outdated";
 
+export type EpistemicStatusFilter = EpistemicStatus | "unset";
+
 export interface MemoryNPC {
   id: string;
   name: string;
