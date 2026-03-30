@@ -189,6 +189,43 @@ For Docker:
 }
 ```
 
+Fully auto-approved tools:
+
+```json
+{
+  "mcpServers": {
+    "neurodivergent-memory": {
+      "autoApprove": [
+        "store_memory",
+        "retrieve_memory",
+        "connect_memories",
+        "search_memories",
+        "update_memory",
+        "delete_memory",
+        "traverse_from",
+        "related_to",
+        "list_memories",
+        "memory_stats",
+        "import_memories"
+      ],
+      "disabled": false,
+      "timeout": 120,
+      "type": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "-v",
+        "neurodivergent-memory-data:/root/.nd-memory",
+        "docker.io/twgbellok/neurodivergent-memory:latest"
+      ],
+      "env": {}
+    }
+  }
+}
+```
+
 ### Docker Runtime
 
 You can also run the packaged server image directly:

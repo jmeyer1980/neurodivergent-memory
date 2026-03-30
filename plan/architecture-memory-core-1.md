@@ -25,12 +25,16 @@ This document defines the implementation sequence for roadmap milestones v0.2.0 
 - **REQ-007**: Add custom district registration with LUCA-derived parent validation.
 - **REQ-008**: Distillation source eligibility is cross-district by default; emotional_processing is a high-priority source but not an exclusive source.
 - **REQ-009**: Distillation policy must support allowlist/blocklist district constraints via configuration without code changes.
+- **REQ-009**: Distillation policy must support allowlist/blocklist district constraints via configuration without code changes.
+- **REQ-010**: Memories used as planning artifacts must support an explicit `epistemic_status` field: `draft | validated | outdated`. Agents must not treat `draft` or `outdated` memories as authoritative without human confirmation. (Source: council synthesis 2026-03-29.)
 - **SEC-001**: Validate all new numeric input ranges in MCP input schemas and runtime guards.
 - **SEC-002**: Do not expose private raw emotional content when returning distilled artifacts unless explicitly requested.
 - **CON-001**: Single-file core architecture in src/index.ts is current state; incremental modular extraction is allowed but not required in v0.2.0.
 - **CON-002**: Existing persistence file format must continue to load old snapshots without migration failure.
 - **GUD-001**: Prefer additive interfaces and optional fields over breaking schema changes.
 - **GUD-002**: Every new server-side behavior must have test coverage and failure-path tests.
+- **GUD-002**: Every new server-side behavior must have test coverage and failure-path tests.
+- **GUD-003**: New planning memories default to `epistemic_status: draft`. Transition to `validated` requires either human action or an explicit agent assertion with a rationale note stored as a connected memory. Transition to `outdated` may be automated when a superseding memory is connected via `abstracted_from` or a conflict edge. (Source: council synthesis 2026-03-29.)
 - **PAT-001**: Apply Warbler-derived pattern: telemetry first, then guardrail activation.
 - **PAT-002**: Apply Warbler-derived pattern: micro-to-macro distillation provenance chain.
 
@@ -43,6 +47,7 @@ This document defines the implementation sequence for roadmap milestones v0.2.0 
 | Task | Description | Completed | Date |
 |------|-------------|-----------|------|
 | TASK-001 | Create src/core/types.ts defining MemoryNPC extensions: agent_id?, abstracted_from?, telemetry fields (repeat_count, last_similarity_score, ping_pong_counter). |  |  |
+| TASK-001 | Create src/core/types.ts defining MemoryNPC extensions: agent_id?, abstracted_from?, epistemic_status?: 'draft' \| 'validated' \| 'outdated', and telemetry fields (repeat_count, last_similarity_score, ping_pong_counter). |  |  |
 | TASK-002 | Create src/core/error-codes.ts with stable code map NM_E001-NM_E030 and helper for MCP error payload formatting. |  |  |
 | TASK-003 | Create src/core/logger.ts with structured JSON logger wrapper and severity levels. |  |  |
 | TASK-004 | Refactor persistence block in src/index.ts to use write-ahead journal file (memories.wal.jsonl) and startup compaction into memories.json. |  |  |
@@ -130,6 +135,8 @@ This document defines the implementation sequence for roadmap milestones v0.2.0 
 - **RISK-003**: Guardrail messaging may break external parsers relying on exact response strings.
 - **RISK-004**: Custom district registration can fragment taxonomy if parent validation is weak.
 - **RISK-005**: Cross-district distillation can over-normalize content if policy thresholds are too permissive.
+- **RISK-005**: Cross-district distillation can over-normalize content if policy thresholds are too permissive.
+- **RISK-006**: Stored plans may be treated as authoritative by future agent sessions even after superseding decisions are made. Mitigation: `epistemic_status` transitions (REQ-010, GUD-003) and the loop telemetry ping-pong detector (TASK-008) both surface stale plan reuse. (Source: council synthesis 2026-03-29.)
 - **ASSUMPTION-001**: Existing clients tolerate additive output fields in tool responses.
 - **ASSUMPTION-002**: Versioned release cadence allows v0.2.0 and v0.3.0 as separate hardening checkpoints.
 - **ASSUMPTION-003**: Warbler remains untracked reference material under ignored development-artifacts path.
