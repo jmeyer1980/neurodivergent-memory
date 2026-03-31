@@ -24,6 +24,7 @@ import {
 import * as fs from "fs";
 import { logger } from "./core/logger.js";
 import { resolvePersistenceLocation } from "./core/persistence.js";
+import { NM_ERRORS } from "./core/error-codes.js";
 import type { EpistemicStatus, EpistemicStatusFilter, MemoryArchetype, MemoryNPC } from "./core/types.js";
 
 /**
@@ -186,6 +187,17 @@ interface MemorySnapshot {
   memories: { [id: string]: PersistedMemoryNPC };
 }
 
+type WalOperation = "store" | "update" | "delete" | "connect" | "import";
+
+interface WalEntry {
+  op: WalOperation;
+  payload: Record<string, unknown>;
+  timestamp: string;
+  seq: number;
+}
+
+type EvictionPolicy = "lru" | "access_frequency" | "district_priority";
+
 /**
  * Neurodivergent memory system
  */
@@ -194,20 +206,64 @@ class NeurodivergentMemory {
   private memories: { [id: string]: MemoryNPC } = {};
   private nextMemoryId = 1;
   private bm25 = new BM25Index();
+  private walSeq = 1;
+  private readonly walFile = `${PERSISTENCE_FILE}.wal.jsonl`;
+  private readonly maxMemories = this.parseMaxMemories(process.env.NEURODIVERGENT_MEMORY_MAX);
+  private readonly evictionPolicy = this.parseEvictionPolicy(process.env.NEURODIVERGENT_MEMORY_EVICTION);
   private saveTimer: ReturnType<typeof setTimeout> | null = null;
   // Promise chain that ensures saves never run concurrently
   private saveChain: Promise<void> = Promise.resolve();
 
   constructor() {
     this.initializeDistricts();
-    this.loadFromDisk();
+    this.ensureStoragePathWritable();
+    this.loadStateWithWalRecovery();
   }
 
   // ── Persistence ────────────────────────────────────────────────────────────
 
-  private loadFromDisk(): void {
+  private ensureStoragePathWritable(): void {
     try {
-      if (!fs.existsSync(PERSISTENCE_FILE)) return;
+      fs.mkdirSync(PERSISTENCE_DIR, { recursive: true });
+      fs.accessSync(PERSISTENCE_DIR, fs.constants.W_OK);
+    } catch (err) {
+      logger.error({ code: NM_ERRORS.STORAGE_PATH_NOT_WRITABLE, persistenceDir: PERSISTENCE_DIR, err }, "Persistence directory is not writable");
+      throw new Error(`Storage path is not writable (${NM_ERRORS.STORAGE_PATH_NOT_WRITABLE}): ${PERSISTENCE_DIR}`);
+    }
+  }
+
+  private loadStateWithWalRecovery(): void {
+    const snapshotLoaded = this.loadSnapshot();
+    const replayResult = this.replayWal();
+
+    if (replayResult.applied > 0) {
+      try {
+        fs.writeFileSync(this.walFile, "", "utf-8");
+        this.saveToDiskSync();
+      } catch (err) {
+        logger.error({ code: NM_ERRORS.PERSISTENCE_WRITE_FAILED, walFile: this.walFile, err }, "Failed to compact snapshot after WAL replay");
+      }
+    }
+
+    const startupMode = replayResult.applied > 0
+      ? "wal-replay"
+      : (snapshotLoaded ? "snapshot-load" : "fresh");
+    logger.info(
+      {
+        startupMode,
+        appliedWalEntries: replayResult.applied,
+        skippedWalEntries: replayResult.skipped,
+        memoryCount: Object.keys(this.memories).length,
+        maxMemories: this.maxMemories ?? "unlimited",
+        evictionPolicy: this.evictionPolicy,
+      },
+      "Memory startup path",
+    );
+  }
+
+  private loadSnapshot(): boolean {
+    try {
+      if (!fs.existsSync(PERSISTENCE_FILE)) return false;
       const raw = fs.readFileSync(PERSISTENCE_FILE, "utf-8");
       const snapshot: MemorySnapshot = JSON.parse(raw);
 
@@ -215,32 +271,104 @@ class NeurodivergentMemory {
 
       const memoriesMap = snapshot.memories ?? {};
       for (const [id, raw_mem] of Object.entries(memoriesMap)) {
-        const now = new Date();
-        const createdDate = new Date((raw_mem as any).created);
-        const lastAccessedDate = new Date((raw_mem as any).last_accessed);
-        const safeCreated =
-          isNaN(createdDate.getTime()) ? now : createdDate;
-        const safeLastAccessed =
-          isNaN(lastAccessedDate.getTime()) ? safeCreated : lastAccessedDate;
-        const mem: MemoryNPC = {
-          ...raw_mem,
-          created: safeCreated,
-          last_accessed: safeLastAccessed,
-        };
-        if (!this.districts[mem.district]) {
-          const valid = Object.keys(this.districts).join(", ");
-          logger.warn({ memoryId: id, district: mem.district, validDistricts: valid }, "Skipping memory with unknown district during snapshot load");
-          continue;
+        const mem = this.deserializeMemory(raw_mem as PersistedMemoryNPC);
+        this.insertMemory(mem);
+      }
+      return true;
+    } catch (err) {
+      logger.warn({ code: NM_ERRORS.SNAPSHOT_LOAD_FAILED, err }, "Failed to load snapshot; starting with empty memory state");
+      this.clearState();
+      return false;
+    }
+  }
+
+  private replayWal(): { applied: number; skipped: number } {
+    if (!fs.existsSync(this.walFile)) return { applied: 0, skipped: 0 };
+
+    let applied = 0;
+    let skipped = 0;
+    try {
+      const lines = fs.readFileSync(this.walFile, "utf-8").split(/\r?\n/);
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed) continue;
+        try {
+          const entry = JSON.parse(trimmed) as WalEntry;
+          this.walSeq = Math.max(this.walSeq, (entry.seq ?? 0) + 1);
+          this.applyWalEntry(entry);
+          applied++;
+        } catch (err) {
+          skipped++;
+          logger.warn({ code: NM_ERRORS.WAL_CORRUPT_ENTRY, walFile: this.walFile, entryPreview: trimmed.slice(0, 120), err }, "Skipping corrupt WAL entry");
         }
-        this.memories[id] = mem;
-        if (!this.districts[mem.district].memories.includes(id)) {
-          this.districts[mem.district].memories.push(id);
-        }
-        this.bm25.addDocument(id, this.documentText(mem));
       }
     } catch (err) {
-      // Corrupt or missing snapshot — start fresh
-      logger.warn({ err }, "Failed to load snapshot; starting with empty memory state");
+      logger.warn({ code: NM_ERRORS.WAL_CORRUPT_ENTRY, walFile: this.walFile, err }, "Failed reading WAL; continuing with snapshot state");
+    }
+
+    return { applied, skipped };
+  }
+
+  private appendWalEntry(op: WalOperation, payload: Record<string, unknown>): void {
+    const entry: WalEntry = {
+      op,
+      payload,
+      timestamp: new Date().toISOString(),
+      seq: this.walSeq++,
+    };
+    try {
+      fs.appendFileSync(this.walFile, `${JSON.stringify(entry)}\n`, "utf-8");
+    } catch (err) {
+      logger.error({ code: NM_ERRORS.PERSISTENCE_WRITE_FAILED, walFile: this.walFile, err }, "Failed to append WAL entry");
+      throw new Error(`Persistence write failed (${NM_ERRORS.PERSISTENCE_WRITE_FAILED})`);
+    }
+  }
+
+  private applyWalEntry(entry: WalEntry): void {
+    switch (entry.op) {
+      case "store": {
+        const mem = this.deserializeMemory(entry.payload.memory as PersistedMemoryNPC);
+        this.ensureCapacityForInsert();
+        this.insertMemory(mem);
+        this.nextMemoryId = Math.max(this.nextMemoryId, this.parseMemoryNumericId(mem.id) + 1);
+        break;
+      }
+      case "update": {
+        const memoryId = String(entry.payload.memory_id ?? "");
+        const updates = (entry.payload.updates ?? {}) as Partial<Pick<MemoryNPC, "content" | "tags" | "emotional_valence" | "intensity" | "district" | "epistemic_status">>;
+        if (this.memories[memoryId]) {
+          this.applyMemoryUpdates(memoryId, updates);
+        }
+        break;
+      }
+      case "delete": {
+        const memoryId = String(entry.payload.memory_id ?? "");
+        if (this.memories[memoryId]) {
+          this.deleteMemoryInternal(memoryId);
+        }
+        break;
+      }
+      case "connect": {
+        const memoryId1 = String(entry.payload.memory_id_1 ?? "");
+        const memoryId2 = String(entry.payload.memory_id_2 ?? "");
+        const bidirectional = Boolean(entry.payload.bidirectional ?? true);
+        if (this.memories[memoryId1] && this.memories[memoryId2]) {
+          this.connectMemoriesInternal(memoryId1, memoryId2, bidirectional);
+        }
+        break;
+      }
+      case "import": {
+        const entries = Array.isArray(entry.payload.entries) ? entry.payload.entries : [];
+        const defaultAgentId = typeof entry.payload.agent_id === "string" ? entry.payload.agent_id : undefined;
+        this.importMemoriesInternal(
+          entries as Array<{ content: string; district: string; tags?: string[]; emotional_valence?: number; intensity?: number; agent_id?: string; epistemic_status?: EpistemicStatus }>,
+          defaultAgentId,
+          true,
+        );
+        break;
+      }
+      default:
+        break;
     }
   }
 
@@ -259,23 +387,139 @@ class NeurodivergentMemory {
 
   private async saveToDiskAsync(): Promise<void> {
     await fs.promises.mkdir(PERSISTENCE_DIR, { recursive: true });
-    const persistedMemories: { [id: string]: PersistedMemoryNPC } = {};
-    for (const [id, mem] of Object.entries(this.memories)) {
-      persistedMemories[id] = {
-        ...mem,
-        created: mem.created.toISOString(),
-        last_accessed: mem.last_accessed.toISOString(),
-      };
-    }
-    const snapshot: MemorySnapshot = {
-      nextMemoryId: this.nextMemoryId,
-      memories: persistedMemories,
-    };
+    const snapshot = this.createSnapshot();
     // Write to a temp file first, then rename for an atomic swap so a partial
     // write can never corrupt the live snapshot.
     const tmp = PERSISTENCE_FILE + ".tmp";
     await fs.promises.writeFile(tmp, JSON.stringify(snapshot, null, 2), "utf-8");
     await fs.promises.rename(tmp, PERSISTENCE_FILE);
+  }
+
+  private saveToDiskSync(): void {
+    fs.mkdirSync(PERSISTENCE_DIR, { recursive: true });
+    const snapshot = this.createSnapshot();
+    const tmp = PERSISTENCE_FILE + ".tmp";
+    fs.writeFileSync(tmp, JSON.stringify(snapshot, null, 2), "utf-8");
+    fs.renameSync(tmp, PERSISTENCE_FILE);
+  }
+
+  private createSnapshot(): MemorySnapshot {
+    const persistedMemories: { [id: string]: PersistedMemoryNPC } = {};
+    for (const [id, mem] of Object.entries(this.memories)) {
+      persistedMemories[id] = this.serializeMemory(mem);
+    }
+    return {
+      nextMemoryId: this.nextMemoryId,
+      memories: persistedMemories,
+    };
+  }
+
+  private clearState(): void {
+    this.memories = {};
+    this.nextMemoryId = 1;
+    this.bm25 = new BM25Index();
+    for (const district of Object.values(this.districts)) {
+      district.memories = [];
+    }
+  }
+
+  private serializeMemory(memory: MemoryNPC): PersistedMemoryNPC {
+    return {
+      ...memory,
+      created: memory.created.toISOString(),
+      last_accessed: memory.last_accessed.toISOString(),
+    };
+  }
+
+  private deserializeMemory(rawMem: PersistedMemoryNPC): MemoryNPC {
+    const now = new Date();
+    const createdDate = new Date((rawMem as any).created);
+    const lastAccessedDate = new Date((rawMem as any).last_accessed);
+    const safeCreated = isNaN(createdDate.getTime()) ? now : createdDate;
+    const safeLastAccessed = isNaN(lastAccessedDate.getTime()) ? safeCreated : lastAccessedDate;
+    return {
+      ...rawMem,
+      created: safeCreated,
+      last_accessed: safeLastAccessed,
+    };
+  }
+
+  private parseMaxMemories(rawValue?: string): number | undefined {
+    if (!rawValue || !rawValue.trim()) return undefined;
+    const parsed = Number.parseInt(rawValue, 10);
+    if (!Number.isFinite(parsed) || parsed <= 0) return undefined;
+    return parsed;
+  }
+
+  private parseEvictionPolicy(rawValue?: string): EvictionPolicy {
+    if (rawValue === "access_frequency" || rawValue === "district_priority") {
+      return rawValue;
+    }
+    return "lru";
+  }
+
+  private ensureCapacityForInsert(): void {
+    if (!this.maxMemories) return;
+    while (Object.keys(this.memories).length >= this.maxMemories) {
+      const evictedId = this.evictOneMemory();
+      if (!evictedId) return;
+      logger.info({ memoryId: evictedId, evictionPolicy: this.evictionPolicy, maxMemories: this.maxMemories }, "Evicted memory due to cap");
+    }
+  }
+
+  private evictOneMemory(): string | undefined {
+    const all = Object.values(this.memories);
+    if (all.length === 0) return undefined;
+
+    let candidate: MemoryNPC | undefined;
+    if (this.evictionPolicy === "access_frequency") {
+      candidate = all.reduce((lowest, current) =>
+        current.access_count < lowest.access_count ? current : lowest
+      );
+    } else if (this.evictionPolicy === "district_priority") {
+      const countsByDistrict = new Map<string, number>();
+      for (const memory of all) {
+        countsByDistrict.set(memory.district, (countsByDistrict.get(memory.district) ?? 0) + 1);
+      }
+      let topDistrict = all[0].district;
+      let topCount = -1;
+      for (const [district, count] of countsByDistrict.entries()) {
+        if (count > topCount) {
+          topCount = count;
+          topDistrict = district;
+        }
+      }
+      const districtMemories = all.filter(m => m.district === topDistrict);
+      candidate = districtMemories.reduce((oldest, current) =>
+        current.last_accessed.getTime() < oldest.last_accessed.getTime() ? current : oldest
+      );
+    } else {
+      candidate = all.reduce((oldest, current) =>
+        current.last_accessed.getTime() < oldest.last_accessed.getTime() ? current : oldest
+      );
+    }
+
+    if (!candidate) return undefined;
+    this.deleteMemoryInternal(candidate.id);
+    return candidate.id;
+  }
+
+  private parseMemoryNumericId(memoryId: string): number {
+    const numericPart = Number.parseInt(memoryId.replace(/^memory_/, ""), 10);
+    return Number.isFinite(numericPart) ? numericPart : 0;
+  }
+
+  private insertMemory(memory: MemoryNPC): void {
+    if (!this.districts[memory.district]) {
+      const valid = Object.keys(this.districts).join(", ");
+      logger.warn({ memoryId: memory.id, district: memory.district, validDistricts: valid }, "Skipping memory with unknown district during load");
+      return;
+    }
+    this.memories[memory.id] = memory;
+    if (!this.districts[memory.district].memories.includes(memory.id)) {
+      this.districts[memory.district].memories.push(memory.id);
+    }
+    this.bm25.addDocument(memory.id, this.documentText(memory));
   }
 
   private documentText(memory: MemoryNPC): string {
@@ -339,9 +583,10 @@ class NeurodivergentMemory {
       throw new Error(`Unknown district: ${district}`);
     }
 
-    const archetype = this.districts[district].archetype;
     const id = `memory_${this.nextMemoryId++}`;
+    const archetype = this.districts[district].archetype;
     const name = this.generateMemoryName(archetype, content);
+    const now = new Date();
 
     const memory: MemoryNPC = {
       id,
@@ -354,17 +599,17 @@ class NeurodivergentMemory {
       concerns: this.generateConcerns(archetype),
       connections: [],
       tags,
-      created: new Date(),
-      last_accessed: new Date(),
+      created: now,
+      last_accessed: now,
       access_count: 1,
       emotional_valence,
       intensity,
       epistemic_status
     };
 
-    this.memories[id] = memory;
-    this.districts[district].memories.push(id);
-    this.bm25.addDocument(id, this.documentText(memory));
+    this.appendWalEntry("store", { memory: this.serializeMemory(memory) });
+    this.ensureCapacityForInsert();
+    this.insertMemory(memory);
     this.scheduleSave();
 
     return memory;
@@ -388,7 +633,43 @@ class NeurodivergentMemory {
       throw new Error(`Unknown district: ${updates.district}`);
     }
 
-    // Move district reference if district changed
+    this.appendWalEntry("update", { memory_id: id, updates });
+    this.applyMemoryUpdates(id, updates);
+    this.scheduleSave();
+
+    return this.memories[id];
+  }
+
+  deleteMemory(id: string): void {
+    const memory = this.memories[id];
+    if (!memory) throw new Error(`Memory not found: ${id}`);
+
+    this.appendWalEntry("delete", { memory_id: id });
+    this.deleteMemoryInternal(id);
+    this.scheduleSave();
+  }
+
+  connectMemories(memoryId1: string, memoryId2: string, bidirectional = true, _agent_id?: string) {
+    if (!this.memories[memoryId1]) throw new Error(`Memory not found: ${memoryId1}`);
+    if (!this.memories[memoryId2]) throw new Error(`Memory not found: ${memoryId2}`);
+
+    this.appendWalEntry("connect", {
+      memory_id_1: memoryId1,
+      memory_id_2: memoryId2,
+      bidirectional,
+    });
+    this.connectMemoriesInternal(memoryId1, memoryId2, bidirectional);
+
+    this.scheduleSave();
+  }
+
+  private applyMemoryUpdates(
+    id: string,
+    updates: Partial<Pick<MemoryNPC, "content" | "tags" | "emotional_valence" | "intensity" | "district" | "epistemic_status">>,
+  ): void {
+    const memory = this.memories[id];
+    if (!memory) return;
+
     if (updates.district !== undefined && updates.district !== memory.district) {
       this.districts[memory.district].memories = this.districts[memory.district].memories.filter(mid => mid !== id);
       this.districts[updates.district].memories.push(id);
@@ -401,33 +682,24 @@ class NeurodivergentMemory {
     if (updates.intensity !== undefined) memory.intensity = updates.intensity;
     if (updates.epistemic_status !== undefined) memory.epistemic_status = updates.epistemic_status;
 
-    // Rebuild BM25 entry with updated text
     this.bm25.addDocument(id, this.documentText(memory));
-    this.scheduleSave();
-
-    return memory;
   }
 
-  deleteMemory(id: string): void {
+  private deleteMemoryInternal(id: string): void {
     const memory = this.memories[id];
-    if (!memory) throw new Error(`Memory not found: ${id}`);
+    if (!memory) return;
 
-    // Remove from district
     this.districts[memory.district].memories = this.districts[memory.district].memories.filter(mid => mid !== id);
-
-    // Remove all incoming connections
     for (const other of Object.values(this.memories)) {
       other.connections = other.connections.filter(cid => cid !== id);
     }
 
     this.bm25.removeDocument(id);
     delete this.memories[id];
-    this.scheduleSave();
   }
 
-  connectMemories(memoryId1: string, memoryId2: string, bidirectional = true, _agent_id?: string) {
-    if (!this.memories[memoryId1]) throw new Error(`Memory not found: ${memoryId1}`);
-    if (!this.memories[memoryId2]) throw new Error(`Memory not found: ${memoryId2}`);
+  private connectMemoriesInternal(memoryId1: string, memoryId2: string, bidirectional: boolean): void {
+    if (!this.memories[memoryId1] || !this.memories[memoryId2]) return;
 
     if (!this.memories[memoryId1].connections.includes(memoryId2)) {
       this.memories[memoryId1].connections.push(memoryId2);
@@ -436,8 +708,6 @@ class NeurodivergentMemory {
     if (bidirectional && !this.memories[memoryId2].connections.includes(memoryId1)) {
       this.memories[memoryId2].connections.push(memoryId1);
     }
-
-    this.scheduleSave();
   }
 
   // ── Search ─────────────────────────────────────────────────────────────────
@@ -720,18 +990,52 @@ class NeurodivergentMemory {
    * Returns the list of newly created memory IDs.
    */
   importMemories(entries: Array<{ content: string; district: string; tags?: string[]; emotional_valence?: number; intensity?: number; agent_id?: string; epistemic_status?: EpistemicStatus }>, default_agent_id?: string): string[] {
+    this.appendWalEntry("import", { entries, agent_id: default_agent_id });
+    const ids = this.importMemoriesInternal(entries, default_agent_id, false);
+    this.scheduleSave();
+    return ids;
+  }
+
+  private importMemoriesInternal(
+    entries: Array<{ content: string; district: string; tags?: string[]; emotional_valence?: number; intensity?: number; agent_id?: string; epistemic_status?: EpistemicStatus }>,
+    default_agent_id?: string,
+    fromWalReplay = false,
+  ): string[] {
     const ids: string[] = [];
     for (const entry of entries) {
-      const mem = this.storeMemory(
-        entry.content,
-        entry.district,
-        entry.tags ?? [],
-        entry.emotional_valence,
-        entry.intensity ?? 0.5,
-        entry.agent_id ?? default_agent_id,
-        entry.epistemic_status
-      );
-      ids.push(mem.id);
+      if (!this.districts[entry.district]) {
+        throw new Error(`Unknown district: ${entry.district}`);
+      }
+
+      const id = `memory_${this.nextMemoryId++}`;
+      const archetype = this.districts[entry.district].archetype;
+      const name = this.generateMemoryName(archetype, entry.content);
+      const now = new Date();
+      const memory: MemoryNPC = {
+        id,
+        name,
+        archetype,
+        agent_id: entry.agent_id ?? default_agent_id,
+        district: entry.district,
+        content: entry.content,
+        traits: this.generateTraits(archetype),
+        concerns: this.generateConcerns(archetype),
+        connections: [],
+        tags: entry.tags ?? [],
+        created: now,
+        last_accessed: now,
+        access_count: 1,
+        emotional_valence: entry.emotional_valence,
+        intensity: entry.intensity ?? 0.5,
+        epistemic_status: entry.epistemic_status,
+      };
+
+      this.ensureCapacityForInsert();
+      this.insertMemory(memory);
+      if (!fromWalReplay) {
+        // no-op: WAL already written by public importMemories caller
+      }
+      ids.push(memory.id);
     }
     return ids;
   }

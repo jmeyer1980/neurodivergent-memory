@@ -119,12 +119,23 @@ Each memory can optionally carry:
 
 ### Knowledge Graph Persistence
 
-Memories are automatically persisted to `~/.neurodivergent-memory/memories.json` on every write. The graph is restored on server startup.
+Memories are persisted with a write-ahead journal (WAL) plus snapshot model:
+
+- Every mutating operation appends to `memories.json.wal.jsonl` first.
+- The in-memory graph is then updated and periodically snapshotted to `memories.json`.
+- On startup, the server loads `memories.json`, replays WAL entries, compacts to a fresh snapshot, then truncates the WAL.
+
+This improves crash recovery behavior compared to snapshot-only persistence.
 
 For explicit control, set one of these environment variables:
 
 - `NEURODIVERGENT_MEMORY_DIR` to choose the directory that contains `memories.json`
 - `NEURODIVERGENT_MEMORY_FILE` to point at a specific snapshot file
+- `NEURODIVERGENT_MEMORY_MAX` to cap total memories (integer; default unlimited)
+- `NEURODIVERGENT_MEMORY_EVICTION` to choose eviction policy when max is reached:
+  - `lru` (default)
+  - `access_frequency`
+  - `district_priority`
 
 Mounts at `/home/node/.neurodivergent-memory` continue to work without any env override — that is the container's `node` user home and is checked automatically.
 
