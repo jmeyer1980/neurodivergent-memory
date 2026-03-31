@@ -757,7 +757,11 @@ class NeurodivergentMemory {
         },
       });
 
-      const pingPongResult = this.applyPingPongTelemetry(matchedMemory);
+      const pingPongResult = this.applyPingPongTelemetry({
+        ...matchedMemory,
+        district,
+        agent_id,
+      });
       pingPongDetected = pingPongResult.detected;
       pingPongCount = pingPongResult.count;
 
