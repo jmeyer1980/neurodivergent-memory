@@ -24,7 +24,14 @@ import {
 import * as fs from "fs";
 import { logger } from "./core/logger.js";
 import { resolvePersistenceLocation } from "./core/persistence.js";
-import { NM_ERRORS } from "./core/error-codes.js";
+import {
+  NM_ERRORS,
+  asMcpErrorShape,
+  createNMError,
+  formatMcpError,
+  mcpErrorResult,
+  type McpErrorShape,
+} from "./core/error-codes.js";
 import type { EpistemicStatus, EpistemicStatusFilter, MemoryArchetype, MemoryNPC } from "./core/types.js";
 
 /**
@@ -238,7 +245,11 @@ class NeurodivergentMemory {
       fs.accessSync(PERSISTENCE_DIR, fs.constants.W_OK);
     } catch (err) {
       logger.error({ code: NM_ERRORS.STORAGE_PATH_NOT_WRITABLE, persistenceDir: PERSISTENCE_DIR, err }, "Persistence directory is not writable");
-      throw new Error(`Storage path is not writable (${NM_ERRORS.STORAGE_PATH_NOT_WRITABLE}): ${PERSISTENCE_DIR}`);
+      throw createNMError(
+        NM_ERRORS.STORAGE_PATH_NOT_WRITABLE,
+        `Storage path is not writable: ${PERSISTENCE_DIR}`,
+        "Verify the configured persistence directory exists and is writable by the current process.",
+      );
     }
   }
 
@@ -333,7 +344,11 @@ class NeurodivergentMemory {
       fs.appendFileSync(this.walFile, `${JSON.stringify(entry)}\n`, "utf-8");
     } catch (err) {
       logger.error({ code: NM_ERRORS.PERSISTENCE_WRITE_FAILED, walFile: this.walFile, err }, "Failed to append WAL entry");
-      throw new Error(`Persistence write failed (${NM_ERRORS.PERSISTENCE_WRITE_FAILED})`);
+      throw createNMError(
+        NM_ERRORS.PERSISTENCE_WRITE_FAILED,
+        `Persistence write failed for WAL file: ${this.walFile}`,
+        "Check disk permissions and available space, then retry the mutating operation.",
+      );
     }
   }
 
@@ -617,7 +632,11 @@ class NeurodivergentMemory {
     epistemic_status?: EpistemicStatus
   ): MemoryNPC {
     if (!this.districts[district]) {
-      throw new Error(`Unknown district: ${district}`);
+      throw createNMError(
+        NM_ERRORS.UNKNOWN_DISTRICT,
+        `Unknown district: ${district}`,
+        `Use one of the configured districts: ${Object.keys(this.districts).join(", ")}.`,
+      );
     }
 
     const id = `memory_${this.nextMemoryId++}`;
@@ -648,6 +667,7 @@ class NeurodivergentMemory {
     this.ensureCapacityForInsert();
     this.insertMemory(memory);
     this.scheduleSave();
+    logger.info({ operation: "store", memoryId: memory.id, district, agentId: agent_id ?? "unassigned" }, "Stored memory");
 
     return memory;
   }
@@ -664,31 +684,61 @@ class NeurodivergentMemory {
 
   updateMemory(id: string, updates: Partial<Pick<MemoryNPC, "content" | "tags" | "emotional_valence" | "intensity" | "district" | "epistemic_status">>): MemoryNPC {
     const memory = this.memories[id];
-    if (!memory) throw new Error(`Memory not found: ${id}`);
+    if (!memory) {
+      throw createNMError(
+        NM_ERRORS.MEMORY_NOT_FOUND,
+        `Memory not found: ${id}`,
+        "List or search memories first, then retry with a valid memory ID.",
+      );
+    }
 
     if (updates.district !== undefined && !this.districts[updates.district]) {
-      throw new Error(`Unknown district: ${updates.district}`);
+      throw createNMError(
+        NM_ERRORS.UNKNOWN_DISTRICT,
+        `Unknown district: ${updates.district}`,
+        `Use one of the configured districts: ${Object.keys(this.districts).join(", ")}.`,
+      );
     }
 
     this.appendWalEntry("update", { memory_id: id, updates });
     this.applyMemoryUpdates(id, updates);
     this.scheduleSave();
+    logger.info({ operation: "update", memoryId: id, changedFields: Object.keys(updates).sort() }, "Updated memory");
 
     return this.memories[id];
   }
 
   deleteMemory(id: string): void {
     const memory = this.memories[id];
-    if (!memory) throw new Error(`Memory not found: ${id}`);
+    if (!memory) {
+      throw createNMError(
+        NM_ERRORS.MEMORY_NOT_FOUND,
+        `Memory not found: ${id}`,
+        "List or search memories first, then retry with a valid memory ID.",
+      );
+    }
 
     this.appendWalEntry("delete", { memory_id: id });
     this.deleteMemoryInternal(id);
     this.scheduleSave();
+    logger.info({ operation: "delete", memoryId: id }, "Deleted memory");
   }
 
   connectMemories(memoryId1: string, memoryId2: string, bidirectional = true, _agent_id?: string) {
-    if (!this.memories[memoryId1]) throw new Error(`Memory not found: ${memoryId1}`);
-    if (!this.memories[memoryId2]) throw new Error(`Memory not found: ${memoryId2}`);
+    if (!this.memories[memoryId1]) {
+      throw createNMError(
+        NM_ERRORS.MEMORY_NOT_FOUND,
+        `Memory not found: ${memoryId1}`,
+        "List or search memories first, then retry with a valid source memory ID.",
+      );
+    }
+    if (!this.memories[memoryId2]) {
+      throw createNMError(
+        NM_ERRORS.MEMORY_NOT_FOUND,
+        `Memory not found: ${memoryId2}`,
+        "List or search memories first, then retry with a valid target memory ID.",
+      );
+    }
 
     this.appendWalEntry("connect", {
       memory_id_1: memoryId1,
@@ -698,6 +748,7 @@ class NeurodivergentMemory {
     this.connectMemoriesInternal(memoryId1, memoryId2, bidirectional);
 
     this.scheduleSave();
+    logger.info({ operation: "connect", memoryId1, memoryId2, bidirectional, agentId: _agent_id ?? "unassigned" }, "Connected memories");
   }
 
   private applyMemoryUpdates(
@@ -823,7 +874,13 @@ class NeurodivergentMemory {
 
   traverseFrom(memoryId: string, depth: number, filterDistrict?: string): MemoryNPC[] {
     const root = this.memories[memoryId];
-    if (!root) throw new Error(`Memory not found: ${memoryId}`);
+    if (!root) {
+      throw createNMError(
+        NM_ERRORS.MEMORY_NOT_FOUND,
+        `Memory not found: ${memoryId}`,
+        "List or search memories first, then retry with a valid memory ID.",
+      );
+    }
 
     const visited = new Set<string>();
     const queue: Array<{ id: string; level: number }> = [{ id: memoryId, level: 0 }];
@@ -858,7 +915,13 @@ class NeurodivergentMemory {
 
   relatedTo(memoryId: string, query?: string): ScoredMemory[] {
     const root = this.memories[memoryId];
-    if (!root) throw new Error(`Memory not found: ${memoryId}`);
+    if (!root) {
+      throw createNMError(
+        NM_ERRORS.MEMORY_NOT_FOUND,
+        `Memory not found: ${memoryId}`,
+        "List or search memories first, then retry with a valid memory ID.",
+      );
+    }
 
     // Collect memories within 2 hops with their hop distance
     const hopMap = new Map<string, number>();
@@ -1034,6 +1097,7 @@ class NeurodivergentMemory {
       this.insertMemory(memory);
     }
     this.scheduleSave();
+    logger.info({ operation: "import", importedCount: materialized.length, agentId: default_agent_id ?? "unassigned" }, "Imported memories");
     return materialized.map(mem => mem.id);
   }
 
@@ -1045,7 +1109,11 @@ class NeurodivergentMemory {
     const memories: MemoryNPC[] = [];
     for (const entry of entries) {
       if (!this.districts[entry.district]) {
-        throw new Error(`Unknown district: ${entry.district}`);
+        throw createNMError(
+          NM_ERRORS.UNKNOWN_DISTRICT,
+          `Unknown district: ${entry.district}`,
+          `Use one of the configured districts: ${Object.keys(this.districts).join(", ")}.`,
+        );
       }
 
       const id = `memory_${nextId++}`;
@@ -1079,6 +1147,20 @@ class NeurodivergentMemory {
 
 // Global memory system instance
 const memorySystem = new NeurodivergentMemory();
+
+function normalizeToolError(error: unknown, fallback: McpErrorShape): McpErrorShape {
+  return asMcpErrorShape(error, fallback);
+}
+
+function logToolFailure(toolName: string, error: McpErrorShape): void {
+  logger.warn({ toolName, code: error.code }, "Tool request failed");
+}
+
+function toolErrorResult(toolName: string, summary: string, error: unknown, fallback: McpErrorShape) {
+  const normalizedError = normalizeToolError(error, fallback);
+  logToolFailure(toolName, normalizedError);
+  return mcpErrorResult(summary, normalizedError);
+}
 
 /**
  * Create an MCP server with capabilities for resources (to list/read memories),
@@ -1141,7 +1223,11 @@ server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
     const district = districts.find(d => d.name.toLowerCase() === districtKey.toLowerCase());
 
     if (!district) {
-      throw new Error(`District not found: ${districtKey}`);
+      throw createNMError(
+        NM_ERRORS.UNKNOWN_DISTRICT,
+        `District not found: ${districtKey}`,
+        "List resources to discover valid district URIs before retrying.",
+      );
     }
 
     // Map district display names back to internal keys
@@ -1181,7 +1267,11 @@ server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
     const memory = memorySystem.retrieveMemory(memoryId);
 
     if (!memory) {
-      throw new Error(`Memory not found: ${memoryId}`);
+      throw createNMError(
+        NM_ERRORS.MEMORY_NOT_FOUND,
+        `Memory not found: ${memoryId}`,
+        "List or search memories first, then retry with a valid memory URI.",
+      );
     }
 
     const connectedMemories = memorySystem.getConnectedMemories(memoryId);
@@ -1203,7 +1293,11 @@ server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
     };
   }
 
-  throw new Error(`Invalid URI: ${request.params.uri}`);
+  throw createNMError(
+    NM_ERRORS.INPUT_VALIDATION_FAILED,
+    `Invalid URI: ${request.params.uri}`,
+    "Use a memory://district/... or memory://memory/... URI from list_resources.",
+  );
 });
 
 /**
@@ -1554,13 +1648,16 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           }]
         };
       } catch (error) {
-        return {
-          content: [{
-            type: "text",
-            text: `❌ Failed to store memory: ${error instanceof Error ? error.message : String(error)}`
-          }],
-          isError: true
-        };
+        return toolErrorResult(
+          "store_memory",
+          "Failed to store memory",
+          error,
+          formatMcpError(
+            NM_ERRORS.INPUT_VALIDATION_FAILED,
+            "Store memory request was invalid.",
+            "Verify required arguments and retry the store_memory call.",
+          ),
+        );
       }
     }
 
@@ -1569,13 +1666,20 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       const memory = memorySystem.retrieveMemory(memory_id);
 
       if (!memory) {
-        return {
-          content: [{
-            type: "text",
-            text: `❌ Memory not found: ${memory_id}`
-          }],
-          isError: true
-        };
+        return toolErrorResult(
+          "retrieve_memory",
+          "Failed to retrieve memory",
+          createNMError(
+            NM_ERRORS.MEMORY_NOT_FOUND,
+            `Memory not found: ${memory_id}`,
+            "List or search memories first, then retry with a valid memory ID.",
+          ),
+          formatMcpError(
+            NM_ERRORS.MEMORY_NOT_FOUND,
+            `Memory not found: ${memory_id}`,
+            "List or search memories first, then retry with a valid memory ID.",
+          ),
+        );
       }
 
       return {
@@ -1605,10 +1709,16 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           }]
         };
       } catch (error) {
-        return {
-          content: [{ type: "text", text: `❌ Failed to update memory: ${error instanceof Error ? error.message : String(error)}` }],
-          isError: true
-        };
+        return toolErrorResult(
+          "update_memory",
+          "Failed to update memory",
+          error,
+          formatMcpError(
+            NM_ERRORS.INPUT_VALIDATION_FAILED,
+            "Update memory request was invalid.",
+            "Verify the memory ID and supplied fields, then retry update_memory.",
+          ),
+        );
       }
     }
 
@@ -1620,10 +1730,16 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           content: [{ type: "text", text: `🗑️ Deleted memory ${memory_id}` }]
         };
       } catch (error) {
-        return {
-          content: [{ type: "text", text: `❌ Failed to delete memory: ${error instanceof Error ? error.message : String(error)}` }],
-          isError: true
-        };
+        return toolErrorResult(
+          "delete_memory",
+          "Failed to delete memory",
+          error,
+          formatMcpError(
+            NM_ERRORS.INPUT_VALIDATION_FAILED,
+            "Delete memory request was invalid.",
+            "Verify the memory ID and retry delete_memory.",
+          ),
+        );
       }
     }
 
@@ -1639,13 +1755,16 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           }]
         };
       } catch (error) {
-        return {
-          content: [{
-            type: "text",
-            text: `❌ Failed to connect memories: ${error instanceof Error ? error.message : String(error)}`
-          }],
-          isError: true
-        };
+        return toolErrorResult(
+          "connect_memories",
+          "Failed to connect memories",
+          error,
+          formatMcpError(
+            NM_ERRORS.INPUT_VALIDATION_FAILED,
+            "Connect memories request was invalid.",
+            "Verify both memory IDs and retry connect_memories.",
+          ),
+        );
       }
     }
 
@@ -1697,7 +1816,16 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         ).join('\n');
         return { content: [{ type: "text", text: `🕸️ Traversal from ${memory_id} (depth ${depth}) — ${results.length} results:\n${text}` }] };
       } catch (error) {
-        return { content: [{ type: "text", text: `❌ Traversal failed: ${error instanceof Error ? error.message : String(error)}` }], isError: true };
+        return toolErrorResult(
+          "traverse_from",
+          "Traversal failed",
+          error,
+          formatMcpError(
+            NM_ERRORS.INPUT_VALIDATION_FAILED,
+            "Traversal request was invalid.",
+            "Verify the memory ID and traversal depth, then retry traverse_from.",
+          ),
+        );
       }
     }
 
@@ -1713,7 +1841,16 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         ).join('\n');
         return { content: [{ type: "text", text: `🔗 Related memories for ${memory_id} (${results.length} results):\n${text}` }] };
       } catch (error) {
-        return { content: [{ type: "text", text: `❌ related_to failed: ${error instanceof Error ? error.message : String(error)}` }], isError: true };
+        return toolErrorResult(
+          "related_to",
+          "related_to failed",
+          error,
+          formatMcpError(
+            NM_ERRORS.INPUT_VALIDATION_FAILED,
+            "related_to request was invalid.",
+            "Verify the memory ID and retry related_to.",
+          ),
+        );
       }
     }
 
@@ -1771,15 +1908,34 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           }]
         };
       } catch (error) {
-        return {
-          content: [{ type: "text", text: `❌ Import failed: ${error instanceof Error ? error.message : String(error)}` }],
-          isError: true
-        };
+        return toolErrorResult(
+          "import_memories",
+          "Import failed",
+          error,
+          formatMcpError(
+            NM_ERRORS.INPUT_VALIDATION_FAILED,
+            "Import request was invalid.",
+            "Verify each entry includes valid required fields, then retry import_memories.",
+          ),
+        );
       }
     }
 
     default:
-      throw new Error(`Unknown tool: ${request.params.name}`);
+      return toolErrorResult(
+        String(request.params.name),
+        "Unknown tool",
+        createNMError(
+          NM_ERRORS.UNKNOWN_TOOL,
+          `Unknown tool: ${request.params.name}`,
+          "Call list_tools to discover supported tool names before retrying.",
+        ),
+        formatMcpError(
+          NM_ERRORS.UNKNOWN_TOOL,
+          `Unknown tool: ${request.params.name}`,
+          "Call list_tools to discover supported tool names before retrying.",
+        ),
+      );
   }
 });
 
@@ -1884,7 +2040,11 @@ server.setRequestHandler(GetPromptRequestSchema, async (request) => {
     }
 
     default:
-      throw new Error(`Unknown prompt: ${request.params.name}`);
+      throw createNMError(
+        NM_ERRORS.INPUT_VALIDATION_FAILED,
+        `Unknown prompt: ${request.params.name}`,
+        "Call list_prompts to discover supported prompt names before retrying.",
+      );
   }
 });
 

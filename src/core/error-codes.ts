@@ -20,7 +20,7 @@ export const NM_ERRORS = {
   RESERVED_018: "NM_E018",
   RESERVED_019: "NM_E019",
   INPUT_VALIDATION_FAILED: "NM_E020",
-  RESERVED_021: "NM_E021",
+  UNKNOWN_TOOL: "NM_E021",
   RESERVED_022: "NM_E022",
   RESERVED_023: "NM_E023",
   RESERVED_024: "NM_E024",
@@ -34,14 +34,61 @@ export const NM_ERRORS = {
 
 export type NMErrorCode = (typeof NM_ERRORS)[keyof typeof NM_ERRORS];
 
-export function formatMcpError(code: NMErrorCode, message: string, recovery: string): {
+export interface McpErrorShape {
   code: NMErrorCode;
   message: string;
   recovery: string;
-} {
+}
+
+export class NMError extends Error {
+  readonly code: NMErrorCode;
+  readonly recovery: string;
+
+  constructor(code: NMErrorCode, message: string, recovery: string) {
+    super(message);
+    this.name = "NMError";
+    this.code = code;
+    this.recovery = recovery;
+  }
+}
+
+export function formatMcpError(code: NMErrorCode, message: string, recovery: string): McpErrorShape {
   return {
     code,
     message,
     recovery,
+  };
+}
+
+export function createNMError(code: NMErrorCode, message: string, recovery: string): NMError {
+  return new NMError(code, message, recovery);
+}
+
+export function asMcpErrorShape(error: unknown, fallback: McpErrorShape): McpErrorShape {
+  if (error instanceof NMError) {
+    return formatMcpError(error.code, error.message, error.recovery);
+  }
+
+  if (error instanceof Error && error.message.trim()) {
+    return formatMcpError(fallback.code, error.message, fallback.recovery);
+  }
+
+  return fallback;
+}
+
+export function formatMcpErrorText(summary: string, error: McpErrorShape): string {
+  return `❌ ${summary}\nCode: ${error.code}\nMessage: ${error.message}\nRecovery: ${error.recovery}`;
+}
+
+export function mcpErrorResult(summary: string, error: McpErrorShape): {
+  content: Array<{ type: "text"; text: string }>;
+  isError: true;
+} {
+  return {
+    content: [{
+      type: "text",
+      text: formatMcpErrorText(summary, error),
+    }],
+    isError: true,
   };
 }

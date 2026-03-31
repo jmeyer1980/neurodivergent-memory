@@ -9,6 +9,8 @@
 - Configurable memory cap and eviction policies via:
   - `NEURODIVERGENT_MEMORY_MAX`
   - `NEURODIVERGENT_MEMORY_EVICTION` (`lru`, `access_frequency`, `district_priority`)
+- Structured MCP error helpers with stable `Code` / `Message` / `Recovery` text blocks for tool failures
+- Structured Pino info logging for write-path operations (`store`, `update`, `delete`, `connect`, `import`)
 
 ### ⚠️ Breaking Change
 
@@ -19,6 +21,7 @@
 - Persistence path resolution now honors explicit env overrides (`NEURODIVERGENT_MEMORY_DIR`, `NEURODIVERGENT_MEMORY_FILE`) and automatically reuses existing snapshots from the `node` user home directory, preventing empty-memory startups when container home paths differ
 - Docker named volume at `/data` is now pre-created with `node` ownership in the image, preventing EACCES errors when no bind-mount ownership is set
 - Docker examples updated to use explicit `/data` data directory and document per-project isolation with cross-platform path guidance
+- Tool handlers now normalize known failures to the NM_E taxonomy instead of returning inconsistent plain-text error messages
 
 ## [0.1.8] - 2026-03-28
 
