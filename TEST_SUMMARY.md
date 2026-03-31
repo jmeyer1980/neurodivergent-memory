@@ -72,7 +72,8 @@ Method:
 | 5000 | 2.18 | 459.8 | 24.74 | 2.87 | 0.50 |
 | 10000 | 4.01 | 249.2 | 67.37 | 14.16 | 0.70 |
 
-Artifacts:
+Baseline artifacts (committed, not overwritten by default):
 
-- Raw benchmark JSON: `benchmark-results/memory-benchmark-baseline.json`
-- Markdown benchmark report: `benchmark-results/memory-benchmark-baseline.md`
+- Raw benchmark JSON baseline (committed file): `benchmark-results/memory-benchmark-baseline.json`
+- Markdown benchmark report baseline (committed file): `benchmark-results/memory-benchmark-baseline.md`
+  These paths refer to the committed baseline artifacts for the run described above; local benchmark runs may write results to different filenames or locations.
