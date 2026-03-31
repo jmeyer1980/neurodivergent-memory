@@ -1152,13 +1152,34 @@ function normalizeToolError(error: unknown, fallback: McpErrorShape): McpErrorSh
   return asMcpErrorShape(error, fallback);
 }
 
-function logToolFailure(toolName: string, error: McpErrorShape): void {
-  logger.warn({ toolName, code: error.code }, "Tool request failed");
+function logToolFailure(toolName: string, error: McpErrorShape, originalError?: unknown): void {
+  const logPayload: Record<string, unknown> = {
+    toolName,
+    code: error.code,
+  };
+
+  if (error.message) {
+    logPayload.message = error.message;
+  }
+
+  if (originalError && originalError !== error) {
+    if (originalError instanceof Error) {
+      logPayload.originalError = {
+        name: originalError.name,
+        message: originalError.message,
+        stack: originalError.stack,
+      };
+    } else {
+      logPayload.originalError = originalError;
+    }
+  }
+
+  logger.warn(logPayload, "Tool request failed");
 }
 
 function toolErrorResult(toolName: string, summary: string, error: unknown, fallback: McpErrorShape) {
   const normalizedError = normalizeToolError(error, fallback);
-  logToolFailure(toolName, normalizedError);
+  logToolFailure(toolName, normalizedError, error);
   return mcpErrorResult(summary, normalizedError);
 }
 
