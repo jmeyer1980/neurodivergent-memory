@@ -14,6 +14,7 @@
 - Async write serialization via mutex to prevent concurrent mutation races under multi-agent load
 - Bounded mutating write queue with backpressure signaling (`NEURODIVERGENT_MEMORY_QUEUE_DEPTH`, `NM_E010`)
 - WIP saturation guardrail warning for in-progress practical tasks (`NEURODIVERGENT_MEMORY_WIP_LIMIT`, `NM_E011`)
+- Development branch release-candidate pipeline that publishes the same npm package name as prereleases (`0.x.x-rc.N`, dist-tag `rc`) and pushes Docker tags `rc-0.x.x` plus per-run `rc-0.x.x-rc.N`
 
 ### ⚠️ Breaking Change
 
@@ -25,6 +26,10 @@
 - Docker named volume at `/data` is now pre-created with `node` ownership in the image, preventing EACCES errors when no bind-mount ownership is set
 - Docker examples updated to use explicit `/data` data directory and document per-project isolation with cross-platform path guidance
 - Tool handlers now normalize known failures to the NM_E taxonomy instead of returning inconsistent plain-text error messages
+
+### Documentation
+
+- Updated roadmap and architecture planning documents to reflect v0.2.0 progress status (persistence, concurrency safety, and structured logging complete; loop telemetry and benchmark baseline pending)
 
 ## [0.1.8] - 2026-03-28
 

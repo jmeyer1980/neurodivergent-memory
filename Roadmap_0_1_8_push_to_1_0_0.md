@@ -39,6 +39,14 @@ For full details see [[Release Notes]].
 
 > *Theme: Make the foundation trustworthy before building on it. Observe before acting.*
 
+**Progress Snapshot (2026-03-31)**
+
+- ✅ Persistence hardening delivered (WAL replay/compaction, startup telemetry, configurable storage path and eviction policy)
+- ✅ Concurrency safety delivered (async write mutex, bounded write queue backpressure, WIP saturation warning)
+- ✅ Structured logging and error taxonomy delivered (Pino write-path logs, NM_E001+ responses with Code/Message/Recovery)
+- ⏳ Loop telemetry observe-only counters pending (repetition, similarity, ping-pong)
+- ⏳ Performance baseline pending (1k/5k/10k benchmark publication)
+
 **Persistence Hardening**
 
 - Replace single-file atomic write with a write-ahead log (WAL) pattern — append operations to a journal, compact on startup
@@ -72,6 +80,12 @@ For full details see [[Release Notes]].
 - Add a benchmark suite: store throughput, BM25 search latency at 1k/5k/10k memories, graph traversal depth
 - Publish benchmark results in the wiki as a regression baseline
 - Document memory growth rate under typical agent workloads
+
+**Suggested Next Execution Order**
+
+1. Loop Telemetry (Issue #18)
+2. Performance Baseline (Issue #19)
+3. Agent identity and contextual retrieval extensions (v0.3.0 prep)
 
 ---
 

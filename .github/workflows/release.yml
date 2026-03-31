@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - release
+      - development
     tags:
       - v*
   workflow_dispatch:
@@ -126,6 +127,190 @@ jobs:
           subject-digest: ${{ steps.docker_build.outputs.digest }}
           push-to-registry: true
           create-storage-record: false
+
+  rc_release:
+    if: github.ref == 'refs/heads/development'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: write
+      id-token: write
+      attestations: write
+      artifact-metadata: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          registry-url: https://registry.npmjs.org
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Compute RC version and tag names
+        id: rc_meta
+        run: |
+          base_version="$(node -p "require('./package.json').version")"
+          rc_version="${base_version}-rc.${GITHUB_RUN_NUMBER}"
+          release_tag="rc-${rc_version}"
+          moving_tag="rc-${base_version}"
+
+          npm version "$rc_version" --no-git-tag-version
+
+          echo "base_version=$base_version" >> "$GITHUB_OUTPUT"
+          echo "rc_version=$rc_version" >> "$GITHUB_OUTPUT"
+          echo "release_tag=$release_tag" >> "$GITHUB_OUTPUT"
+          echo "moving_tag=$moving_tag" >> "$GITHUB_OUTPUT"
+
+      - name: Build package
+        run: npm run build
+
+      - name: Pack npm artifact
+        id: pack
+        run: |
+          tarball="$(npm pack | tail -n 1)"
+          echo "tarball=$tarball" >> "$GITHUB_OUTPUT"
+          sha256sum "$tarball" > checksums.txt
+
+      - name: Attest npm package tarball
+        id: package_attest
+        uses: actions/attest@v4
+        with:
+          subject-path: ${{ steps.pack.outputs.tarball }}
+
+      - name: Publish RC package to npm
+        run: |
+          version="$(node -p "require('./package.json').version")"
+
+          if npm view "neurodivergent-memory@$version" version >/dev/null 2>&1; then
+            echo "neurodivergent-memory@$version already exists on npm; skipping publish."
+            exit 0
+          fi
+
+          set +e
+          publish_log="$(mktemp)"
+          npm publish "${{ steps.pack.outputs.tarball }}" --provenance --access public --tag rc 2> >(tee "$publish_log" >&2)
+          status=$?
+          set -e
+
+          if [ "$status" -ne 0 ] && grep -q "EOTP" "$publish_log"; then
+            echo "::error::npm publish failed with EOTP (2FA challenge). Use an npm Automation token for NPM_TOKEN (recommended), or configure npm Trusted Publishing for this repo."
+          fi
+
+          exit "$status"
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v4
+        with:
+          username: twgbellok
+          password: ${{ secrets.DOCKER_TOKEN }}
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Compute Docker metadata
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: |
+            ${{ env.IMAGE_NAME }}
+            ${{ env.GHCR_IMAGE_NAME }}
+          flavor: |
+            latest=false
+          tags: |
+            type=raw,value=${{ steps.rc_meta.outputs.moving_tag }}
+            type=raw,value=${{ steps.rc_meta.outputs.release_tag }}
+            type=sha
+
+      - name: Build and push container image
+        id: docker_build
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          platforms: linux/amd64,linux/arm64
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          annotations: ${{ steps.meta.outputs.annotations }}
+          provenance: mode=max
+          sbom: true
+
+      - name: Update Docker Hub description
+        uses: peter-evans/dockerhub-description@v4
+        with:
+          username: twgbellok
+          password: ${{ secrets.DOCKER_TOKEN }}
+          repository: twgbellok/neurodivergent-memory
+          readme-filepath: ./README.md
+
+      - name: Attest container image
+        id: image_attest
+        uses: actions/attest@v4
+        with:
+          subject-name: ${{ env.IMAGE_NAME }}
+          subject-digest: ${{ steps.docker_build.outputs.digest }}
+          push-to-registry: true
+          create-storage-record: false
+
+      - name: Collect attestation bundles
+        run: |
+          cp "${{ steps.package_attest.outputs.bundle-path }}" npm-package.attestation.json
+          cp "${{ steps.image_attest.outputs.bundle-path }}" docker-image.attestation.json
+
+      - name: Create RC release notes
+        run: |
+          cat > release-notes.md <<'EOF'
+          ## Release Candidate
+
+          This is an automated development branch release candidate and may be unstable.
+
+          - Branch: development
+          - Base version: ${{ steps.rc_meta.outputs.base_version }}
+          - RC version: ${{ steps.rc_meta.outputs.rc_version }}
+          - npm install: npm install neurodivergent-memory@${{ steps.rc_meta.outputs.rc_version }}
+          - npm dist-tag: rc
+          - Docker tags:
+            - ${{ steps.rc_meta.outputs.moving_tag }}
+            - ${{ steps.rc_meta.outputs.release_tag }}
+
+          Use with caution for validation and early integration testing only.
+          EOF
+
+      - name: Create or update RC GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "${{ steps.rc_meta.outputs.release_tag }}" >/dev/null 2>&1; then
+            gh release upload "${{ steps.rc_meta.outputs.release_tag }}" \
+              "${{ steps.pack.outputs.tarball }}" \
+              checksums.txt \
+              npm-package.attestation.json \
+              docker-image.attestation.json \
+              --clobber
+            gh release edit "${{ steps.rc_meta.outputs.release_tag }}" --prerelease --notes-file release-notes.md
+          else
+            gh release create "${{ steps.rc_meta.outputs.release_tag }}" \
+              "${{ steps.pack.outputs.tarball }}" \
+              checksums.txt \
+              npm-package.attestation.json \
+              docker-image.attestation.json \
+              --prerelease \
+              --notes-file release-notes.md
+          fi
 
   release:
     if: startsWith(github.ref, 'refs/tags/v')
