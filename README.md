@@ -175,7 +175,7 @@ For agents: if memories appear missing after upgrading the container, use `impor
 Pushes to the `development` branch publish **release candidates** using the same npm package name (`neurodivergent-memory`) and container repositories.
 
 - npm prereleases are published as `0.x.x-rc.N` with npm dist-tag `rc`.
-- Docker images are published with `rc-0.x.x` (moving) and `rc-0.x.x-rc.N` (immutable per run) tags.
+- Docker images are published with `rc-0.x.x` (moving) and `rc-0.x.x-rc.N` tags, where `N` is derived from the GitHub Actions run number (unique per CI run number but may be republished if the same workflow run is reattempted).
 - GitHub releases for RC builds are marked as **pre-release**.
 
 These builds are intentionally less stable than the research preview line and should be used only for validation and early integration testing.
