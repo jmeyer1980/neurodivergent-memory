@@ -170,6 +170,19 @@ For agents: if memories appear missing after upgrading the container, use `impor
 - GitHub Actions generates **artifact attestations** for the npm tarball and the pushed container image digest
 - Tagged releases upload the npm tarball, checksums, and attestation bundles as release assets
 
+## Error Contract
+
+Mutating and lookup tool failures are returned with a stable operator-facing shape embedded in the text response:
+
+```text
+❌ <summary>
+Code: NM_EXXX
+Message: Human-readable failure summary
+Recovery: Suggested next action
+```
+
+The leading summary line is contextual, while the `Code`/`Message`/`Recovery` block remains stable for operators to parse and search. This keeps MCP responses readable in chat clients while giving operators a stable code they can search in logs and release notes. Structured logs are written with Pino to stderr and include the same `code` field on known failure paths.
+
 ## Development
 
 Install dependencies:
