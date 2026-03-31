@@ -1,5 +1,12 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixed
+
+- Persistence path resolution now honors explicit env overrides and automatically reuses existing snapshots from common Docker home directories, preventing empty-memory startups when container home paths differ
+- Docker examples now use an explicit data directory and document how to isolate memory per project instead of sharing one global file unintentionally
+
 ## [0.1.8] - 2026-03-28
 
 ### ⚠️ Research Preview Release

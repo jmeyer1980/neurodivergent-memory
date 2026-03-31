@@ -121,6 +121,13 @@ Each memory can optionally carry:
 
 Memories are automatically persisted to `~/.neurodivergent-memory/memories.json` on every write. The graph is restored on server startup.
 
+For explicit control, set one of these environment variables:
+
+- `NEURODIVERGENT_MEMORY_DIR` to choose the directory that contains `memories.json`
+- `NEURODIVERGENT_MEMORY_FILE` to point at a specific snapshot file
+
+The server also checks common Docker home directories so older container mounts at either `/home/node/.neurodivergent-memory` or `/root/.neurodivergent-memory` continue to load existing data instead of silently starting empty.
+
 ## Release Security
 
 - GitHub Actions runs on **Node.js 20 LTS** for CI and release automation
@@ -180,8 +187,10 @@ For Docker:
         "run",
         "-i",
         "--rm",
+        "-e",
+        "NEURODIVERGENT_MEMORY_DIR=/data",
         "-v",
-        "neurodivergent-memory-data:/root/.nd-memory",
+        "neurodivergent-memory-data:/data",
         "docker.io/twgbellok/neurodivergent-memory:latest"
       ]
     }
@@ -216,11 +225,35 @@ Fully auto-approved tools:
         "run",
         "-i",
         "--rm",
+        "-e",
+        "NEURODIVERGENT_MEMORY_DIR=/data",
         "-v",
-        "neurodivergent-memory-data:/root/.nd-memory",
+        "neurodivergent-memory-data:/data",
         "docker.io/twgbellok/neurodivergent-memory:latest"
       ],
       "env": {}
+    }
+  }
+}
+```
+
+If you want per-project isolation instead of a shared global memory file, mount a project-specific host directory and keep the same container-side target:
+
+```json
+{
+  "mcpServers": {
+    "neurodivergent-memory": {
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "-e",
+        "NEURODIVERGENT_MEMORY_DIR=/data",
+        "-v",
+        "${workspaceFolder}\\.neurodivergent-memory:/data",
+        "docker.io/twgbellok/neurodivergent-memory:latest"
+      ]
     }
   }
 }
