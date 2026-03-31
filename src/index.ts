@@ -1788,26 +1788,37 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           hasTaskInProgressTags(tags);
 
         let wipWarning: string | undefined;
-        if (shouldCheckWipLimit) {
-          const existingInProgressTasks = findExistingInProgressTasks(agent_id);
-          if (existingInProgressTasks.length >= configuredWipLimit) {
-            wipWarning = buildWipGuardrailWarning(agent_id, existingInProgressTasks);
-            logger.warn(
-              {
-                toolName: "store_memory",
-                code: NM_ERRORS.WIP_LIMIT_EXCEEDED,
-                agentId: agent_id,
-                limit: configuredWipLimit,
-                currentInProgressCount: existingInProgressTasks.length,
-              },
-              "WIP guardrail warning emitted",
-            );
-          }
-        }
 
         const memory = await runMutatingTool(
           "store_memory",
-          () => memorySystem.storeMemory(content, district, tags, emotional_valence, intensity, agent_id, epistemic_status),
+          () => {
+            if (shouldCheckWipLimit) {
+              const existingInProgressTasks = findExistingInProgressTasks(agent_id);
+              if (existingInProgressTasks.length >= configuredWipLimit) {
+                wipWarning = buildWipGuardrailWarning(agent_id, existingInProgressTasks);
+                logger.warn(
+                  {
+                    toolName: "store_memory",
+                    code: NM_ERRORS.WIP_LIMIT_EXCEEDED,
+                    agentId: agent_id,
+                    limit: configuredWipLimit,
+                    currentInProgressCount: existingInProgressTasks.length,
+                  },
+                  "WIP guardrail warning emitted",
+                );
+              }
+            }
+
+            return memorySystem.storeMemory(
+              content,
+              district,
+              tags,
+              emotional_valence,
+              intensity,
+              agent_id,
+              epistemic_status,
+            );
+          },
         );
         const warningLine = wipWarning ? `\n${wipWarning}` : "";
         return {
