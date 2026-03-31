@@ -205,9 +205,50 @@ function startServer() {
   }
 
   async function stop() {
-    child.kill();
-    await new Promise(resolve => child.once("exit", resolve));
-    fs.rmSync(tempDir, { recursive: true, force: true });
+    const killTimeoutMs = 5000;
+
+    // Ensure we always attempt to clean up the temp directory.
+    try {
+      // If the child has already exited or been killed, just clean up.
+      if (child.exitCode !== null || child.killed) {
+        return;
+      }
+
+      // Attempt graceful shutdown first.
+      child.kill();
+
+      let exited = false;
+      const exitPromise = new Promise(resolve => {
+        child.once("exit", () => {
+          exited = true;
+          resolve();
+        });
+      });
+
+      // Wait for either process exit or a timeout.
+      await Promise.race([
+        exitPromise,
+        new Promise(resolve => setTimeout(resolve, killTimeoutMs)),
+      ]);
+
+      // If the process did not exit in time, escalate on non-Windows platforms.
+      if (!exited && process.platform !== "win32") {
+        try {
+          child.kill("SIGKILL");
+        } catch {
+          // Ignore errors from unsupported signals.
+        }
+        // Best-effort wait for the process to exit after SIGKILL.
+        await new Promise(resolve => child.once("exit", resolve));
+      }
+    } finally {
+      // Always attempt to remove the temporary directory.
+      try {
+        fs.rmSync(tempDir, { recursive: true, force: true });
+      } catch {
+        // Ignore cleanup errors.
+      }
+    }
   }
 
   return { callTool, stop, tempDir };
