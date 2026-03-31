@@ -405,23 +405,23 @@ The Inspector will provide a URL to access debugging tools in your browser.
 Here is an example copilot-instructions.md
 
 ```copilot-instructions.md
-# neurodivergent-memory — Agent Bootstrap Instructions
+# neurodivergent-memory — Agent Bootstrap Instructions (summary)
 
-This file is automatically read by GitHub Copilot and compatible agents at the start of every session.
-It replaces the need to fetch the governance memory (`memory_11`) before working with this MCP server.
+For the canonical and most up-to-date Copilot bootstrap instructions, see:
 
----
+- `.github/copilot-instructions.md` in this repository
 
-## What this server is
-
-`neurodivergent-memory` is a **Model Context Protocol (MCP) server** that stores and retrieves memories as a
-knowledge graph. It is designed for neurodivergent thinking patterns: non-linear, associative, tag-rich.
-
-Memories are organised into five **districts** (knowledge domains) and connected via bidirectional edges.
-Search uses **BM25 semantic ranking** — no embedding model or cloud LLM required.
+This appendix intentionally does not duplicate the full contents of that file to avoid drift between
+multiple copies of the same instructions.
 
 ---
 
+## What this server is (high level)
+
+`neurodivergent-memory` is a **Model Context Protocol (MCP) server** for working with a persistent, tag-rich
+knowledge-graph style memory system designed around neurodivergent, non-linear thinking patterns.
+
+---
 ## Canonical Tag Schema
 
 Always apply tags from the four namespaces below when calling `store_memory`.
