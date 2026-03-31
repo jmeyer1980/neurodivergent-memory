@@ -613,11 +613,58 @@ class NeurodivergentMemory {
   }
 
   private detectRepeatCandidate(content: string, agentId?: string): { memory: MemoryNPC; similarityScore: number } | undefined {
-    const recentCandidates = Object.values(this.memories)
-      .filter(memory => (agentId ? memory.agent_id === agentId : true))
-      .sort((a, b) => b.created.getTime() - a.created.getTime())
-      .slice(0, 10);
+    // Select the 10 most recently created memories for this agent (or globally) in O(N log k) with k=10,
+    // instead of sorting all memories (O(N log N)).
+    const candidates = Object.values(this.memories).filter(memory =>
+      agentId ? memory.agent_id === agentId : true,
+    );
 
+    const recentCandidates: MemoryNPC[] = [];
+    for (const memory of candidates) {
+      const createdTime = memory.created.getTime();
+
+      if (recentCandidates.length === 0) {
+        recentCandidates.push(memory);
+        continue;
+      }
+
+      // If we don't yet have 10 candidates, insert in sorted (descending created) position.
+      if (recentCandidates.length < 10) {
+        let inserted = false;
+        for (let i = 0; i < recentCandidates.length; i++) {
+          if (createdTime > recentCandidates[i].created.getTime()) {
+            recentCandidates.splice(i, 0, memory);
+            inserted = true;
+            break;
+          }
+        }
+        if (!inserted) {
+          recentCandidates.push(memory);
+        }
+        continue;
+      }
+
+      // We already have 10; only insert if this memory is newer than the oldest in the list.
+      const oldest = recentCandidates[recentCandidates.length - 1];
+      if (createdTime <= oldest.created.getTime()) {
+        continue;
+      }
+
+      let inserted = false;
+      for (let i = 0; i < recentCandidates.length; i++) {
+        if (createdTime > recentCandidates[i].created.getTime()) {
+          recentCandidates.splice(i, 0, memory);
+          inserted = true;
+          break;
+        }
+      }
+      if (inserted) {
+        // Trim back to 10 most recent
+        if (recentCandidates.length > 10) {
+          recentCandidates.length = 10;
+        }
+      }
+    }
     if (recentCandidates.length === 0) {
       return undefined;
     }
