@@ -2,10 +2,15 @@
 
 ## [Unreleased]
 
+### ⚠️ Breaking Change
+
+- **`/root/.neurodivergent-memory` mounts no longer found automatically.** The image runs as the `node` user which cannot read `/root`. Configs that previously mounted data at `/root/.neurodivergent-memory` will silently start empty. Migrate by re-mounting the same host volume at `/data` (with `NEURODIVERGENT_MEMORY_DIR=/data`) or at `/home/node/.neurodivergent-memory`. See the README for full recovery instructions.
+
 ### Fixed
 
-- Persistence path resolution now honors explicit env overrides and automatically reuses existing snapshots from common Docker home directories, preventing empty-memory startups when container home paths differ
-- Docker examples now use an explicit data directory and document how to isolate memory per project instead of sharing one global file unintentionally
+- Persistence path resolution now honors explicit env overrides (`NEURODIVERGENT_MEMORY_DIR`, `NEURODIVERGENT_MEMORY_FILE`) and automatically reuses existing snapshots from the `node` user home directory, preventing empty-memory startups when container home paths differ
+- Docker named volume at `/data` is now pre-created with `node` ownership in the image, preventing EACCES errors when no bind-mount ownership is set
+- Docker examples updated to use explicit `/data` data directory and document per-project isolation with cross-platform path guidance
 
 ## [0.1.8] - 2026-03-28
 

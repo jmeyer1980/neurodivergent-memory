@@ -45,13 +45,17 @@ test("ignores broken Windows HOME values inside Linux containers", () => {
     "linux",
   );
 
+  // /root is no longer scanned — the container runs as USER node which cannot read /root
   assert.deepEqual(candidates, [
     "/home/node/.neurodivergent-memory",
-    "/root/.neurodivergent-memory",
   ]);
 });
 
-test("falls back to legacy root mount when it contains the only snapshot", () => {
+// Regression for breaking change introduced in v0.1.9:
+// /root is no longer in LEGACY_CONTAINER_HOMES because USER node cannot read /root.
+// A snapshot that only exists at /root/.neurodivergent-memory is invisible to the resolver;
+// it falls back to the default home directory instead of silently returning stale data.
+test("does not find /root snapshot (breaking change: USER node cannot read /root)", () => {
   const existingPaths = new Set([
     "/root/.neurodivergent-memory/memories.json",
   ]);
@@ -65,7 +69,7 @@ test("falls back to legacy root mount when it contains the only snapshot", () =>
     pathExists: (candidatePath) => existingPaths.has(candidatePath),
   });
 
-  assert.equal(location.dir, "/root/.neurodivergent-memory");
-  assert.equal(location.file, "/root/.neurodivergent-memory/memories.json");
-  assert.equal(location.source, "existing snapshot");
+  // /root is not scanned, so resolver falls through to default home
+  assert.equal(location.dir, "/home/node/.neurodivergent-memory");
+  assert.equal(location.source, "default home directory");
 });

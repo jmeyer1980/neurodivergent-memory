@@ -4,7 +4,9 @@ import * as path from "path";
 
 const DEFAULT_DIR_NAME = ".neurodivergent-memory";
 const DEFAULT_FILE_NAME = "memories.json";
-const LEGACY_CONTAINER_HOMES = ["/home/node", "/root"];
+// /root is intentionally excluded: the image runs as USER node which cannot traverse /root.
+// Mounting data at /root/.neurodivergent-memory is a breaking change from pre-v0.1.9 configs.
+const LEGACY_CONTAINER_HOMES = ["/home/node"];
 
 export interface PersistenceLocation {
   dir: string;
