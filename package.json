@@ -34,6 +34,7 @@
   "scripts": {
     "build": "tsc && node -e \"require('fs').chmodSync('build/index.js', '755')\"",
     "test": "npm run build && node --test",
+    "benchmark": "npm run build && node benchmarks/memory-benchmark.mjs",
     "prepare": "npm run build",
     "watch": "tsc --watch",
     "inspector": "npx @modelcontextprotocol/inspector build/index.js"

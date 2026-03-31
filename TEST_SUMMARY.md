@@ -47,3 +47,32 @@ To keep this test valid for current server behavior:
 - Detailed report: `SMOKE_TEST_REPORT.md`
 - Narrative report: `EXPERIMENT_REPORT.md`
 - Raw interaction log: `test-results-full.jsonl`
+
+## Benchmark Baseline (2026-03-31)
+
+Environment:
+
+- Node: `v24.11.1`
+- Platform: `win32 10.0.26200 (x64)`
+- CPU: `Intel(R) Core(TM) i7-10870H CPU @ 2.20GHz` (16 logical cores)
+- Memory: `31.91 GB`
+- Commit: `69bdfac`
+
+Method:
+
+- Harness: `npm run benchmark`
+- Transport: end-to-end MCP stdio against `build/index.js`
+- Isolation: temp persistence directory per dataset run
+- Sizes: 1k / 5k / 10k memories
+- Measurements: `store_memory` throughput, `search_memories` latency, `list_memories` latency, `related_to` latency
+
+| Dataset | Store Avg ms | Store Throughput ops/s | Search p95 ms | List p95 ms | Related p95 ms |
+| ---- | ----: | ----: | ----: | ----: | ----: |
+| 1000 | 1.70 | 589.4 | 6.23 | 1.51 | 2.23 |
+| 5000 | 2.18 | 459.8 | 24.74 | 2.87 | 0.50 |
+| 10000 | 4.01 | 249.2 | 67.37 | 14.16 | 0.70 |
+
+Artifacts:
+
+- Raw benchmark JSON: `benchmark-results/memory-benchmark-baseline.json`
+- Markdown benchmark report: `benchmark-results/memory-benchmark-baseline.md`
