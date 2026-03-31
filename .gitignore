@@ -160,4 +160,3 @@ vite.config.ts.timestamp-*
 
 # developmental artifacts not in build
 development-artifacts/
-test-results.txt

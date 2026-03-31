@@ -51,9 +51,9 @@ This document defines the implementation sequence for roadmap milestones v0.2.0 
 | TASK-005 | Add async write mutex + queue in src/index.ts for all mutating operations (store/update/delete/connect/import). | ✅ | 2026-03-31 |
 | TASK-006 | Add config surface in src/index.ts for storage path env override and memory cap + eviction strategy enum (lru/access_frequency/district_priority). | ✅ | 2026-03-31 |
 | TASK-007 | Extend MCP input schemas in src/index.ts list-tools handler: store_memory/connect_memories/import_memories optional agent_id. | ✅ | 2026-03-29 |
-| TASK-008 | Add loop telemetry counters in src/index.ts for repeated writes, repeated reads, and ping-pong detection by district/agent pair. | ✅ | 2026-03-31 |
+| TASK-008 | Add loop telemetry counters in src/index.ts for repeated writes, repeated reads, and ping-pong detection by district/agent pair. |  |  |
 | TASK-009 | Extend memory_stats output in src/index.ts to include perAgent and loop telemetry summary blocks. | ✅ | 2026-03-29 |
-| TASK-010 | Add benchmark harness at `benchmarks/memory-benchmark.mjs` covering 1k/5k/10k search latency and write throughput. | ✅ | 2026-03-31 |
+| TASK-010 | Add benchmark harness skeleton at tests/benchmarks/memory-benchmark.ts covering 1k/5k/10k search latency and write throughput. |  |  |
 
 ### Implementation Phase 2
 
@@ -80,7 +80,7 @@ This document defines the implementation sequence for roadmap milestones v0.2.0 
 |------|-------------|-----------|------|
 | TASK-021 | Update README.md with new tool docs for distill_memory, register_district, context/recency retrieval, and agent_id fields. |  |  |
 | TASK-022 | Update CHANGELOG.md with explicit migration notes and compatibility guarantees for persisted snapshots. |  |  |
-| TASK-023 | Add wiki-aligned benchmark results section to SMOKE_TEST_REPORT.md and/or TEST_SUMMARY.md after benchmark run. | ✅ | 2026-03-31 |
+| TASK-023 | Add wiki-aligned benchmark results section to SMOKE_TEST_REPORT.md and/or TEST_SUMMARY.md after benchmark run. |  |  |
 | TASK-024 | Bump package.json version for v0.2.0 then v0.3.0, update server.json metadata consistently. |  |  |
 | TASK-025 | Execute full verification: npm run build, smoke scripts, benchmark scripts, and report outputs checked into tracked docs only. |  |  |
 

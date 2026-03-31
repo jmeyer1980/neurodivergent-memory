@@ -44,8 +44,8 @@ For full details see [[Release Notes]].
 - ✅ Persistence hardening delivered (WAL replay/compaction, startup telemetry, configurable storage path and eviction policy)
 - ✅ Concurrency safety delivered (async write mutex, bounded write queue backpressure, WIP saturation warning)
 - ✅ Structured logging and error taxonomy delivered (Pino write-path logs, NM_E001+ responses with Code/Message/Recovery)
-- ✅ Loop telemetry observe-only counters delivered (repetition, similarity, ping-pong, memory_stats loop telemetry block)
-- ✅ Performance baseline published (1k/5k/10k benchmark harness + baseline outputs in `benchmark-results/` and `TEST_SUMMARY.md`)
+- ⏳ Loop telemetry observe-only counters pending (repetition, similarity, ping-pong)
+- ⏳ Performance baseline pending (1k/5k/10k benchmark publication)
 
 **Persistence Hardening**
 
@@ -83,9 +83,9 @@ For full details see [[Release Notes]].
 
 **Suggested Next Execution Order**
 
-1. Project identifier support (Issue #28)
-2. Distillation and contextual retrieval prep (v0.3.0)
-3. Performance follow-up hardening only if regressions surface from the published baseline
+1. Loop Telemetry (Issue #18)
+2. Performance Baseline (Issue #19)
+3. Agent identity and contextual retrieval extensions (v0.3.0 prep)
 
 ---
 
