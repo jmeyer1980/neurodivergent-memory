@@ -1898,6 +1898,6 @@ async function main() {
 }
 
 main().catch((error) => {
-  console.error("Server error:", error);
+  logger.fatal({ err: error }, "Server failed to start");
   process.exit(1);
 });
