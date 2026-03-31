@@ -50,6 +50,28 @@ test("ping-pong detection increments after threshold transitions", async () => {
   assert.equal(result.pingPongCount, 3);
 });
 
+test("ping-pong detection only triggers on a new read-write transition", async () => {
+  const tracker = new LoopTelemetryTracker({
+    operationWindowSize: 20,
+    pingPongThreshold: 1,
+    repeatThreshold: 0.85,
+  });
+
+  const memory = createMemory({ id: "memory_99", district: "logical_analysis", agent_id: "alpha" });
+
+  tracker.recordRead(memory);
+  const transitionWrite = { ...memory, district: "creative_synthesis", agent_id: "beta" };
+  let result = tracker.recordWrite(transitionWrite);
+  assert.equal(result.pingPongDetected, true);
+  assert.equal(result.pingPongCount, 1);
+
+  // A write not preceded by a read should not trigger a new detection.
+  const nonTransitionWrite = { ...memory, district: "vigilant_monitoring", agent_id: "gamma" };
+  result = tracker.recordWrite(nonTransitionWrite);
+  assert.equal(result.pingPongDetected, false);
+  assert.equal(result.pingPongCount, 1);
+});
+
 test("summarize returns top candidates and last five high-similarity writes", async () => {
   const tracker = new LoopTelemetryTracker({
     operationWindowSize: 20,

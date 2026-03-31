@@ -23,6 +23,12 @@ interface OperationEvent {
   timestamp: string;
 }
 
+export interface LoopOperationIdentity {
+  memory_id: string;
+  district: string;
+  agent_id?: string;
+}
+
 export interface LoopTelemetrySummary {
   repeat_write_candidates: Array<{ id: string; name: string; repeat_write_count: number; last_similarity_score?: number }>;
   ping_pong_candidates: Array<{ id: string; name: string; ping_pong_counter: number }>;
@@ -46,27 +52,42 @@ export class LoopTelemetryTracker {
     return this.repeatThreshold;
   }
 
-  recordRead(memory: MemoryNPC): void {
+  recordRead(input: MemoryNPC | LoopOperationIdentity): void {
+    const identity = this.toOperationIdentity(input);
     this.appendOperation({
       op: "read",
-      memory_id: memory.id,
-      district: memory.district,
-      agent_id: memory.agent_id,
+      memory_id: identity.memory_id,
+      district: identity.district,
+      agent_id: identity.agent_id,
       timestamp: new Date().toISOString(),
     });
   }
 
-  recordWrite(memory: MemoryNPC): { pingPongDetected: boolean; pingPongCount: number } {
+  recordWrite(input: MemoryNPC | LoopOperationIdentity): { pingPongDetected: boolean; pingPongCount: number } {
+    const identity = this.toOperationIdentity(input);
     this.appendOperation({
       op: "write",
-      memory_id: memory.id,
-      district: memory.district,
-      agent_id: memory.agent_id,
+      memory_id: identity.memory_id,
+      district: identity.district,
+      agent_id: identity.agent_id,
       timestamp: new Date().toISOString(),
     });
 
-    const pingPongCount = this.countReadWriteTransitions(memory.id);
-    const pingPongDetected = pingPongCount >= this.pingPongThreshold;
+    const perMemory = this.operations.filter(event => event.memory_id === identity.memory_id);
+    const pingPongCount = this.countReadWriteTransitions(identity.memory_id);
+
+    // Only emit detection when the current write creates a new read->write transition
+    // and that transition count reaches threshold.
+    const previous = perMemory.length >= 2 ? perMemory[perMemory.length - 2] : undefined;
+    const current = perMemory.length >= 1 ? perMemory[perMemory.length - 1] : undefined;
+    const currentTransition =
+      previous !== undefined &&
+      current !== undefined &&
+      previous.op === "read" &&
+      current.op === "write" &&
+      this.identityKey(previous) !== this.identityKey(current);
+    const pingPongDetected = currentTransition && pingPongCount >= this.pingPongThreshold;
+
     return { pingPongDetected, pingPongCount };
   }
 
@@ -134,5 +155,17 @@ export class LoopTelemetryTracker {
 
   private identityKey(event: OperationEvent): string {
     return `${event.district}::${event.agent_id ?? "unassigned"}`;
+  }
+
+  private toOperationIdentity(input: MemoryNPC | LoopOperationIdentity): LoopOperationIdentity {
+    if ("id" in input) {
+      return {
+        memory_id: input.id,
+        district: input.district,
+        agent_id: input.agent_id,
+      };
+    }
+
+    return input;
   }
 }

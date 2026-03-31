@@ -38,7 +38,7 @@
 
 This patch release forces Docker Hub README refresh on each release and upgrades Node to 24.
 
-### - - Fixed
+### Fixed
 
 - Added `peter-evans/dockerhub-description@v4` step in the release workflow so Docker Hub description is always updated from `README.md`
 - Added `workflow_dispatch` to allow manual README refresh runs when needed
@@ -52,7 +52,7 @@ This patch release forces Docker Hub README refresh on each release and upgrades
 
 This patch release fixes README GIF and link rendering on Docker Hub and GHCR.
 
-### -- Fixed
+### Fixed
 
 - Replaced relative GIF paths with absolute `raw.githubusercontent.com` URLs so Docker Hub and GHCR can render the preview image and link correctly
 
@@ -60,7 +60,7 @@ This patch release fixes README GIF and link rendering on Docker Hub and GHCR.
 
 This patch release disables Docker `latest` tag generation to comply with immutable tag settings.
 
-### --- Fixed
+### Fixed
 
 - Release workflow now sets Docker metadata `flavor.latest=false` to avoid pushing immutable `latest`
 - Prevents Docker Hub publish failures caused by immutable floating tags
@@ -69,7 +69,7 @@ This patch release disables Docker `latest` tag generation to comply with immuta
 
 This patch release fixes Docker Hub immutable tag conflict and publishes to the official MCP Registry.
 
-### -Added
+### Added
 
 - Added `mcpName` field to `package.json` required for MCP Registry namespace verification (`io.github.jmeyer1980/neurodivergent-memory`)
 - Added `server.json` for publishing to the official MCP Registry at `registry.modelcontextprotocol.io`
@@ -78,7 +78,7 @@ This patch release fixes Docker Hub immutable tag conflict and publishes to the 
 
 This patch release improves package visibility in GitHub by publishing container images to GitHub Container Registry (GHCR) in addition to Docker Hub.
 
-### -Fixed
+### Fixed
 
 - Release workflow now publishes container images to `ghcr.io/jmeyer1980/neurodivergent-memory`
 - Added `packages: write` workflow permissions required for GHCR publishing
@@ -88,7 +88,7 @@ This patch release improves package visibility in GitHub by publishing container
 
 This patch release focuses on release pipeline reliability and publish resiliency.
 
-### - Fixed
+### Fixed
 
 - Release workflow now syncs `release` with `main` on version tag pushes
 - Release workflow now skips npm publish when the version already exists on npm (rerun-safe)
@@ -98,7 +98,7 @@ This patch release focuses on release pipeline reliability and publish resilienc
 
 This is a **research preview release**. We are actively developing core features and stability improvements toward 1.0.0. Expect API changes, feature additions, and potential breaking changes in minor version updates during the 0.x series.
 
-### - Added
+### Added
 
 - **Core MCP Server**: Knowledge graph storage and retrieval via Model Context Protocol stdio transport
 - **5-District Architecture**: Semantic organization across logical_analysis, emotional_processing, practical_execution, vigilant_monitoring, and creative_synthesis domains
@@ -110,7 +110,7 @@ This is a **research preview release**. We are actively developing core features
 - **Docker Support**: Multi-platform container images (amd64, arm64) with provenance and SBOM attestation
 - **Security**: npm provenance publishing, container attestation, checksums on release artifacts
 
-### ---- Fixed
+### Fixed
 
 - Test script hang prevention: Added adaptive timeout and completion detection to prevent indefinite stdin blocking
 

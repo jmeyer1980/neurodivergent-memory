@@ -64,6 +64,11 @@ interface StoreMemoryResult {
   ping_pong_count?: number;
 }
 
+interface OperationActorContext {
+  district?: string;
+  agent_id?: string;
+}
+
 /**
  * BM25 index for semantic ranking of memories.
  * k1 and b are standard Okapi BM25 parameters.
@@ -692,8 +697,12 @@ class NeurodivergentMemory {
     };
   }
 
-  private applyPingPongTelemetry(memory: MemoryNPC): { detected: boolean; count: number } {
-    const pingPong = this.loopTelemetry.recordWrite(memory);
+  private applyPingPongTelemetry(memory: MemoryNPC, actor?: OperationActorContext): { detected: boolean; count: number } {
+    const pingPong = this.loopTelemetry.recordWrite({
+      memory_id: memory.id,
+      district: actor?.district ?? memory.district,
+      agent_id: actor?.agent_id ?? memory.agent_id,
+    });
     if (pingPong.pingPongDetected) {
       memory.ping_pong_counter = (memory.ping_pong_counter ?? 0) + 1;
       this.appendWalEntry("update", {
@@ -804,8 +813,7 @@ class NeurodivergentMemory {
         },
       });
 
-      const pingPongResult = this.applyPingPongTelemetry({
-        ...matchedMemory,
+      const pingPongResult = this.applyPingPongTelemetry(matchedMemory, {
         district,
         agent_id,
       });
@@ -874,18 +882,26 @@ class NeurodivergentMemory {
     };
   }
 
-  retrieveMemory(id: string): MemoryNPC | null {
+  retrieveMemory(id: string, actor?: OperationActorContext): MemoryNPC | null {
     const memory = this.memories[id];
     if (memory) {
       memory.last_accessed = new Date();
       memory.access_count++;
-      this.loopTelemetry.recordRead(memory);
+      this.loopTelemetry.recordRead({
+        memory_id: memory.id,
+        district: actor?.district ?? memory.district,
+        agent_id: actor?.agent_id ?? memory.agent_id,
+      });
       this.scheduleSave();
     }
     return memory || null;
   }
 
-  updateMemory(id: string, updates: Partial<Pick<MemoryNPC, "content" | "tags" | "emotional_valence" | "intensity" | "district" | "epistemic_status">>): MemoryNPC {
+  updateMemory(
+    id: string,
+    updates: Partial<Pick<MemoryNPC, "content" | "tags" | "emotional_valence" | "intensity" | "district" | "epistemic_status">>,
+    actor?: OperationActorContext,
+  ): MemoryNPC {
     const memory = this.memories[id];
     if (!memory) {
       throw createNMError(
@@ -905,7 +921,7 @@ class NeurodivergentMemory {
 
     this.appendWalEntry("update", { memory_id: id, updates });
     this.applyMemoryUpdates(id, updates);
-    this.applyPingPongTelemetry(this.memories[id]);
+    this.applyPingPongTelemetry(this.memories[id], actor);
     this.scheduleSave();
     logger.info({ operation: "update", memoryId: id, changedFields: Object.keys(updates).sort() }, "Updated memory");
 
@@ -1732,6 +1748,15 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             memory_id: {
               type: "string",
               description: "ID of the memory to retrieve"
+            },
+            district: {
+              type: "string",
+              enum: ["logical_analysis", "emotional_processing", "practical_execution", "vigilant_monitoring", "creative_synthesis"],
+              description: "Optional caller district for loop telemetry attribution"
+            },
+            agent_id: {
+              type: "string",
+              description: "Optional caller agent identifier for loop telemetry attribution"
             }
           },
           required: ["memory_id"]
@@ -1772,6 +1797,15 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
               minimum: 0,
               maximum: 1,
               description: "New intensity (optional)"
+            },
+            actor_district: {
+              type: "string",
+              enum: ["logical_analysis", "emotional_processing", "practical_execution", "vigilant_monitoring", "creative_synthesis"],
+              description: "Optional caller district for loop telemetry attribution"
+            },
+            agent_id: {
+              type: "string",
+              description: "Optional caller agent identifier for loop telemetry attribution"
             },
             epistemic_status: {
               type: "string",
@@ -2079,8 +2113,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     }
 
     case "retrieve_memory": {
-      const { memory_id } = request.params.arguments as any;
-      const memory = memorySystem.retrieveMemory(memory_id);
+      const { memory_id, district, agent_id } = request.params.arguments as any;
+      const memory = memorySystem.retrieveMemory(memory_id, { district, agent_id });
 
       if (!memory) {
         return toolErrorResult(
@@ -2108,7 +2142,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     }
 
     case "update_memory": {
-      const { memory_id, content, district, tags, emotional_valence, intensity, epistemic_status } = request.params.arguments as any;
+      const { memory_id, content, district, tags, emotional_valence, intensity, epistemic_status, actor_district, agent_id } = request.params.arguments as any;
       try {
       const updates: Partial<Pick<MemoryNPC, "content" | "tags" | "emotional_valence" | "intensity" | "district" | "epistemic_status">> = {};
         if (content !== undefined) updates.content = content;
@@ -2120,7 +2154,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
         const memory = await runMutatingTool(
           "update_memory",
-          () => memorySystem.updateMemory(memory_id, updates),
+          () => memorySystem.updateMemory(memory_id, updates, { district: actor_district, agent_id }),
         );
         return {
           content: [{
