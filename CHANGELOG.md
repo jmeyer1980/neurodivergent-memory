@@ -7,8 +7,8 @@
 - Write-ahead journal persistence (`memories.json.wal.jsonl`) for mutating operations with startup replay and compaction into `memories.json`
 - Startup recovery telemetry indicating whether boot path was `fresh`, `snapshot-load`, or `wal-replay`
 - Configurable memory cap and eviction policies via:
-	- `NEURODIVERGENT_MEMORY_MAX`
-	- `NEURODIVERGENT_MEMORY_EVICTION` (`lru`, `access_frequency`, `district_priority`)
+  - `NEURODIVERGENT_MEMORY_MAX`
+  - `NEURODIVERGENT_MEMORY_EVICTION` (`lru`, `access_frequency`, `district_priority`)
 
 ### ⚠️ Breaking Change
 
