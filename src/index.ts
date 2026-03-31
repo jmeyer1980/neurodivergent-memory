@@ -1245,7 +1245,7 @@ class NeurodivergentMemory {
     for (const m of allMems) perDistrict[m.district] = (perDistrict[m.district] ?? 0) + 1;
     for (const m of allMems) {
       const agentKey = m.agent_id ?? "unassigned";
-      const projectKey = m.project_id ?? "unset";
+      const projectKey = m.project_id ?? "(unset)";
       perAgent[agentKey] = (perAgent[agentKey] ?? 0) + 1;
       perProject[projectKey] = (perProject[projectKey] ?? 0) + 1;
       const rawStatus = m.epistemic_status ?? "unset";
