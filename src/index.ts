@@ -375,9 +375,15 @@ class NeurodivergentMemory {
         return false;
       }
       case "import": {
-        const serializedMemories = Array.isArray(entry.payload.memories)
-          ? (entry.payload.memories as PersistedMemoryNPC[])
-          : [];
+        // Support both new and legacy WAL import payload shapes:
+        // - New format:  payload.memories: PersistedMemoryNPC[]
+        // - Legacy format: payload.entries: PersistedMemoryNPC[] (+ optional agent_id)
+        let serializedMemories: PersistedMemoryNPC[] = [];
+        if (Array.isArray((entry as any).payload?.memories)) {
+          serializedMemories = (entry.payload.memories as PersistedMemoryNPC[]) ?? [];
+        } else if (Array.isArray((entry as any).payload?.entries)) {
+          serializedMemories = (entry.payload.entries as PersistedMemoryNPC[]) ?? [];
+        }
         let mutated = false;
         for (const rawMemory of serializedMemories) {
           const memory = this.deserializeMemory(rawMemory);
