@@ -155,13 +155,15 @@ jobs:
         id: rc_meta
         run: |
           base_version="$(node -p "require('./package.json').version")"
-          rc_version="${base_version}-rc.${GITHUB_RUN_NUMBER}"
+          run_sequence="${GITHUB_RUN_NUMBER}.${GITHUB_RUN_ATTEMPT}"
+          rc_version="${base_version}-rc.${run_sequence}"
           release_tag="rc-${rc_version}"
           moving_tag="rc-${base_version}"
 
           npm version "$rc_version" --no-git-tag-version
 
           echo "base_version=$base_version" >> "$GITHUB_OUTPUT"
+          echo "run_sequence=$run_sequence" >> "$GITHUB_OUTPUT"
           echo "rc_version=$rc_version" >> "$GITHUB_OUTPUT"
           echo "release_tag=$release_tag" >> "$GITHUB_OUTPUT"
           echo "moving_tag=$moving_tag" >> "$GITHUB_OUTPUT"
@@ -281,6 +283,7 @@ jobs:
 
           - Branch: development
           - Base version: ${{ steps.rc_meta.outputs.base_version }}
+          - Run sequence: ${{ steps.rc_meta.outputs.run_sequence }} (run_number.run_attempt)
           - RC version: ${{ steps.rc_meta.outputs.rc_version }}
           - npm install: npm install neurodivergent-memory@${{ steps.rc_meta.outputs.rc_version }}
           - npm dist-tag: rc

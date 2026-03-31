@@ -14,7 +14,7 @@
 - Async write serialization via mutex to prevent concurrent mutation races under multi-agent load
 - Bounded mutating write queue with backpressure signaling (`NEURODIVERGENT_MEMORY_QUEUE_DEPTH`, `NM_E010`)
 - WIP saturation guardrail warning for in-progress practical tasks (`NEURODIVERGENT_MEMORY_WIP_LIMIT`, `NM_E011`)
-- Development branch release-candidate pipeline that publishes the same npm package name as prereleases (`0.x.x-rc.N`, dist-tag `rc`) and pushes Docker tags `rc-0.x.x` plus `rc-0.x.x-rc.N` derived from the GitHub Actions run number
+- Development branch release-candidate pipeline that publishes the same npm package name as prereleases (`0.x.x-rc.N`, dist-tag `rc`, where `N=run_number.run_attempt`) and pushes Docker tags `rc-0.x.x` plus `rc-0.x.x-rc.N` derived from the same run sequence
 
 ### ⚠️ Breaking Change
 
