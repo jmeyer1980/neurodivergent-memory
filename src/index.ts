@@ -198,6 +198,16 @@ interface WalEntry {
 
 type EvictionPolicy = "lru" | "access_frequency" | "district_priority";
 
+interface ImportMemoryEntry {
+  content: string;
+  district: string;
+  tags?: string[];
+  emotional_valence?: number;
+  intensity?: number;
+  agent_id?: string;
+  epistemic_status?: EpistemicStatus;
+}
+
 /**
  * Neurodivergent memory system
  */
@@ -238,8 +248,8 @@ class NeurodivergentMemory {
 
     if (replayResult.applied > 0) {
       try {
-        fs.writeFileSync(this.walFile, "", "utf-8");
         this.saveToDiskSync();
+        fs.writeFileSync(this.walFile, "", "utf-8");
       } catch (err) {
         logger.error({ code: NM_ERRORS.PERSISTENCE_WRITE_FAILED, walFile: this.walFile, err }, "Failed to compact snapshot after WAL replay");
       }
@@ -295,8 +305,10 @@ class NeurodivergentMemory {
         try {
           const entry = JSON.parse(trimmed) as WalEntry;
           this.walSeq = Math.max(this.walSeq, (entry.seq ?? 0) + 1);
-          this.applyWalEntry(entry);
-          applied++;
+          const mutated = this.applyWalEntry(entry);
+          if (mutated) {
+            applied++;
+          }
         } catch (err) {
           skipped++;
           logger.warn({ code: NM_ERRORS.WAL_CORRUPT_ENTRY, walFile: this.walFile, entryPreview: trimmed.slice(0, 120), err }, "Skipping corrupt WAL entry");
@@ -324,29 +336,33 @@ class NeurodivergentMemory {
     }
   }
 
-  private applyWalEntry(entry: WalEntry): void {
+  private applyWalEntry(entry: WalEntry): boolean {
     switch (entry.op) {
       case "store": {
         const mem = this.deserializeMemory(entry.payload.memory as PersistedMemoryNPC);
-        this.ensureCapacityForInsert();
-        this.insertMemory(mem);
-        this.nextMemoryId = Math.max(this.nextMemoryId, this.parseMemoryNumericId(mem.id) + 1);
-        break;
+        this.ensureCapacityForInsert(false);
+        const inserted = this.insertMemory(mem);
+        if (inserted) {
+          this.nextMemoryId = Math.max(this.nextMemoryId, this.parseMemoryNumericId(mem.id) + 1);
+        }
+        return inserted;
       }
       case "update": {
         const memoryId = String(entry.payload.memory_id ?? "");
         const updates = (entry.payload.updates ?? {}) as Partial<Pick<MemoryNPC, "content" | "tags" | "emotional_valence" | "intensity" | "district" | "epistemic_status">>;
         if (this.memories[memoryId]) {
           this.applyMemoryUpdates(memoryId, updates);
+          return true;
         }
-        break;
+        return false;
       }
       case "delete": {
         const memoryId = String(entry.payload.memory_id ?? "");
         if (this.memories[memoryId]) {
           this.deleteMemoryInternal(memoryId);
+          return true;
         }
-        break;
+        return false;
       }
       case "connect": {
         const memoryId1 = String(entry.payload.memory_id_1 ?? "");
@@ -354,21 +370,28 @@ class NeurodivergentMemory {
         const bidirectional = Boolean(entry.payload.bidirectional ?? true);
         if (this.memories[memoryId1] && this.memories[memoryId2]) {
           this.connectMemoriesInternal(memoryId1, memoryId2, bidirectional);
+          return true;
         }
-        break;
+        return false;
       }
       case "import": {
-        const entries = Array.isArray(entry.payload.entries) ? entry.payload.entries : [];
-        const defaultAgentId = typeof entry.payload.agent_id === "string" ? entry.payload.agent_id : undefined;
-        this.importMemoriesInternal(
-          entries as Array<{ content: string; district: string; tags?: string[]; emotional_valence?: number; intensity?: number; agent_id?: string; epistemic_status?: EpistemicStatus }>,
-          defaultAgentId,
-          true,
-        );
-        break;
+        const serializedMemories = Array.isArray(entry.payload.memories)
+          ? (entry.payload.memories as PersistedMemoryNPC[])
+          : [];
+        let mutated = false;
+        for (const rawMemory of serializedMemories) {
+          const memory = this.deserializeMemory(rawMemory);
+          this.ensureCapacityForInsert(false);
+          const inserted = this.insertMemory(memory);
+          if (inserted) {
+            this.nextMemoryId = Math.max(this.nextMemoryId, this.parseMemoryNumericId(memory.id) + 1);
+            mutated = true;
+          }
+        }
+        return mutated;
       }
       default:
-        break;
+        return false;
     }
   }
 
@@ -458,16 +481,16 @@ class NeurodivergentMemory {
     return "lru";
   }
 
-  private ensureCapacityForInsert(): void {
+  private ensureCapacityForInsert(recordWal = true): void {
     if (!this.maxMemories) return;
     while (Object.keys(this.memories).length >= this.maxMemories) {
-      const evictedId = this.evictOneMemory();
+      const evictedId = this.evictOneMemory(recordWal);
       if (!evictedId) return;
       logger.info({ memoryId: evictedId, evictionPolicy: this.evictionPolicy, maxMemories: this.maxMemories }, "Evicted memory due to cap");
     }
   }
 
-  private evictOneMemory(): string | undefined {
+  private evictOneMemory(recordWal = true): string | undefined {
     const all = Object.values(this.memories);
     if (all.length === 0) return undefined;
 
@@ -500,6 +523,9 @@ class NeurodivergentMemory {
     }
 
     if (!candidate) return undefined;
+    if (recordWal) {
+      this.appendWalEntry("delete", { memory_id: candidate.id, reason: "eviction" });
+    }
     this.deleteMemoryInternal(candidate.id);
     return candidate.id;
   }
@@ -509,17 +535,18 @@ class NeurodivergentMemory {
     return Number.isFinite(numericPart) ? numericPart : 0;
   }
 
-  private insertMemory(memory: MemoryNPC): void {
+  private insertMemory(memory: MemoryNPC): boolean {
     if (!this.districts[memory.district]) {
       const valid = Object.keys(this.districts).join(", ");
       logger.warn({ memoryId: memory.id, district: memory.district, validDistricts: valid }, "Skipping memory with unknown district during load");
-      return;
+      return false;
     }
     this.memories[memory.id] = memory;
     if (!this.districts[memory.district].memories.includes(memory.id)) {
       this.districts[memory.district].memories.push(memory.id);
     }
     this.bm25.addDocument(memory.id, this.documentText(memory));
+    return true;
   }
 
   private documentText(memory: MemoryNPC): string {
@@ -990,24 +1017,28 @@ class NeurodivergentMemory {
    * Returns the list of newly created memory IDs.
    */
   importMemories(entries: Array<{ content: string; district: string; tags?: string[]; emotional_valence?: number; intensity?: number; agent_id?: string; epistemic_status?: EpistemicStatus }>, default_agent_id?: string): string[] {
-    this.appendWalEntry("import", { entries, agent_id: default_agent_id });
-    const ids = this.importMemoriesInternal(entries, default_agent_id, false);
+    const materialized = this.materializeImportMemories(entries, default_agent_id);
+    this.appendWalEntry("import", { memories: materialized.map(mem => this.serializeMemory(mem)) });
+    for (const memory of materialized) {
+      this.ensureCapacityForInsert();
+      this.insertMemory(memory);
+    }
     this.scheduleSave();
-    return ids;
+    return materialized.map(mem => mem.id);
   }
 
-  private importMemoriesInternal(
-    entries: Array<{ content: string; district: string; tags?: string[]; emotional_valence?: number; intensity?: number; agent_id?: string; epistemic_status?: EpistemicStatus }>,
+  private materializeImportMemories(
+    entries: ImportMemoryEntry[],
     default_agent_id?: string,
-    fromWalReplay = false,
-  ): string[] {
-    const ids: string[] = [];
+  ): MemoryNPC[] {
+    let nextId = this.nextMemoryId;
+    const memories: MemoryNPC[] = [];
     for (const entry of entries) {
       if (!this.districts[entry.district]) {
         throw new Error(`Unknown district: ${entry.district}`);
       }
 
-      const id = `memory_${this.nextMemoryId++}`;
+      const id = `memory_${nextId++}`;
       const archetype = this.districts[entry.district].archetype;
       const name = this.generateMemoryName(archetype, entry.content);
       const now = new Date();
@@ -1029,15 +1060,10 @@ class NeurodivergentMemory {
         intensity: entry.intensity ?? 0.5,
         epistemic_status: entry.epistemic_status,
       };
-
-      this.ensureCapacityForInsert();
-      this.insertMemory(memory);
-      if (!fromWalReplay) {
-        // no-op: WAL already written by public importMemories caller
-      }
-      ids.push(memory.id);
+      memories.push(memory);
     }
-    return ids;
+    this.nextMemoryId = nextId;
+    return memories;
   }
 }
 
