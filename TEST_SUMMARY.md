@@ -16,6 +16,7 @@ Smoke test: PASS
 ## Functional Coverage
 
 Validated in this run:
+
 - Memory creation across all five districts
 - Canonical tagging and listing
 - BM25 search and filtered retrieval
@@ -38,6 +39,7 @@ Validated in this run:
 ## Harness Maintenance Completed
 
 To keep this test valid for current server behavior:
+
 - Updated memory IDs from `mem_*` to `memory_*`
 - Updated `update_memory` payload fields to current schema
 - Updated scenario references from v0.1.1/Node 20 to v0.1.8/Node 24
@@ -56,7 +58,7 @@ Environment:
 - Platform: `win32 10.0.26200 (x64)`
 - CPU: `Intel(R) Core(TM) i7-10870H CPU @ 2.20GHz` (16 logical cores)
 - Memory: `31.91 GB`
-- Commit: `69bdfac`
+- Commit: `54e44ad`
 
 Method:
 
@@ -64,13 +66,13 @@ Method:
 - Transport: end-to-end MCP stdio against `build/index.js`
 - Isolation: temp persistence directory per dataset run
 - Sizes: 1k / 5k / 10k memories
-- Measurements: `store_memory` throughput, `search_memories` latency, `list_memories` latency, `related_to` latency
+- Measurements: 100 sampled `store_memory` writes near each dataset tier, 100-query `search_memories` latency, 100-query `list_memories` latency, and `traverse_from` latency at depths 2/3/5 over a connected 500-memory graph
 
-| Dataset | Store Avg ms | Store Throughput ops/s | Search p95 ms | List p95 ms | Related p95 ms |
-| ---- | ----: | ----: | ----: | ----: | ----: |
-| 1000 | 1.70 | 589.4 | 6.23 | 1.51 | 2.23 |
-| 5000 | 2.18 | 459.8 | 24.74 | 2.87 | 0.50 |
-| 10000 | 4.01 | 249.2 | 67.37 | 14.16 | 0.70 |
+| Dataset | Measured Writes | Store Throughput ops/s | Search p95 ms | List p95 ms | Traverse d2 p95 ms | Traverse d3 p95 ms | Traverse d5 p95 ms |
+| ---- | ----: | ----: | ----: | ----: | ----: | ----: | ----: |
+| 1000 | 100 | 654.1 | 5.39 | 1.02 | 0.40 | 0.45 | 0.38 |
+| 5000 | 100 | 260.5 | 27.99 | 3.24 | 0.43 | 0.39 | 0.37 |
+| 10000 | 100 | 175.4 | 71.97 | 8.58 | 0.49 | 0.43 | 0.58 |
 
 Baseline artifacts (committed, not overwritten by default):
 

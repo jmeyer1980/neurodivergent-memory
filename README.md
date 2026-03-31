@@ -241,11 +241,20 @@ npm run benchmark
 The benchmark:
 
 - Uses an isolated temp persistence directory so it does not mutate your local memory graph.
-- Measures `store_memory` throughput plus `search_memories`, `list_memories`, and `related_to` latency at 1k, 5k, and 10k memories.
+- Seeds each dataset tier, then measures `store_memory` throughput across 100 writes at the target tier.
+- Measures `search_memories` and `list_memories` latency over 100 iterations at 1k, 5k, and 10k memories.
+- Measures `traverse_from` latency at depths 2, 3, and 5 on a connected graph of 500 memories.
+- Prints the structured JSON report to stdout for automation-friendly capture.
 - Writes run-specific outputs to timestamped files under `benchmark-results/`.
 - Also writes rolling latest aliases:
   - `benchmark-results/memory-benchmark-latest.json`
   - `benchmark-results/memory-benchmark-latest.md`
+
+There is also a convenience alias:
+
+```bash
+npm run bench
+```
 
 The committed baseline is intended as a relative regression reference for RC vs stable comparisons, not as a universal absolute performance guarantee across machines.
 
@@ -254,6 +263,7 @@ To intentionally refresh the committed baseline files in place:
 ```bash
 npm run benchmark -- --update-baseline
 ```
+
 ## Development
 
 Install dependencies:
@@ -405,23 +415,23 @@ The Inspector will provide a URL to access debugging tools in your browser.
 Here is an example copilot-instructions.md
 
 ```copilot-instructions.md
-# neurodivergent-memory — Agent Bootstrap Instructions (summary)
+# neurodivergent-memory — Agent Bootstrap Instructions
 
-For the canonical and most up-to-date Copilot bootstrap instructions, see:
-
-- `.github/copilot-instructions.md` in this repository
-
-This appendix intentionally does not duplicate the full contents of that file to avoid drift between
-multiple copies of the same instructions.
+This file is automatically read by GitHub Copilot and compatible agents at the start of every session.
+It replaces the need to fetch the governance memory (`memory_11`) before working with this MCP server.
 
 ---
 
-## What this server is (high level)
+## What this server is
 
-`neurodivergent-memory` is a **Model Context Protocol (MCP) server** for working with a persistent, tag-rich
-knowledge-graph style memory system designed around neurodivergent, non-linear thinking patterns.
+`neurodivergent-memory` is a **Model Context Protocol (MCP) server** that stores and retrieves memories as a
+knowledge graph. It is designed for neurodivergent thinking patterns: non-linear, associative, tag-rich.
+
+Memories are organised into five **districts** (knowledge domains) and connected via bidirectional edges.
+Search uses **BM25 semantic ranking** — no embedding model or cloud LLM required.
 
 ---
+
 ## Canonical Tag Schema
 
 Always apply tags from the four namespaces below when calling `store_memory`.
