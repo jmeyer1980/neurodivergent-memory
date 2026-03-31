@@ -183,6 +183,22 @@ Recovery: Suggested next action
 
 The leading summary line is contextual, while the `Code`/`Message`/`Recovery` block remains stable for operators to parse and search. This keeps MCP responses readable in chat clients while giving operators a stable code they can search in logs and release notes. Structured logs are written with Pino to stderr and include the same `code` field on known failure paths.
 
+## Concurrency Safety
+
+Mutating tools are serialized through an async mutex to prevent concurrent write races when multiple agents call the server at the same time.
+
+Write queue behavior:
+
+- Pending write operations are bounded by `NEURODIVERGENT_MEMORY_QUEUE_DEPTH` (default: `50`).
+- When the queue is full, mutating tools return `NM_E010` with a retry-oriented recovery message.
+- Queue high-water/clear transitions are logged with structured Pino warnings.
+
+WIP guardrail behavior:
+
+- `store_memory` checks practical in-progress task saturation per `agent_id` when task tags include in-progress markers.
+- The cap is controlled by `NEURODIVERGENT_MEMORY_WIP_LIMIT` (default: `1`; set `0` to disable).
+- Exceeding the cap emits a warning line in the tool response and logs `NM_E011` for operator visibility.
+
 ## Development
 
 Install dependencies:

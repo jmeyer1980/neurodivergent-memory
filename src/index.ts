@@ -24,6 +24,7 @@ import {
 import * as fs from "fs";
 import { logger } from "./core/logger.js";
 import { resolvePersistenceLocation } from "./core/persistence.js";
+import { AsyncMutex } from "./core/async-mutex.js";
 import {
   NM_ERRORS,
   asMcpErrorShape,
@@ -1148,6 +1149,121 @@ class NeurodivergentMemory {
 // Global memory system instance
 const memorySystem = new NeurodivergentMemory();
 
+const DEFAULT_WRITE_QUEUE_DEPTH = 50;
+const DEFAULT_WIP_LIMIT = 1;
+const writeMutex = new AsyncMutex();
+const configuredWriteQueueDepth = parseIntegerEnv(
+  process.env.NEURODIVERGENT_MEMORY_QUEUE_DEPTH,
+  DEFAULT_WRITE_QUEUE_DEPTH,
+  (value) => value > 0,
+);
+const configuredWipLimit = parseIntegerEnv(
+  process.env.NEURODIVERGENT_MEMORY_WIP_LIMIT,
+  DEFAULT_WIP_LIMIT,
+  (value) => value >= 0,
+);
+
+let pendingWriteQueueDepth = 0;
+let queueBackpressureActive = false;
+
+function parseIntegerEnv(
+  rawValue: string | undefined,
+  fallback: number,
+  validator: (value: number) => boolean,
+): number {
+  if (!rawValue || !rawValue.trim()) {
+    return fallback;
+  }
+
+  const parsed = Number.parseInt(rawValue, 10);
+  if (!Number.isFinite(parsed) || !validator(parsed)) {
+    return fallback;
+  }
+
+  return parsed;
+}
+
+function normalizeTag(tag: string): string {
+  return tag.trim().toLowerCase().replace(/[\s-]+/g, "_");
+}
+
+function hasTaskInProgressTags(tags: string[] = []): boolean {
+  const normalizedTags = new Set(tags.map(normalizeTag));
+
+  const hasTaskTag =
+    normalizedTags.has("kind:task") ||
+    normalizedTags.has("type:task") ||
+    normalizedTags.has("task");
+
+  const hasInProgressTag =
+    normalizedTags.has("status:in_progress") ||
+    normalizedTags.has("state:in_progress") ||
+    normalizedTags.has("in_progress");
+
+  return hasTaskTag && hasInProgressTag;
+}
+
+function findExistingInProgressTasks(agentId: string): MemoryNPC[] {
+  return memorySystem
+    .getAllMemories()
+    .filter(memory =>
+      memory.district === "practical_execution" &&
+      memory.agent_id === agentId &&
+      hasTaskInProgressTags(memory.tags),
+    );
+}
+
+function buildWipGuardrailWarning(agentId: string, existingTasks: MemoryNPC[]): string {
+  const existingPreview = existingTasks
+    .slice(0, 3)
+    .map(memory => `${memory.id} (${memory.name})`)
+    .join(", ");
+
+  return `⚠️ WIP guardrail: agent ${agentId} already has ${existingTasks.length} in-progress practical task(s): ${existingPreview}. Consider completing or re-triaging before adding more in-progress work.`;
+}
+
+async function runMutatingTool<T>(toolName: string, operation: () => Promise<T> | T): Promise<T> {
+  if (pendingWriteQueueDepth >= configuredWriteQueueDepth) {
+    throw createNMError(
+      NM_ERRORS.WRITE_QUEUE_CAPACITY,
+      "Write queue is at capacity. Retry after a brief delay.",
+      "Wait for pending writes to drain, then retry the mutating call.",
+    );
+  }
+
+  pendingWriteQueueDepth += 1;
+  if (!queueBackpressureActive && pendingWriteQueueDepth >= configuredWriteQueueDepth) {
+    queueBackpressureActive = true;
+    logger.warn(
+      {
+        toolName,
+        code: NM_ERRORS.WRITE_QUEUE_CAPACITY,
+        queueDepth: pendingWriteQueueDepth,
+        queueCapacity: configuredWriteQueueDepth,
+      },
+      "Write queue high-water mark reached",
+    );
+  }
+
+  try {
+    return await writeMutex.runExclusive(operation);
+  } finally {
+    pendingWriteQueueDepth = Math.max(0, pendingWriteQueueDepth - 1);
+    if (queueBackpressureActive && pendingWriteQueueDepth < configuredWriteQueueDepth) {
+      queueBackpressureActive = false;
+      logger.warn(
+        {
+          toolName,
+          code: NM_ERRORS.WRITE_QUEUE_CAPACITY,
+          queueDepth: pendingWriteQueueDepth,
+          queueCapacity: configuredWriteQueueDepth,
+        },
+        "Write queue high-water mark cleared",
+      );
+    }
+  }
+}
+
 function normalizeToolError(error: unknown, fallback: McpErrorShape): McpErrorShape {
   return asMcpErrorShape(error, fallback);
 }
@@ -1661,11 +1777,39 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       const { content, district, tags = [], emotional_valence, intensity = 0.5, agent_id, epistemic_status } = request.params.arguments as any;
 
       try {
-        const memory = memorySystem.storeMemory(content, district, tags, emotional_valence, intensity, agent_id, epistemic_status);
+        const shouldCheckWipLimit =
+          configuredWipLimit > 0 &&
+          district === "practical_execution" &&
+          typeof agent_id === "string" &&
+          hasTaskInProgressTags(tags);
+
+        let wipWarning: string | undefined;
+        if (shouldCheckWipLimit) {
+          const existingInProgressTasks = findExistingInProgressTasks(agent_id);
+          if (existingInProgressTasks.length >= configuredWipLimit) {
+            wipWarning = buildWipGuardrailWarning(agent_id, existingInProgressTasks);
+            logger.warn(
+              {
+                toolName: "store_memory",
+                code: NM_ERRORS.WIP_LIMIT_EXCEEDED,
+                agentId: agent_id,
+                limit: configuredWipLimit,
+                currentInProgressCount: existingInProgressTasks.length,
+              },
+              "WIP guardrail warning emitted",
+            );
+          }
+        }
+
+        const memory = await runMutatingTool(
+          "store_memory",
+          () => memorySystem.storeMemory(content, district, tags, emotional_valence, intensity, agent_id, epistemic_status),
+        );
+        const warningLine = wipWarning ? `\n${wipWarning}` : "";
         return {
           content: [{
             type: "text",
-            text: `🧠 Stored memory "${memory.name}" in ${memorySystem.getAllDistricts().find(d => d.name.toLowerCase().replace(/\s+/g, '_') === district)?.name || district}\nID: ${memory.id}\nArchetype: ${memory.archetype}\nAgent: ${memory.agent_id ?? "unassigned"}\nEpistemic status: ${memory.epistemic_status ?? "unset"}`
+            text: `🧠 Stored memory "${memory.name}" in ${memorySystem.getAllDistricts().find(d => d.name.toLowerCase().replace(/\s+/g, '_') === district)?.name || district}\nID: ${memory.id}\nArchetype: ${memory.archetype}\nAgent: ${memory.agent_id ?? "unassigned"}\nEpistemic status: ${memory.epistemic_status ?? "unset"}${warningLine}`
           }]
         };
       } catch (error) {
@@ -1722,7 +1866,10 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         if (intensity !== undefined) updates.intensity = intensity;
         if (epistemic_status !== undefined) updates.epistemic_status = epistemic_status;
 
-        const memory = memorySystem.updateMemory(memory_id, updates);
+        const memory = await runMutatingTool(
+          "update_memory",
+          () => memorySystem.updateMemory(memory_id, updates),
+        );
         return {
           content: [{
             type: "text",
@@ -1746,7 +1893,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     case "delete_memory": {
       const { memory_id } = request.params.arguments as any;
       try {
-        memorySystem.deleteMemory(memory_id);
+        await runMutatingTool("delete_memory", () => memorySystem.deleteMemory(memory_id));
         return {
           content: [{ type: "text", text: `🗑️ Deleted memory ${memory_id}` }]
         };
@@ -1768,7 +1915,10 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       const { memory_id_1, memory_id_2, bidirectional = true, agent_id } = request.params.arguments as any;
 
       try {
-        memorySystem.connectMemories(memory_id_1, memory_id_2, bidirectional, agent_id);
+        await runMutatingTool(
+          "connect_memories",
+          () => memorySystem.connectMemories(memory_id_1, memory_id_2, bidirectional, agent_id),
+        );
         return {
           content: [{
             type: "text",
@@ -1921,7 +2071,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     case "import_memories": {
       const { entries, agent_id } = request.params.arguments as any;
       try {
-        const ids = memorySystem.importMemories(entries, agent_id);
+        const ids = await runMutatingTool("import_memories", () => memorySystem.importMemories(entries, agent_id));
         return {
           content: [{
             type: "text",
