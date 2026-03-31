@@ -44,14 +44,20 @@ function percentile(values, ratio) {
   return sorted[index];
 }
 
+function percentileFromSorted(sorted, ratio) {
+  if (sorted.length === 0) return 0;
+  const index = Math.min(sorted.length - 1, Math.max(0, Math.ceil(sorted.length * ratio) - 1));
+  return sorted[index];
+}
+
 function summarizeLatencies(values) {
   const sorted = [...values].sort((left, right) => left - right);
   const total = sorted.reduce((sum, value) => sum + value, 0);
   return {
     iterations: sorted.length,
     average_ms: sorted.length > 0 ? total / sorted.length : 0,
-    p50_ms: percentile(sorted, 0.5),
-    p95_ms: percentile(sorted, 0.95),
+    p50_ms: percentileFromSorted(sorted, 0.5),
+    p95_ms: percentileFromSorted(sorted, 0.95),
     min_ms: sorted[0] ?? 0,
     max_ms: sorted[sorted.length - 1] ?? 0,
   };
@@ -386,6 +392,9 @@ function buildMarkdownReport(results, environment) {
 }
 
 async function main() {
+  const cliArgs = new Set(process.argv.slice(2));
+  const updateBaseline = cliArgs.has("--update-baseline");
+
   fs.mkdirSync(OUTPUT_DIR, { recursive: true });
 
   const environment = {
@@ -409,14 +418,27 @@ async function main() {
     results,
   };
   const markdown = buildMarkdownReport(results, environment);
-  const jsonPath = path.join(OUTPUT_DIR, "memory-benchmark-baseline.json");
-  const markdownPath = path.join(OUTPUT_DIR, "memory-benchmark-baseline.md");
+  const runSuffix = new Date().toISOString().replace(/[:.]/g, "-");
+  const basename = updateBaseline ? "memory-benchmark-baseline" : `memory-benchmark-${runSuffix}`;
+  const jsonPath = path.join(OUTPUT_DIR, `${basename}.json`);
+  const markdownPath = path.join(OUTPUT_DIR, `${basename}.md`);
+  const latestJsonPath = path.join(OUTPUT_DIR, "memory-benchmark-latest.json");
+  const latestMarkdownPath = path.join(OUTPUT_DIR, "memory-benchmark-latest.md");
 
   fs.writeFileSync(jsonPath, `${JSON.stringify(payload, null, 2)}\n`, "utf8");
   fs.writeFileSync(markdownPath, markdown, "utf8");
 
+  if (!updateBaseline) {
+    fs.writeFileSync(latestJsonPath, `${JSON.stringify(payload, null, 2)}\n`, "utf8");
+    fs.writeFileSync(latestMarkdownPath, markdown, "utf8");
+  }
+
   process.stdout.write(`Benchmark JSON written to ${path.relative(process.cwd(), jsonPath)}\n`);
   process.stdout.write(`Benchmark Markdown written to ${path.relative(process.cwd(), markdownPath)}\n\n`);
+  if (!updateBaseline) {
+    process.stdout.write(`Latest JSON alias written to ${path.relative(process.cwd(), latestJsonPath)}\n`);
+    process.stdout.write(`Latest Markdown alias written to ${path.relative(process.cwd(), latestMarkdownPath)}\n\n`);
+  }
   process.stdout.write(markdown);
 }
 
