@@ -243,11 +243,17 @@ The benchmark:
 - Uses an isolated temp persistence directory so it does not mutate your local memory graph.
 - Measures `store_memory` throughput plus `search_memories`, `list_memories`, and `related_to` latency at 1k, 5k, and 10k memories.
 - Writes raw and Markdown outputs to:
-  - `benchmark-results/memory-benchmark-baseline.json`
-  - `benchmark-results/memory-benchmark-baseline.md`
+  - `benchmark-results/memory-benchmark-latest.json`
+  - `benchmark-results/memory-benchmark-latest.md`
 
 The committed baseline is intended as a relative regression reference for RC vs stable comparisons, not as a universal absolute performance guarantee across machines.
 
+To intentionally refresh the committed baseline, run the benchmark, then copy or rename:
+
+- `benchmark-results/memory-benchmark-latest.json` → `benchmark-results/memory-benchmark-baseline.json`
+- `benchmark-results/memory-benchmark-latest.md` → `benchmark-results/memory-benchmark-baseline.md`
+
+and commit the updated baseline files.
 ## Development
 
 Install dependencies:
