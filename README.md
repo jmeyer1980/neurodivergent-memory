@@ -80,15 +80,15 @@ Memories are organized by cognitive domain:
 
 - **`store_memory`** — Create new memory nodes with optional emotional valence and intensity
 - **`retrieve_memory`** — Fetch a specific memory by ID and increment access count
-- **`update_memory`** — Modify content, tags, district, emotional_valence, or intensity
+- **`update_memory`** — Modify content, tags, district, emotional_valence, intensity, or project attribution
 - **`delete_memory`** — Remove a memory and all its connections
 - **`connect_memories`** — Create bidirectional edges between memory nodes
-- **`search_memories`** — BM25-ranked semantic search with optional filters (district, tags, emotional valence, intensity, min_score)
+- **`search_memories`** — BM25-ranked semantic search with optional filters (district, project_id, tags, emotional valence, intensity, min_score)
 - **`traverse_from`** — Graph traversal up to N hops from a starting memory
 - **`related_to`** — Find memories by graph proximity + BM25 semantic blend
-- **`list_memories`** — Paginated listing with optional district/archetype filters
-- **`memory_stats`** — Aggregate statistics (totals, per-district counts, most-accessed, orphans)
-- **`import_memories`** — Bulk-seed memories from JSON array
+- **`list_memories`** — Paginated listing with optional district/archetype/project_id filters
+- **`memory_stats`** — Aggregate statistics (totals, per-district/per-project counts, most-accessed, orphans) with optional project scope
+- **`import_memories`** — Bulk-seed memories from JSON array, including mixed entries with and without project attribution
 
 ### Prompts
 
@@ -116,6 +116,16 @@ Each memory can optionally carry:
 
 - **emotional_valence** (-1 to 1) — Emotional charge or affective tone
 - **intensity** (0–1) — Mental energy or importance weight
+
+### Project Attribution and Scoped Retrieval
+
+Memories can optionally include a first-class `project_id` for attribution and scoped retrieval across multi-project graphs.
+
+- `project_id` is optional on writes (`store_memory`, `update_memory`, `import_memories`).
+- `search_memories`, `list_memories`, and `memory_stats` accept an optional `project_id` filter.
+- Stats now include a `perProject` breakdown.
+- Validation contract: `project_id` must match `^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$` (max length 64).
+- Invalid values return stable error code `NM_E020` with recovery guidance.
 
 ### Knowledge Graph Persistence
 
