@@ -1,7 +1,7 @@
 {
   "environment": {
-    "date": "2026-03-31T19:54:52.809Z",
-    "git_commit": "69bdfac",
+    "date": "2026-03-31T21:01:29.773Z",
+    "git_commit": "54e44ad",
     "node": "v24.11.1",
     "platform": "win32 10.0.26200 (x64)",
     "cpu_model": "Intel(R) Core(TM) i7-10870H CPU @ 2.20GHz",
@@ -11,40 +11,63 @@
   "results": [
     {
       "dataset_size": 1000,
-      "connected_sample_size": 1000,
+      "graph_benchmark_node_count": 500,
       "store": {
-        "total_duration_ms": 1696.6066,
-        "avg_ms_per_memory": 1.6966066,
-        "throughput_ops_per_sec": 589.4118294718411
+        "measured_write_count": 100,
+        "seeded_before_measurement": 900,
+        "total_duration_ms": 152.88660000000007,
+        "average_ms_per_memory": 1.5288660000000007,
+        "p50_ms": 1.4185,
+        "p95_ms": 2.061,
+        "max_ms": 2.3607,
+        "throughput_ops_per_sec": 654.0795596213138
       },
       "search_memories": {
-        "iterations": 25,
-        "average_ms": 4.60272,
-        "p50_ms": 4.1947,
-        "p95_ms": 6.2281,
-        "min_ms": 3.6115,
-        "max_ms": 12.6745
+        "iterations": 100,
+        "average_ms": 4.352496999999999,
+        "p50_ms": 4.0239,
+        "p95_ms": 5.388,
+        "min_ms": 3.2871,
+        "max_ms": 12.0203
       },
       "list_memories": {
-        "iterations": 15,
-        "average_ms": 1.0386933333333335,
-        "p50_ms": 1.0286,
-        "p95_ms": 1.51,
-        "min_ms": 0.7664,
-        "max_ms": 1.51
+        "iterations": 100,
+        "average_ms": 0.7271859999999998,
+        "p50_ms": 0.6678,
+        "p95_ms": 1.0167,
+        "min_ms": 0.5038,
+        "max_ms": 3.9695
       },
-      "related_to": {
-        "iterations": 20,
-        "average_ms": 0.87984,
-        "p50_ms": 0.4926,
-        "p95_ms": 2.2287,
-        "min_ms": 0.3289,
-        "max_ms": 5.7804
+      "traverse_from": {
+        "2": {
+          "iterations": 100,
+          "average_ms": 0.26757999999999993,
+          "p50_ms": 0.2391,
+          "p95_ms": 0.4039,
+          "min_ms": 0.1953,
+          "max_ms": 0.5029
+        },
+        "3": {
+          "iterations": 100,
+          "average_ms": 0.28178800000000004,
+          "p50_ms": 0.2557,
+          "p95_ms": 0.4522,
+          "min_ms": 0.2005,
+          "max_ms": 0.8125
+        },
+        "5": {
+          "iterations": 100,
+          "average_ms": 0.2766400000000001,
+          "p50_ms": 0.2532,
+          "p95_ms": 0.3789,
+          "min_ms": 0.2028,
+          "max_ms": 0.7359
+        }
       },
       "memory_stats_excerpt": [
         "📊 Memory Stats",
         "Total memories: 1000",
-        "Total connections: 999",
+        "Total connections: 499",
         "",
         "Per district:",
         "  logical_analysis: 200"
@@ -52,40 +75,63 @@
     },
     {
       "dataset_size": 5000,
-      "connected_sample_size": 1001,
+      "graph_benchmark_node_count": 500,
       "store": {
-        "total_duration_ms": 10875.2896,
-        "avg_ms_per_memory": 2.17505792,
-        "throughput_ops_per_sec": 459.7578716432526
+        "measured_write_count": 100,
+        "seeded_before_measurement": 4900,
+        "total_duration_ms": 383.94659999999976,
+        "average_ms_per_memory": 3.839466,
+        "p50_ms": 3.8188,
+        "p95_ms": 4.6531,
+        "max_ms": 4.9508,
+        "throughput_ops_per_sec": 260.45288589611175
       },
       "search_memories": {
-        "iterations": 25,
-        "average_ms": 21.917308000000002,
-        "p50_ms": 20.5809,
-        "p95_ms": 24.7397,
-        "min_ms": 17.9083,
-        "max_ms": 56.2163
+        "iterations": 100,
+        "average_ms": 22.978583999999998,
+        "p50_ms": 21.6281,
+        "p95_ms": 27.9892,
+        "min_ms": 18.3957,
+        "max_ms": 60.3955
       },
       "list_memories": {
-        "iterations": 15,
-        "average_ms": 2.2600199999999995,
-        "p50_ms": 2.2031,
-        "p95_ms": 2.8744,
-        "min_ms": 1.9481,
-        "max_ms": 2.8744
+        "iterations": 100,
+        "average_ms": 2.5047989999999998,
+        "p50_ms": 2.45,
+        "p95_ms": 3.2448,
+        "min_ms": 1.8847,
+        "max_ms": 3.9946
       },
-      "related_to": {
-        "iterations": 20,
-        "average_ms": 0.3869,
-        "p50_ms": 0.358,
-        "p95_ms": 0.4969,
-        "min_ms": 0.2852,
-        "max_ms": 0.6325
+      "traverse_from": {
+        "2": {
+          "iterations": 100,
+          "average_ms": 0.31090700000000004,
+          "p50_ms": 0.2931,
+          "p95_ms": 0.4273,
+          "min_ms": 0.2059,
+          "max_ms": 0.9841
+        },
+        "3": {
+          "iterations": 100,
+          "average_ms": 0.324399,
+          "p50_ms": 0.2694,
+          "p95_ms": 0.3911,
+          "min_ms": 0.1982,
+          "max_ms": 4.6167
+        },
+        "5": {
+          "iterations": 100,
+          "average_ms": 0.28615600000000013,
+          "p50_ms": 0.2754,
+          "p95_ms": 0.3652,
+          "min_ms": 0.2261,
+          "max_ms": 0.6171
+        }
       },
       "memory_stats_excerpt": [
         "📊 Memory Stats",
         "Total memories: 5000",
-        "Total connections: 1000",
+        "Total connections: 499",
         "",
         "Per district:",
         "  logical_analysis: 1000"
@@ -93,40 +139,63 @@
     },
     {
       "dataset_size": 10000,
-      "connected_sample_size": 1001,
+      "graph_benchmark_node_count": 500,
       "store": {
-        "total_duration_ms": 40120.5963,
-        "avg_ms_per_memory": 4.0120596299999995,
-        "throughput_ops_per_sec": 249.24853871127536
+        "measured_write_count": 100,
+        "seeded_before_measurement": 9900,
+        "total_duration_ms": 570.2623,
+        "average_ms_per_memory": 5.702623,
+        "p50_ms": 5.5412,
+        "p95_ms": 6.7836,
+        "max_ms": 12.6894,
+        "throughput_ops_per_sec": 175.3579010921816
       },
       "search_memories": {
-        "iterations": 25,
-        "average_ms": 57.462667999999994,
-        "p50_ms": 52.6949,
-        "p95_ms": 67.3703,
-        "min_ms": 46.3675,
-        "max_ms": 155.3572
+        "iterations": 100,
+        "average_ms": 55.115077000000014,
+        "p50_ms": 53.6293,
+        "p95_ms": 71.9661,
+        "min_ms": 42.4178,
+        "max_ms": 140.1877
       },
       "list_memories": {
-        "iterations": 15,
-        "average_ms": 6.00666,
-        "p50_ms": 5.7373,
-        "p95_ms": 14.1635,
-        "min_ms": 3.7315,
-        "max_ms": 14.1635
+        "iterations": 100,
+        "average_ms": 6.480101000000001,
+        "p50_ms": 6.5454,
+        "p95_ms": 8.583,
+        "min_ms": 3.9435,
+        "max_ms": 18.0012
       },
-      "related_to": {
-        "iterations": 20,
-        "average_ms": 0.36183000000000004,
-        "p50_ms": 0.3373,
-        "p95_ms": 0.6953,
-        "min_ms": 0.2407,
-        "max_ms": 0.775
+      "traverse_from": {
+        "2": {
+          "iterations": 100,
+          "average_ms": 0.309369,
+          "p50_ms": 0.2895,
+          "p95_ms": 0.4875,
+          "min_ms": 0.2334,
+          "max_ms": 0.5828
+        },
+        "3": {
+          "iterations": 100,
+          "average_ms": 0.30265200000000003,
+          "p50_ms": 0.2851,
+          "p95_ms": 0.4254,
+          "min_ms": 0.2233,
+          "max_ms": 0.5871
+        },
+        "5": {
+          "iterations": 100,
+          "average_ms": 0.41684599999999983,
+          "p50_ms": 0.3885,
+          "p95_ms": 0.5824,
+          "min_ms": 0.2415,
+          "max_ms": 0.7706
+        }
       },
       "memory_stats_excerpt": [
         "📊 Memory Stats",
         "Total memories: 10000",
-        "Total connections: 1000",
+        "Total connections: 499",
         "",
         "Per district:",
         "  logical_analysis: 2000"

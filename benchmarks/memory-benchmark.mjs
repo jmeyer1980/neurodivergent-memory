@@ -22,10 +22,12 @@ const TOPICS = [
   "throughput",
   "telemetry",
 ];
-const SEARCH_ITERATIONS = 25;
-const LIST_ITERATIONS = 15;
-const RELATED_ITERATIONS = 20;
-const CONNECTED_SAMPLE_LIMIT = 1000;
+const MEASURED_WRITE_ITERATIONS = 100;
+const SEARCH_ITERATIONS = 100;
+const LIST_ITERATIONS = 100;
+const TRAVERSAL_ITERATIONS = 100;
+const TRAVERSAL_DEPTHS = [2, 3, 5];
+const GRAPH_BENCHMARK_NODE_COUNT = 500;
 const PAGE_SIZE = 50;
 const OUTPUT_DIR = path.join(process.cwd(), "benchmark-results");
 
@@ -35,13 +37,6 @@ function nowNs() {
 
 function nsToMs(value) {
   return Number(value) / 1_000_000;
-}
-
-function percentile(values, ratio) {
-  if (values.length === 0) return 0;
-  const sorted = [...values].sort((left, right) => left - right);
-  const index = Math.min(sorted.length - 1, Math.max(0, Math.ceil(sorted.length * ratio) - 1));
-  return sorted[index];
 }
 
 function percentileFromSorted(sorted, ratio) {
@@ -265,18 +260,32 @@ async function benchmarkDataset(size) {
   const ids = [];
   const searchLatencies = [];
   const listLatencies = [];
-  const relatedLatencies = [];
+  const measuredStoreLatencies = [];
+  const traversalLatencies = new Map(TRAVERSAL_DEPTHS.map(depth => [depth, []]));
 
   try {
-    const storeStart = nowNs();
-    for (let index = 0; index < size; index += 1) {
+    const seedCountBeforeMeasurement = Math.max(0, size - MEASURED_WRITE_ITERATIONS);
+    for (let index = 0; index < seedCountBeforeMeasurement; index += 1) {
       const response = await server.callTool("store_memory", createMemoryPayload(index));
       assertSuccess(response, "store_memory");
       ids.push(extractMemoryId(extractText(response)));
     }
-    const storeDurationMs = nsToMs(nowNs() - storeStart);
 
-    const connectLimit = Math.min(Math.max(1, size - 1), CONNECTED_SAMPLE_LIMIT);
+    for (let index = seedCountBeforeMeasurement; index < size; index += 1) {
+      const start = nowNs();
+      const response = await server.callTool("store_memory", createMemoryPayload(index));
+      const durationMs = nsToMs(nowNs() - start);
+      assertSuccess(response, "store_memory");
+      ids.push(extractMemoryId(extractText(response)));
+      measuredStoreLatencies.push(durationMs);
+    }
+
+    const measuredStoreSummary = summarizeLatencies(measuredStoreLatencies);
+    const measuredStoreDurationMs = measuredStoreLatencies.reduce((sum, value) => sum + value, 0);
+    const measuredWriteCount = measuredStoreLatencies.length;
+
+    const graphNodeCount = Math.min(Math.max(1, GRAPH_BENCHMARK_NODE_COUNT), ids.length);
+    const connectLimit = Math.max(0, graphNodeCount - 1);
     for (let index = 1; index <= connectLimit; index += 1) {
       const response = await server.callTool("connect_memories", {
         memory_id_1: ids[index - 1],
@@ -291,8 +300,11 @@ async function benchmarkDataset(size) {
     assertSuccess(warmupSearch, "search_memories");
     const warmupList = await server.callTool("list_memories", { page: 1, page_size: PAGE_SIZE });
     assertSuccess(warmupList, "list_memories");
-    const warmupRelated = await server.callTool("related_to", { memory_id: ids[Math.min(connectLimit, ids.length - 1)] });
-    assertSuccess(warmupRelated, "related_to");
+    const warmupTraverse = await server.callTool("traverse_from", {
+      memory_id: ids[Math.min(connectLimit, ids.length - 1)],
+      depth: TRAVERSAL_DEPTHS[0],
+    });
+    assertSuccess(warmupTraverse, "traverse_from");
 
     for (let iteration = 0; iteration < SEARCH_ITERATIONS; iteration += 1) {
       const start = nowNs();
@@ -318,32 +330,44 @@ async function benchmarkDataset(size) {
       listLatencies.push(durationMs);
     }
 
-    for (let iteration = 0; iteration < RELATED_ITERATIONS; iteration += 1) {
-      const sourceId = ids[iteration % (connectLimit + 1)];
-      const start = nowNs();
-      const response = await server.callTool("related_to", {
-        memory_id: sourceId,
-        query: createSearchQuery(iteration),
-      });
-      const durationMs = nsToMs(nowNs() - start);
-      assertSuccess(response, "related_to");
-      relatedLatencies.push(durationMs);
+    for (const depth of TRAVERSAL_DEPTHS) {
+      const depthLatencies = traversalLatencies.get(depth);
+      for (let iteration = 0; iteration < TRAVERSAL_ITERATIONS; iteration += 1) {
+        const sourceId = ids[iteration % graphNodeCount];
+        const start = nowNs();
+        const response = await server.callTool("traverse_from", {
+          memory_id: sourceId,
+          depth,
+        });
+        const durationMs = nsToMs(nowNs() - start);
+        assertSuccess(response, "traverse_from");
+        depthLatencies.push(durationMs);
+      }
     }
 
     const statsResponse = await server.callTool("memory_stats", {});
     assertSuccess(statsResponse, "memory_stats");
 
+    const traversalSummary = Object.fromEntries(
+      TRAVERSAL_DEPTHS.map(depth => [depth, summarizeLatencies(traversalLatencies.get(depth))]),
+    );
+
     return {
       dataset_size: size,
-      connected_sample_size: connectLimit + 1,
+      graph_benchmark_node_count: graphNodeCount,
       store: {
-        total_duration_ms: storeDurationMs,
-        avg_ms_per_memory: storeDurationMs / size,
-        throughput_ops_per_sec: size / (storeDurationMs / 1000),
+        measured_write_count: measuredWriteCount,
+        seeded_before_measurement: seedCountBeforeMeasurement,
+        total_duration_ms: measuredStoreDurationMs,
+        average_ms_per_memory: measuredStoreSummary.average_ms,
+        p50_ms: measuredStoreSummary.p50_ms,
+        p95_ms: measuredStoreSummary.p95_ms,
+        max_ms: measuredStoreSummary.max_ms,
+        throughput_ops_per_sec: measuredWriteCount / (measuredStoreDurationMs / 1000),
       },
       search_memories: summarizeLatencies(searchLatencies),
       list_memories: summarizeLatencies(listLatencies),
-      related_to: summarizeLatencies(relatedLatencies),
+      traverse_from: traversalSummary,
       memory_stats_excerpt: extractText(statsResponse).split("\n").slice(0, 6),
     };
   } finally {
@@ -364,13 +388,13 @@ function buildMarkdownReport(results, environment) {
     "",
     "These measurements are end-to-end MCP stdio timings against the built server in an isolated temp persistence directory.",
     "",
-    "| Dataset | Store Avg ms | Store Throughput ops/s | Search p95 ms | List p95 ms | Related p95 ms |",
-    "| --- | ---: | ---: | ---: | ---: | ---: |",
+    "| Dataset | Measured Writes | Store Throughput ops/s | Search p95 ms | List p95 ms | Traverse d2 p95 ms | Traverse d3 p95 ms | Traverse d5 p95 ms |",
+    "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
   ];
 
   for (const result of results) {
     lines.push(
-      `| ${result.dataset_size} | ${formatMs(result.store.avg_ms_per_memory)} | ${formatOps(result.store.throughput_ops_per_sec)} | ${formatMs(result.search_memories.p95_ms)} | ${formatMs(result.list_memories.p95_ms)} | ${formatMs(result.related_to.p95_ms)} |`,
+      `| ${result.dataset_size} | ${result.store.measured_write_count} | ${formatOps(result.store.throughput_ops_per_sec)} | ${formatMs(result.search_memories.p95_ms)} | ${formatMs(result.list_memories.p95_ms)} | ${formatMs(result.traverse_from[2].p95_ms)} | ${formatMs(result.traverse_from[3].p95_ms)} | ${formatMs(result.traverse_from[5].p95_ms)} |`,
     );
   }
 
@@ -378,13 +402,18 @@ function buildMarkdownReport(results, environment) {
 
   for (const result of results) {
     lines.push(`### ${result.dataset_size} memories`, "");
+    lines.push(`- Seeded before measurement: ${result.store.seeded_before_measurement}`);
+    lines.push(`- Measured store writes: ${result.store.measured_write_count}`);
     lines.push(`- Store total duration: ${formatMs(result.store.total_duration_ms)} ms`);
-    lines.push(`- Store average per memory: ${formatMs(result.store.avg_ms_per_memory)} ms`);
+    lines.push(`- Store average per memory: ${formatMs(result.store.average_ms_per_memory)} ms`);
+    lines.push(`- Store p50/p95/max: ${formatMs(result.store.p50_ms)} / ${formatMs(result.store.p95_ms)} / ${formatMs(result.store.max_ms)} ms`);
     lines.push(`- Store throughput: ${formatOps(result.store.throughput_ops_per_sec)} ops/s`);
     lines.push(`- Search avg/p50/p95/max: ${formatMs(result.search_memories.average_ms)} / ${formatMs(result.search_memories.p50_ms)} / ${formatMs(result.search_memories.p95_ms)} / ${formatMs(result.search_memories.max_ms)} ms`);
     lines.push(`- List avg/p50/p95/max: ${formatMs(result.list_memories.average_ms)} / ${formatMs(result.list_memories.p50_ms)} / ${formatMs(result.list_memories.p95_ms)} / ${formatMs(result.list_memories.max_ms)} ms`);
-    lines.push(`- Related avg/p50/p95/max: ${formatMs(result.related_to.average_ms)} / ${formatMs(result.related_to.p50_ms)} / ${formatMs(result.related_to.p95_ms)} / ${formatMs(result.related_to.max_ms)} ms`);
-    lines.push(`- Connected sample size for graph benchmark: ${result.connected_sample_size}`);
+    for (const depth of TRAVERSAL_DEPTHS) {
+      lines.push(`- Traverse depth ${depth} avg/p50/p95/max: ${formatMs(result.traverse_from[depth].average_ms)} / ${formatMs(result.traverse_from[depth].p50_ms)} / ${formatMs(result.traverse_from[depth].p95_ms)} / ${formatMs(result.traverse_from[depth].max_ms)} ms`);
+    }
+    lines.push(`- Connected graph benchmark nodes: ${result.graph_benchmark_node_count}`);
     lines.push("");
   }
 
@@ -427,18 +456,14 @@ async function main() {
 
   fs.writeFileSync(jsonPath, `${JSON.stringify(payload, null, 2)}\n`, "utf8");
   fs.writeFileSync(markdownPath, markdown, "utf8");
-
-  if (!updateBaseline) {
-    fs.writeFileSync(latestJsonPath, `${JSON.stringify(payload, null, 2)}\n`, "utf8");
-    fs.writeFileSync(latestMarkdownPath, markdown, "utf8");
-  }
+  fs.writeFileSync(latestJsonPath, `${JSON.stringify(payload, null, 2)}\n`, "utf8");
+  fs.writeFileSync(latestMarkdownPath, markdown, "utf8");
 
   process.stdout.write(`Benchmark JSON written to ${path.relative(process.cwd(), jsonPath)}\n`);
   process.stdout.write(`Benchmark Markdown written to ${path.relative(process.cwd(), markdownPath)}\n\n`);
-  if (!updateBaseline) {
-    process.stdout.write(`Latest JSON alias written to ${path.relative(process.cwd(), latestJsonPath)}\n`);
-    process.stdout.write(`Latest Markdown alias written to ${path.relative(process.cwd(), latestMarkdownPath)}\n\n`);
-  }
+  process.stdout.write(`Latest JSON alias written to ${path.relative(process.cwd(), latestJsonPath)}\n`);
+  process.stdout.write(`Latest Markdown alias written to ${path.relative(process.cwd(), latestMarkdownPath)}\n\n`);
+  process.stdout.write(`${JSON.stringify(payload, null, 2)}\n\n`);
   process.stdout.write(markdown);
 }
 
