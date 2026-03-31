@@ -22,9 +22,8 @@ import {
   GetPromptRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 import * as fs from "fs";
-import * as path from "path";
-import * as os from "os";
 import { logger } from "./core/logger.js";
+import { resolvePersistenceLocation } from "./core/persistence.js";
 import type { EpistemicStatus, EpistemicStatusFilter, MemoryArchetype, MemoryNPC } from "./core/types.js";
 
 /**
@@ -156,8 +155,18 @@ class BM25Index {
 /**
  * Path where memory graph is persisted between restarts.
  */
-const PERSISTENCE_DIR = path.join(os.homedir(), ".neurodivergent-memory");
-const PERSISTENCE_FILE = path.join(PERSISTENCE_DIR, "memories.json");
+const PERSISTENCE_LOCATION = resolvePersistenceLocation();
+const PERSISTENCE_DIR = PERSISTENCE_LOCATION.dir;
+const PERSISTENCE_FILE = PERSISTENCE_LOCATION.file;
+
+logger.info(
+  {
+    persistenceDir: PERSISTENCE_DIR,
+    persistenceFile: PERSISTENCE_FILE,
+    source: PERSISTENCE_LOCATION.source,
+  },
+  "Resolved persistence location",
+);
 
 /**
  * On-disk representation of a MemoryNPC: identical to MemoryNPC except that

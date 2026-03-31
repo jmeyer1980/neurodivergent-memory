@@ -121,6 +121,36 @@ Each memory can optionally carry:
 
 Memories are automatically persisted to `~/.neurodivergent-memory/memories.json` on every write. The graph is restored on server startup.
 
+For explicit control, set one of these environment variables:
+
+- `NEURODIVERGENT_MEMORY_DIR` to choose the directory that contains `memories.json`
+- `NEURODIVERGENT_MEMORY_FILE` to point at a specific snapshot file
+
+Mounts at `/home/node/.neurodivergent-memory` continue to work without any env override — that is the container's `node` user home and is checked automatically.
+
+> **⚠️ Breaking change (v0.1.9):** The image runs as the `node` user and **cannot read `/root`**, so previous mounts at `/root/.neurodivergent-memory` are silently skipped. Agents may appear to have lost all memories. See [Recovering memories after upgrade](#recovering-memories-after-upgrade) below.
+
+#### Recovering memories after upgrade
+
+If you previously mounted data at `/root/.neurodivergent-memory`, your snapshot is still intact on the host volume. Re-mount it using one of these options:
+
+**Option A — explicit `/data` mount (recommended):**
+
+```json
+"-e", "NEURODIVERGENT_MEMORY_DIR=/data",
+"-v", "mydata:/data"
+```
+
+**Option B — mount at the path the `node` user already owns:**
+
+```json
+"-v", "mydata:/home/node/.neurodivergent-memory"
+```
+
+No `NEURODIVERGENT_MEMORY_DIR` override is needed for option B — the server finds the existing snapshot automatically.
+
+For agents: if memories appear missing after upgrading the container, use `import_memories` to reload from a backup export, or ask your AI assistant to re-run `memory_stats` after the volume is remounted correctly to confirm restoration.
+
 ## Release Security
 
 - GitHub Actions runs on **Node.js 20 LTS** for CI and release automation
@@ -180,8 +210,10 @@ For Docker:
         "run",
         "-i",
         "--rm",
+        "-e",
+        "NEURODIVERGENT_MEMORY_DIR=/data",
         "-v",
-        "neurodivergent-memory-data:/root/.nd-memory",
+        "neurodivergent-memory-data:/data",
         "docker.io/twgbellok/neurodivergent-memory:latest"
       ]
     }
@@ -216,8 +248,10 @@ Fully auto-approved tools:
         "run",
         "-i",
         "--rm",
+        "-e",
+        "NEURODIVERGENT_MEMORY_DIR=/data",
         "-v",
-        "neurodivergent-memory-data:/root/.nd-memory",
+        "neurodivergent-memory-data:/data",
         "docker.io/twgbellok/neurodivergent-memory:latest"
       ],
       "env": {}
@@ -225,6 +259,33 @@ Fully auto-approved tools:
   }
 }
 ```
+
+If you want per-project isolation instead of a shared global memory file, mount a project-specific host directory and keep the same container-side target. Use the path separator for your OS:
+
+- **Windows**: `${workspaceFolder}\.neurodivergent-memory:/data`
+- **macOS / Linux**: `${workspaceFolder}/.neurodivergent-memory:/data`
+
+```json
+{
+  "mcpServers": {
+    "neurodivergent-memory": {
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "-e",
+        "NEURODIVERGENT_MEMORY_DIR=/data",
+        "-v",
+        "${workspaceFolder}/.neurodivergent-memory:/data",
+        "docker.io/twgbellok/neurodivergent-memory:latest"
+      ]
+    }
+  }
+}
+```
+
+> **Note:** Replace `/` with `\` on Windows: `${workspaceFolder}\.neurodivergent-memory:/data`
 
 ### Docker Runtime
 
