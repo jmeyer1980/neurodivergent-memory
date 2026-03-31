@@ -2221,7 +2221,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     case "update_memory": {
       const { memory_id, content, district, tags, emotional_valence, intensity, epistemic_status, project_id, actor_district, agent_id } = request.params.arguments as any;
       try {
-      const updates: Partial<Pick<MemoryNPC, "content" | "tags" | "emotional_valence" | "intensity" | "district" | "epistemic_status" | "project_id">> = {};
+        const updates: Partial<Pick<MemoryNPC, "content" | "tags" | "emotional_valence" | "intensity" | "district" | "epistemic_status" | "project_id">> = {};
         if (content !== undefined) updates.content = content;
         if (district !== undefined) updates.district = district;
         if (tags !== undefined) updates.tags = tags;
