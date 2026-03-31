@@ -1341,7 +1341,14 @@ class NeurodivergentMemory {
 
   /**
    * Import memories from a structured JSON array (bootstrap/seed).
-   * Each entry must have: content, district. Optional: tags, emotional_valence, intensity.
+   * Each entry must have: content, district.
+   * Optional per-entry fields:
+   * - tags
+   * - emotional_valence
+   * - intensity
+   * - agent_id (overrides default_agent_id when provided)
+   * - project_id
+   * - epistemic_status (must be a valid EpistemicStatus)
    * Returns the list of newly created memory IDs.
    */
   importMemories(entries: Array<{ content: string; district: string; tags?: string[]; emotional_valence?: number; intensity?: number; agent_id?: string; project_id?: string; epistemic_status?: EpistemicStatus }>, default_agent_id?: string): string[] {
