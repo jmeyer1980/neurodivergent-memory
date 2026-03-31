@@ -228,6 +228,32 @@ Configuration:
 - `NEURODIVERGENT_MEMORY_LOOP_WINDOW` (default: `20`)
 - `NEURODIVERGENT_MEMORY_PING_PONG_THRESHOLD` (default: `3`)
 
+## Performance Benchmark Baseline
+
+Issue #19 adds a deterministic benchmark harness for end-to-end MCP stdio measurements against the built server.
+
+Run it with:
+
+```bash
+npm run benchmark
+```
+
+The benchmark:
+
+- Uses an isolated temp persistence directory so it does not mutate your local memory graph.
+- Measures `store_memory` throughput plus `search_memories`, `list_memories`, and `related_to` latency at 1k, 5k, and 10k memories.
+- Writes run-specific outputs to timestamped files under `benchmark-results/`.
+- Also writes rolling latest aliases:
+  - `benchmark-results/memory-benchmark-latest.json`
+  - `benchmark-results/memory-benchmark-latest.md`
+
+The committed baseline is intended as a relative regression reference for RC vs stable comparisons, not as a universal absolute performance guarantee across machines.
+
+To intentionally refresh the committed baseline files in place:
+
+```bash
+npm run benchmark -- --update-baseline
+```
 ## Development
 
 Install dependencies:

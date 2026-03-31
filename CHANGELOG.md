@@ -16,6 +16,7 @@
 - WIP saturation guardrail warning for in-progress practical tasks (`NEURODIVERGENT_MEMORY_WIP_LIMIT`, `NM_E011`)
 - Development branch release-candidate pipeline that publishes the same npm package name as prereleases (`0.x.x-rc.N`, dist-tag `rc`, where `N=run_number.run_attempt`) and pushes Docker tags `rc-0.x.x` plus `rc-0.x.x-rc.N` derived from the same run sequence
 - Observe-only loop telemetry for `store_memory`, `retrieve_memory`, `update_memory`, and `memory_stats` with repeat counters, ping-pong detection, and recent high-similarity write reporting (`NEURODIVERGENT_MEMORY_REPEAT_THRESHOLD`, `NEURODIVERGENT_MEMORY_LOOP_WINDOW`, `NEURODIVERGENT_MEMORY_PING_PONG_THRESHOLD`)
+- Deterministic MCP stdio benchmark harness at `benchmarks/memory-benchmark.mjs` with published 1k/5k/10k baseline outputs in `benchmark-results/`
 
 ### ⚠️ Breaking Change
 
@@ -30,7 +31,8 @@
 
 ### Documentation
 
-- Updated roadmap and architecture planning documents to reflect v0.2.0 progress status (persistence, concurrency safety, and structured logging complete; loop telemetry and benchmark baseline pending)
+- Published first local benchmark baseline in `TEST_SUMMARY.md` and `benchmark-results/memory-benchmark-baseline.md` for 1k/5k/10k memory datasets
+- Updated roadmap and architecture planning documents to reflect v0.2.0 progress status (persistence, concurrency safety, structured logging, loop telemetry, and benchmark baseline complete)
 
 ### ⚠️ Research Preview Releases
 
