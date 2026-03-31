@@ -627,19 +627,22 @@ class NeurodivergentMemory {
       memory,
       score: this.bm25.score(memory.id, queryTerms),
     }));
-    const maxScore = rawScores.reduce((best, current) => Math.max(best, current.score), 0);
-    if (maxScore <= 0) {
+
+    // Find the best-scoring candidate using the raw BM25 score as a stable similarity metric.
+    const best = rawScores.reduce(
+      (currentBest, candidate) => (candidate.score > currentBest.score ? candidate : currentBest),
+      rawScores[0],
+    );
+
+    // If even the best candidate has a non-positive score, treat this as "no repeat detected".
+    if (best.score <= 0) {
       return undefined;
     }
 
-    const best = rawScores
-      .map(candidate => ({
-        memory: candidate.memory,
-        similarityScore: candidate.score / maxScore,
-      }))
-      .sort((a, b) => b.similarityScore - a.similarityScore)[0];
-
-    return best;
+    return {
+      memory: best.memory,
+      similarityScore: best.score,
+    };
   }
 
   private applyPingPongTelemetry(memory: MemoryNPC): { detected: boolean; count: number } {
