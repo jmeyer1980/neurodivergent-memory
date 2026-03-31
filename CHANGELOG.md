@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Added
+
+- Write-ahead journal persistence (`memories.json.wal.jsonl`) for mutating operations with startup replay and compaction into `memories.json`
+- Startup recovery telemetry indicating whether boot path was `fresh`, `snapshot-load`, or `wal-replay`
+- Configurable memory cap and eviction policies via:
+	- `NEURODIVERGENT_MEMORY_MAX`
+	- `NEURODIVERGENT_MEMORY_EVICTION` (`lru`, `access_frequency`, `district_priority`)
+
 ### ⚠️ Breaking Change
 
 - **`/root/.neurodivergent-memory` mounts no longer found automatically.** The image runs as the `node` user which cannot read `/root`. Configs that previously mounted data at `/root/.neurodivergent-memory` will silently start empty. Migrate by re-mounting the same host volume at `/data` (with `NEURODIVERGENT_MEMORY_DIR=/data`) or at `/home/node/.neurodivergent-memory`. See the README for full recovery instructions.
