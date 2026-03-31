@@ -164,11 +164,22 @@ For agents: if memories appear missing after upgrading the container, use `impor
 
 ## Release Security
 
-- GitHub Actions runs on **Node.js 20 LTS** for CI and release automation
+- GitHub Actions runs on **Node.js 24 LTS** for CI and release automation
 - npm publishes use **OIDC provenance** with `npm publish --provenance --access public`
 - Docker images are built with **Buildx**, published to Docker Hub, and emitted with **SBOM** and **provenance** metadata
 - GitHub Actions generates **artifact attestations** for the npm tarball and the pushed container image digest
 - Tagged releases upload the npm tarball, checksums, and attestation bundles as release assets
+
+## Development RC Channel
+
+Pushes to the `development` branch publish **release candidates** using the same npm package name (`neurodivergent-memory`) and container repositories.
+
+- npm prereleases are published as `0.x.x-rc.N` with npm dist-tag `rc`.
+- npm prerelease suffix `N` uses `run_number.run_attempt` to avoid collisions on workflow re-runs.
+- Docker images are published with `rc-0.x.x` (moving) and `rc-0.x.x-rc.N` tags, where `N` is derived from `run_number.run_attempt` (immutable per run attempt).
+- GitHub releases for RC builds are marked as **pre-release**.
+
+These builds are intentionally less stable than the research preview line and should be used only for validation and early integration testing.
 
 ## Error Contract
 
