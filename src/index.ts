@@ -246,7 +246,7 @@ class NeurodivergentMemory {
     const snapshotLoaded = this.loadSnapshot();
     const replayResult = this.replayWal();
 
-    if (replayResult.applied > 0) {
+    if (replayResult.replayed > 0) {
       try {
         this.saveToDiskSync();
         fs.writeFileSync(this.walFile, "", "utf-8");
@@ -255,13 +255,14 @@ class NeurodivergentMemory {
       }
     }
 
-    const startupMode = replayResult.applied > 0
+    const startupMode = replayResult.replayed > 0
       ? "wal-replay"
       : (snapshotLoaded ? "snapshot-load" : "fresh");
     logger.info(
       {
         startupMode,
-        appliedWalEntries: replayResult.applied,
+        replayedWalEntries: replayResult.replayed,
+        appliedWalEntries: replayResult.mutated,
         skippedWalEntries: replayResult.skipped,
         memoryCount: Object.keys(this.memories).length,
         maxMemories: this.maxMemories ?? "unlimited",
@@ -292,10 +293,11 @@ class NeurodivergentMemory {
     }
   }
 
-  private replayWal(): { applied: number; skipped: number } {
-    if (!fs.existsSync(this.walFile)) return { applied: 0, skipped: 0 };
+  private replayWal(): { replayed: number; mutated: number; skipped: number } {
+    if (!fs.existsSync(this.walFile)) return { replayed: 0, mutated: 0, skipped: 0 };
 
-    let applied = 0;
+    let replayed = 0;
+    let mutated = 0;
     let skipped = 0;
     try {
       const lines = fs.readFileSync(this.walFile, "utf-8").split(/\r?\n/);
@@ -305,10 +307,9 @@ class NeurodivergentMemory {
         try {
           const entry = JSON.parse(trimmed) as WalEntry;
           this.walSeq = Math.max(this.walSeq, (entry.seq ?? 0) + 1);
-          const mutated = this.applyWalEntry(entry);
-          if (mutated) {
-            applied++;
-          }
+          replayed++;
+          const entryMutated = this.applyWalEntry(entry);
+          if (entryMutated) mutated++;
         } catch (err) {
           skipped++;
           logger.warn({ code: NM_ERRORS.WAL_CORRUPT_ENTRY, walFile: this.walFile, entryPreview: trimmed.slice(0, 120), err }, "Skipping corrupt WAL entry");
@@ -318,7 +319,7 @@ class NeurodivergentMemory {
       logger.warn({ code: NM_ERRORS.WAL_CORRUPT_ENTRY, walFile: this.walFile, err }, "Failed reading WAL; continuing with snapshot state");
     }
 
-    return { applied, skipped };
+    return { replayed, mutated, skipped };
   }
 
   private appendWalEntry(op: WalOperation, payload: Record<string, unknown>): void {
@@ -340,7 +341,6 @@ class NeurodivergentMemory {
     switch (entry.op) {
       case "store": {
         const mem = this.deserializeMemory(entry.payload.memory as PersistedMemoryNPC);
-        this.ensureCapacityForInsert(false);
         const inserted = this.insertMemory(mem);
         if (inserted) {
           this.nextMemoryId = Math.max(this.nextMemoryId, this.parseMemoryNumericId(mem.id) + 1);
@@ -375,19 +375,23 @@ class NeurodivergentMemory {
         return false;
       }
       case "import": {
-        // Support both new and legacy WAL import payload shapes:
-        // - New format:  payload.memories: PersistedMemoryNPC[]
-        // - Legacy format: payload.entries: PersistedMemoryNPC[] (+ optional agent_id)
         let serializedMemories: PersistedMemoryNPC[] = [];
-        if (Array.isArray((entry as any).payload?.memories)) {
-          serializedMemories = (entry.payload.memories as PersistedMemoryNPC[]) ?? [];
-        } else if (Array.isArray((entry as any).payload?.entries)) {
-          serializedMemories = (entry.payload.entries as PersistedMemoryNPC[]) ?? [];
+        if (Array.isArray(entry.payload.memories)) {
+          serializedMemories = entry.payload.memories as PersistedMemoryNPC[];
+        }
+
+        // Backward compatibility: legacy import WAL payload stored raw entries + optional default agent_id.
+        if (serializedMemories.length === 0 && Array.isArray(entry.payload.entries)) {
+          const legacyEntries = entry.payload.entries as ImportMemoryEntry[];
+          const legacyDefaultAgentId = typeof entry.payload.agent_id === "string"
+            ? entry.payload.agent_id
+            : undefined;
+          const materializedLegacy = this.materializeImportMemories(legacyEntries, legacyDefaultAgentId);
+          serializedMemories = materializedLegacy.map(memory => this.serializeMemory(memory));
         }
         let mutated = false;
         for (const rawMemory of serializedMemories) {
           const memory = this.deserializeMemory(rawMemory);
-          this.ensureCapacityForInsert(false);
           const inserted = this.insertMemory(memory);
           if (inserted) {
             this.nextMemoryId = Math.max(this.nextMemoryId, this.parseMemoryNumericId(memory.id) + 1);
