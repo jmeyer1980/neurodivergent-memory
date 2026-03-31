@@ -1,7 +1,7 @@
 {
   "environment": {
-    "date": "2026-03-31T21:01:29.773Z",
-    "git_commit": "54e44ad",
+    "date": "2026-03-31T21:13:54.251Z",
+    "git_commit": "c66cf0d",
     "node": "v24.11.1",
     "platform": "win32 10.0.26200 (x64)",
     "cpu_model": "Intel(R) Core(TM) i7-10870H CPU @ 2.20GHz",
@@ -15,53 +15,53 @@
       "store": {
         "measured_write_count": 100,
         "seeded_before_measurement": 900,
-        "total_duration_ms": 152.88660000000007,
-        "average_ms_per_memory": 1.5288660000000007,
-        "p50_ms": 1.4185,
-        "p95_ms": 2.061,
-        "max_ms": 2.3607,
-        "throughput_ops_per_sec": 654.0795596213138
+        "total_duration_ms": 138.8062,
+        "average_ms_per_memory": 1.3880620000000006,
+        "p50_ms": 1.3628,
+        "p95_ms": 1.7813,
+        "max_ms": 2.1156,
+        "throughput_ops_per_sec": 720.4289145585716
       },
       "search_memories": {
         "iterations": 100,
-        "average_ms": 4.352496999999999,
-        "p50_ms": 4.0239,
-        "p95_ms": 5.388,
-        "min_ms": 3.2871,
-        "max_ms": 12.0203
+        "average_ms": 4.270683000000002,
+        "p50_ms": 3.9483,
+        "p95_ms": 5.3056,
+        "min_ms": 3.2483,
+        "max_ms": 11.6452
       },
       "list_memories": {
         "iterations": 100,
-        "average_ms": 0.7271859999999998,
-        "p50_ms": 0.6678,
-        "p95_ms": 1.0167,
-        "min_ms": 0.5038,
-        "max_ms": 3.9695
+        "average_ms": 0.9012500000000001,
+        "p50_ms": 0.8203,
+        "p95_ms": 1.4124,
+        "min_ms": 0.5138,
+        "max_ms": 3.6845
       },
       "traverse_from": {
         "2": {
           "iterations": 100,
-          "average_ms": 0.26757999999999993,
-          "p50_ms": 0.2391,
-          "p95_ms": 0.4039,
-          "min_ms": 0.1953,
-          "max_ms": 0.5029
+          "average_ms": 0.42104899999999984,
+          "p50_ms": 0.2846,
+          "p95_ms": 0.5375,
+          "min_ms": 0.1993,
+          "max_ms": 11.1416
         },
         "3": {
           "iterations": 100,
-          "average_ms": 0.28178800000000004,
-          "p50_ms": 0.2557,
-          "p95_ms": 0.4522,
-          "min_ms": 0.2005,
-          "max_ms": 0.8125
+          "average_ms": 0.29504300000000006,
+          "p50_ms": 0.2705,
+          "p95_ms": 0.4192,
+          "min_ms": 0.2046,
+          "max_ms": 0.6778
         },
         "5": {
           "iterations": 100,
-          "average_ms": 0.2766400000000001,
-          "p50_ms": 0.2532,
-          "p95_ms": 0.3789,
-          "min_ms": 0.2028,
-          "max_ms": 0.7359
+          "average_ms": 0.319037,
+          "p50_ms": 0.3005,
+          "p95_ms": 0.432,
+          "min_ms": 0.2145,
+          "max_ms": 0.7196
         }
       },
       "memory_stats_excerpt": [
@@ -79,53 +79,53 @@
       "store": {
         "measured_write_count": 100,
         "seeded_before_measurement": 4900,
-        "total_duration_ms": 383.94659999999976,
-        "average_ms_per_memory": 3.839466,
-        "p50_ms": 3.8188,
-        "p95_ms": 4.6531,
-        "max_ms": 4.9508,
-        "throughput_ops_per_sec": 260.45288589611175
+        "total_duration_ms": 364.58569999999986,
+        "average_ms_per_memory": 3.645857000000001,
+        "p50_ms": 3.6233,
+        "p95_ms": 4.6613,
+        "max_ms": 5.0209,
+        "throughput_ops_per_sec": 274.28393379114993
       },
       "search_memories": {
         "iterations": 100,
-        "average_ms": 22.978583999999998,
-        "p50_ms": 21.6281,
-        "p95_ms": 27.9892,
-        "min_ms": 18.3957,
-        "max_ms": 60.3955
+        "average_ms": 25.405950999999995,
+        "p50_ms": 24.3425,
+        "p95_ms": 31.9561,
+        "min_ms": 18.352,
+        "max_ms": 75.4505
       },
       "list_memories": {
         "iterations": 100,
-        "average_ms": 2.5047989999999998,
-        "p50_ms": 2.45,
-        "p95_ms": 3.2448,
-        "min_ms": 1.8847,
-        "max_ms": 3.9946
+        "average_ms": 2.6342980000000007,
+        "p50_ms": 2.541,
+        "p95_ms": 3.5174,
+        "min_ms": 1.663,
+        "max_ms": 4.9785
       },
       "traverse_from": {
         "2": {
           "iterations": 100,
-          "average_ms": 0.31090700000000004,
-          "p50_ms": 0.2931,
-          "p95_ms": 0.4273,
-          "min_ms": 0.2059,
-          "max_ms": 0.9841
+          "average_ms": 0.344855,
+          "p50_ms": 0.3207,
+          "p95_ms": 0.5185,
+          "min_ms": 0.2188,
+          "max_ms": 0.6096
         },
         "3": {
           "iterations": 100,
-          "average_ms": 0.324399,
-          "p50_ms": 0.2694,
-          "p95_ms": 0.3911,
-          "min_ms": 0.1982,
-          "max_ms": 4.6167
+          "average_ms": 0.35614500000000004,
+          "p50_ms": 0.2856,
+          "p95_ms": 0.4211,
+          "min_ms": 0.2319,
+          "max_ms": 5.3571
         },
         "5": {
           "iterations": 100,
-          "average_ms": 0.28615600000000013,
-          "p50_ms": 0.2754,
-          "p95_ms": 0.3652,
-          "min_ms": 0.2261,
-          "max_ms": 0.6171
+          "average_ms": 0.30267499999999997,
+          "p50_ms": 0.2663,
+          "p95_ms": 0.4528,
+          "min_ms": 0.2246,
+          "max_ms": 0.5073
         }
       },
       "memory_stats_excerpt": [
@@ -143,53 +143,53 @@
       "store": {
         "measured_write_count": 100,
         "seeded_before_measurement": 9900,
-        "total_duration_ms": 570.2623,
-        "average_ms_per_memory": 5.702623,
-        "p50_ms": 5.5412,
-        "p95_ms": 6.7836,
-        "max_ms": 12.6894,
-        "throughput_ops_per_sec": 175.3579010921816
+        "total_duration_ms": 899.4848999999999,
+        "average_ms_per_memory": 8.994848999999999,
+        "p50_ms": 8.7777,
+        "p95_ms": 12.0834,
+        "max_ms": 14.8999,
+        "throughput_ops_per_sec": 111.17474012070687
       },
       "search_memories": {
         "iterations": 100,
-        "average_ms": 55.115077000000014,
-        "p50_ms": 53.6293,
-        "p95_ms": 71.9661,
-        "min_ms": 42.4178,
-        "max_ms": 140.1877
+        "average_ms": 61.76236499999999,
+        "p50_ms": 59.4147,
+        "p95_ms": 73.3494,
+        "min_ms": 48.5278,
+        "max_ms": 148.0092
       },
       "list_memories": {
         "iterations": 100,
-        "average_ms": 6.480101000000001,
-        "p50_ms": 6.5454,
-        "p95_ms": 8.583,
-        "min_ms": 3.9435,
-        "max_ms": 18.0012
+        "average_ms": 6.080253999999999,
+        "p50_ms": 5.8237,
+        "p95_ms": 8.0152,
+        "min_ms": 3.8705,
+        "max_ms": 10.8134
       },
       "traverse_from": {
         "2": {
           "iterations": 100,
-          "average_ms": 0.309369,
-          "p50_ms": 0.2895,
-          "p95_ms": 0.4875,
-          "min_ms": 0.2334,
-          "max_ms": 0.5828
+          "average_ms": 0.3633179999999998,
+          "p50_ms": 0.3533,
+          "p95_ms": 0.555,
+          "min_ms": 0.2276,
+          "max_ms": 0.7816
         },
         "3": {
           "iterations": 100,
-          "average_ms": 0.30265200000000003,
-          "p50_ms": 0.2851,
-          "p95_ms": 0.4254,
-          "min_ms": 0.2233,
-          "max_ms": 0.5871
+          "average_ms": 0.37901700000000005,
+          "p50_ms": 0.3639,
+          "p95_ms": 0.5752,
+          "min_ms": 0.2344,
+          "max_ms": 0.6571
         },
         "5": {
           "iterations": 100,
-          "average_ms": 0.41684599999999983,
-          "p50_ms": 0.3885,
-          "p95_ms": 0.5824,
-          "min_ms": 0.2415,
-          "max_ms": 0.7706
+          "average_ms": 0.412207,
+          "p50_ms": 0.3958,
+          "p95_ms": 0.5829,
+          "min_ms": 0.2583,
+          "max_ms": 0.8665
         }
       },
       "memory_stats_excerpt": [

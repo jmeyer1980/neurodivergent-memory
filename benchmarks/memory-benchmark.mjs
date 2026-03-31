@@ -438,7 +438,7 @@ async function main() {
 
   const results = [];
   for (const size of DATASET_SIZES) {
-    process.stdout.write(`Running benchmark for ${size} memories...\n`);
+    process.stderr.write(`Running benchmark for ${size} memories...\n`);
     results.push(await benchmarkDataset(size));
   }
 
@@ -459,12 +459,11 @@ async function main() {
   fs.writeFileSync(latestJsonPath, `${JSON.stringify(payload, null, 2)}\n`, "utf8");
   fs.writeFileSync(latestMarkdownPath, markdown, "utf8");
 
-  process.stdout.write(`Benchmark JSON written to ${path.relative(process.cwd(), jsonPath)}\n`);
-  process.stdout.write(`Benchmark Markdown written to ${path.relative(process.cwd(), markdownPath)}\n\n`);
-  process.stdout.write(`Latest JSON alias written to ${path.relative(process.cwd(), latestJsonPath)}\n`);
-  process.stdout.write(`Latest Markdown alias written to ${path.relative(process.cwd(), latestMarkdownPath)}\n\n`);
-  process.stdout.write(`${JSON.stringify(payload, null, 2)}\n\n`);
-  process.stdout.write(markdown);
+  process.stderr.write(`Benchmark JSON written to ${path.relative(process.cwd(), jsonPath)}\n`);
+  process.stderr.write(`Benchmark Markdown written to ${path.relative(process.cwd(), markdownPath)}\n\n`);
+  process.stderr.write(`Latest JSON alias written to ${path.relative(process.cwd(), latestJsonPath)}\n`);
+  process.stderr.write(`Latest Markdown alias written to ${path.relative(process.cwd(), latestMarkdownPath)}\n\n`);
+  process.stdout.write(`${JSON.stringify(payload, null, 2)}\n`);
 }
 
 main().catch(error => {
