@@ -25,6 +25,7 @@ import * as fs from "fs";
 import { logger } from "./core/logger.js";
 import { resolvePersistenceLocation } from "./core/persistence.js";
 import { AsyncMutex } from "./core/async-mutex.js";
+import { LoopTelemetryTracker } from "./core/loop-telemetry.js";
 import {
   NM_ERRORS,
   asMcpErrorShape,
@@ -52,6 +53,15 @@ interface MemoryDistrict {
 interface ScoredMemory {
   memory: MemoryNPC;
   score: number;
+}
+
+interface StoreMemoryResult {
+  memory: MemoryNPC;
+  repeat_detected: boolean;
+  matched_memory_id?: string;
+  similarity_score?: number;
+  ping_pong_detected?: boolean;
+  ping_pong_count?: number;
 }
 
 /**
@@ -228,6 +238,26 @@ class NeurodivergentMemory {
   private readonly walFile = `${PERSISTENCE_FILE}.wal.jsonl`;
   private readonly maxMemories = this.parseMaxMemories(process.env.NEURODIVERGENT_MEMORY_MAX);
   private readonly evictionPolicy = this.parseEvictionPolicy(process.env.NEURODIVERGENT_MEMORY_EVICTION);
+  private readonly repeatThreshold = parseNumberEnv(
+    process.env.NEURODIVERGENT_MEMORY_REPEAT_THRESHOLD,
+    0.85,
+    (value) => value >= 0 && value <= 1,
+  );
+  private readonly loopTelemetryWindowSize = parseIntegerEnv(
+    process.env.NEURODIVERGENT_MEMORY_LOOP_WINDOW,
+    20,
+    (value) => value > 1,
+  );
+  private readonly pingPongThreshold = parseIntegerEnv(
+    process.env.NEURODIVERGENT_MEMORY_PING_PONG_THRESHOLD,
+    3,
+    (value) => value > 0,
+  );
+  private readonly loopTelemetry = new LoopTelemetryTracker({
+    operationWindowSize: this.loopTelemetryWindowSize,
+    pingPongThreshold: this.pingPongThreshold,
+    repeatThreshold: this.repeatThreshold,
+  });
   private saveTimer: ReturnType<typeof setTimeout> | null = null;
   // Promise chain that ensures saves never run concurrently
   private saveChain: Promise<void> = Promise.resolve();
@@ -486,10 +516,13 @@ class NeurodivergentMemory {
     const lastAccessedDate = new Date((rawMem as any).last_accessed);
     const safeCreated = isNaN(createdDate.getTime()) ? now : createdDate;
     const safeLastAccessed = isNaN(lastAccessedDate.getTime()) ? safeCreated : lastAccessedDate;
+    const repeatWriteCount = rawMem.repeat_write_count ?? rawMem.repeat_count;
     return {
       ...rawMem,
       created: safeCreated,
       last_accessed: safeLastAccessed,
+      repeat_write_count: repeatWriteCount,
+      repeat_count: repeatWriteCount,
     };
   }
 
@@ -579,6 +612,59 @@ class NeurodivergentMemory {
     return [memory.content, memory.name, ...memory.tags].join(" ");
   }
 
+  private detectRepeatCandidate(content: string, agentId?: string): { memory: MemoryNPC; similarityScore: number } | undefined {
+    const recentCandidates = Object.values(this.memories)
+      .filter(memory => (agentId ? memory.agent_id === agentId : true))
+      .sort((a, b) => b.created.getTime() - a.created.getTime())
+      .slice(0, 10);
+
+    if (recentCandidates.length === 0) {
+      return undefined;
+    }
+
+    const queryTerms = this.bm25.queryTerms(content);
+    const rawScores = recentCandidates.map(memory => ({
+      memory,
+      score: this.bm25.score(memory.id, queryTerms),
+    }));
+    const maxScore = rawScores.reduce((best, current) => Math.max(best, current.score), 0);
+    if (maxScore <= 0) {
+      return undefined;
+    }
+
+    const best = rawScores
+      .map(candidate => ({
+        memory: candidate.memory,
+        similarityScore: candidate.score / maxScore,
+      }))
+      .sort((a, b) => b.similarityScore - a.similarityScore)[0];
+
+    return best;
+  }
+
+  private applyPingPongTelemetry(memory: MemoryNPC): { detected: boolean; count: number } {
+    const pingPong = this.loopTelemetry.recordWrite(memory);
+    if (pingPong.pingPongDetected) {
+      memory.ping_pong_counter = (memory.ping_pong_counter ?? 0) + 1;
+      this.appendWalEntry("update", {
+        memory_id: memory.id,
+        updates: { ping_pong_counter: memory.ping_pong_counter },
+      });
+      logger.info(
+        {
+          event: "ping_pong_detected",
+          memory_id: memory.id,
+          count: pingPong.pingPongCount,
+          ping_pong_counter: memory.ping_pong_counter,
+        },
+        "Ping-pong telemetry detected",
+      );
+      return { detected: true, count: pingPong.pingPongCount };
+    }
+
+    return { detected: false, count: pingPong.pingPongCount };
+  }
+
   // ── Districts ──────────────────────────────────────────────────────────────
 
   private initializeDistricts() {
@@ -631,7 +717,7 @@ class NeurodivergentMemory {
     intensity = 0.5,
     agent_id?: string,
     epistemic_status?: EpistemicStatus
-  ): MemoryNPC {
+  ): StoreMemoryResult {
     if (!this.districts[district]) {
       throw createNMError(
         NM_ERRORS.UNKNOWN_DISTRICT,
@@ -644,6 +730,47 @@ class NeurodivergentMemory {
     const archetype = this.districts[district].archetype;
     const name = this.generateMemoryName(archetype, content);
     const now = new Date();
+    const repeatCandidate = this.detectRepeatCandidate(content, agent_id);
+
+    let repeatDetected = false;
+    let matchedMemoryId: string | undefined;
+    let similarityScore: number | undefined;
+    let pingPongDetected = false;
+    let pingPongCount: number | undefined;
+
+    if (repeatCandidate && repeatCandidate.similarityScore >= this.loopTelemetry.getRepeatThreshold()) {
+      const matchedMemory = repeatCandidate.memory;
+      const nextRepeatCount = (matchedMemory.repeat_write_count ?? matchedMemory.repeat_count ?? 0) + 1;
+      matchedMemory.repeat_write_count = nextRepeatCount;
+      matchedMemory.repeat_count = nextRepeatCount;
+      matchedMemory.last_similarity_score = repeatCandidate.similarityScore;
+
+      this.appendWalEntry("update", {
+        memory_id: matchedMemory.id,
+        updates: {
+          repeat_write_count: matchedMemory.repeat_write_count,
+          repeat_count: matchedMemory.repeat_count,
+          last_similarity_score: matchedMemory.last_similarity_score,
+        },
+      });
+
+      const pingPongResult = this.applyPingPongTelemetry(matchedMemory);
+      pingPongDetected = pingPongResult.detected;
+      pingPongCount = pingPongResult.count;
+
+      this.loopTelemetry.recordHighSimilarityWrite({
+        memory_id: id,
+        matched_memory_id: matchedMemory.id,
+        similarity_score: repeatCandidate.similarityScore,
+        timestamp: now.toISOString(),
+        district,
+        agent_id,
+      });
+
+      repeatDetected = true;
+      matchedMemoryId = matchedMemory.id;
+      similarityScore = repeatCandidate.similarityScore;
+    }
 
     const memory: MemoryNPC = {
       id,
@@ -661,16 +788,36 @@ class NeurodivergentMemory {
       access_count: 1,
       emotional_valence,
       intensity,
-      epistemic_status
+      epistemic_status,
+      last_similarity_score: similarityScore,
     };
 
     this.appendWalEntry("store", { memory: this.serializeMemory(memory) });
     this.ensureCapacityForInsert();
     this.insertMemory(memory);
+    this.loopTelemetry.recordWrite(memory);
     this.scheduleSave();
-    logger.info({ operation: "store", memoryId: memory.id, district, agentId: agent_id ?? "unassigned" }, "Stored memory");
+    logger.info(
+      {
+        operation: "store",
+        memoryId: memory.id,
+        district,
+        agentId: agent_id ?? "unassigned",
+        repeat_detected: repeatDetected,
+        matched_memory_id: matchedMemoryId,
+        similarity_score: similarityScore,
+      },
+      "Stored memory",
+    );
 
-    return memory;
+    return {
+      memory,
+      repeat_detected: repeatDetected,
+      matched_memory_id: matchedMemoryId,
+      similarity_score: similarityScore,
+      ping_pong_detected: pingPongDetected,
+      ping_pong_count: pingPongCount,
+    };
   }
 
   retrieveMemory(id: string): MemoryNPC | null {
@@ -678,6 +825,7 @@ class NeurodivergentMemory {
     if (memory) {
       memory.last_accessed = new Date();
       memory.access_count++;
+      this.loopTelemetry.recordRead(memory);
       this.scheduleSave();
     }
     return memory || null;
@@ -703,6 +851,7 @@ class NeurodivergentMemory {
 
     this.appendWalEntry("update", { memory_id: id, updates });
     this.applyMemoryUpdates(id, updates);
+    this.applyPingPongTelemetry(this.memories[id]);
     this.scheduleSave();
     logger.info({ operation: "update", memoryId: id, changedFields: Object.keys(updates).sort() }, "Updated memory");
 
@@ -1022,8 +1171,18 @@ class NeurodivergentMemory {
       .map(m => ({ id: m.id, name: m.name, access_count: m.access_count }));
 
     const orphans = allMems.filter(m => m.connections.length === 0).map(m => ({ id: m.id, name: m.name }));
+    const loop_telemetry = this.loopTelemetry.summarize(allMems);
 
-    return { totalMemories, perDistrict, perAgent, epistemicStatusBreakdown, totalConnections, mostAccessed, orphans };
+    return {
+      totalMemories,
+      perDistrict,
+      perAgent,
+      epistemicStatusBreakdown,
+      totalConnections,
+      mostAccessed,
+      orphans,
+      loop_telemetry,
+    };
   }
 
   // ── Helpers ────────────────────────────────────────────────────────────────
@@ -1176,6 +1335,23 @@ function parseIntegerEnv(
   }
 
   const parsed = Number.parseInt(rawValue, 10);
+  if (!Number.isFinite(parsed) || !validator(parsed)) {
+    return fallback;
+  }
+
+  return parsed;
+}
+
+function parseNumberEnv(
+  rawValue: string | undefined,
+  fallback: number,
+  validator: (value: number) => boolean,
+): number {
+  if (!rawValue || !rawValue.trim()) {
+    return fallback;
+  }
+
+  const parsed = Number.parseFloat(rawValue);
   if (!Number.isFinite(parsed) || !validator(parsed)) {
     return fallback;
   }
@@ -1789,7 +1965,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
         let wipWarning: string | undefined;
 
-        const memory = await runMutatingTool(
+        const storeResult = await runMutatingTool(
           "store_memory",
           () => {
             if (shouldCheckWipLimit) {
@@ -1820,11 +1996,18 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             );
           },
         );
+        const memory = storeResult.memory;
         const warningLine = wipWarning ? `\n${wipWarning}` : "";
+        const repeatLines = [
+          `repeat_detected: ${storeResult.repeat_detected ? "true" : "false"}`,
+          storeResult.matched_memory_id ? `matched_memory_id: ${storeResult.matched_memory_id}` : undefined,
+          storeResult.similarity_score !== undefined ? `similarity_score: ${storeResult.similarity_score.toFixed(3)}` : undefined,
+          storeResult.ping_pong_detected ? `ping_pong_detected: true (transition_count=${storeResult.ping_pong_count ?? 0})` : undefined,
+        ].filter(Boolean).join("\n");
         return {
           content: [{
             type: "text",
-            text: `🧠 Stored memory "${memory.name}" in ${memorySystem.getAllDistricts().find(d => d.name.toLowerCase().replace(/\s+/g, '_') === district)?.name || district}\nID: ${memory.id}\nArchetype: ${memory.archetype}\nAgent: ${memory.agent_id ?? "unassigned"}\nEpistemic status: ${memory.epistemic_status ?? "unset"}${warningLine}`
+            text: `🧠 Stored memory "${memory.name}" in ${memorySystem.getAllDistricts().find(d => d.name.toLowerCase().replace(/\s+/g, '_') === district)?.name || district}\nID: ${memory.id}\nArchetype: ${memory.archetype}\nAgent: ${memory.agent_id ?? "unassigned"}\nEpistemic status: ${memory.epistemic_status ?? "unset"}\n${repeatLines}${warningLine}`
           }]
         };
       } catch (error) {
@@ -2074,11 +2257,26 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       const orphanList = stats.orphans.length > 0
         ? stats.orphans.map((m: any) => `  ${m.id} — ${m.name}`).join('\n')
         : '  (none)';
+      const repeatCandidates = stats.loop_telemetry?.repeat_write_candidates?.length > 0
+        ? stats.loop_telemetry.repeat_write_candidates
+            .map((m: any) => `  ${m.id} — ${m.name} (repeat_write_count=${m.repeat_write_count}, last_similarity=${(m.last_similarity_score ?? 0).toFixed(3)})`)
+            .join("\n")
+        : "  (none)";
+      const pingPongCandidates = stats.loop_telemetry?.ping_pong_candidates?.length > 0
+        ? stats.loop_telemetry.ping_pong_candidates
+            .map((m: any) => `  ${m.id} — ${m.name} (ping_pong_counter=${m.ping_pong_counter})`)
+            .join("\n")
+        : "  (none)";
+      const recentSimilarityWrites = stats.loop_telemetry?.recent_high_similarity_writes?.length > 0
+        ? stats.loop_telemetry.recent_high_similarity_writes
+            .map((entry: any) => `  ${entry.memory_id} -> ${entry.matched_memory_id} (score=${Number(entry.similarity_score).toFixed(3)}, district=${entry.district}, agent=${entry.agent_id ?? "unassigned"})`)
+            .join("\n")
+        : "  (none)";
 
       return {
         content: [{
           type: "text",
-          text: `📊 Memory Stats\nTotal memories: ${stats.totalMemories}\nTotal connections: ${stats.totalConnections}\n\nPer district:\n${districtLines}\n\nPer agent:\n${perAgentLines || '  (none)'}\n\nEpistemic status:\n${epistemicLines || '  (none)'}\n\nMost accessed:\n${topAccessed}\n\nOrphans (no connections):\n${orphanList}`
+          text: `📊 Memory Stats\nTotal memories: ${stats.totalMemories}\nTotal connections: ${stats.totalConnections}\n\nPer district:\n${districtLines}\n\nPer agent:\n${perAgentLines || '  (none)'}\n\nEpistemic status:\n${epistemicLines || '  (none)'}\n\nMost accessed:\n${topAccessed}\n\nOrphans (no connections):\n${orphanList}\n\nLoop telemetry:\nrepeat_write_candidates:\n${repeatCandidates}\nping_pong_candidates:\n${pingPongCandidates}\nrecent_high_similarity_writes:\n${recentSimilarityWrites}`
         }]
       };
     }
