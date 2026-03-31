@@ -22,6 +22,7 @@ export interface MemoryNPC {
   intensity?: number;
   abstracted_from?: string;
   epistemic_status?: EpistemicStatus;
+  repeat_write_count?: number;
   repeat_count?: number;
   last_similarity_score?: number;
   ping_pong_counter?: number;

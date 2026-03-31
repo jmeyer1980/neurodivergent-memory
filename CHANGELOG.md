@@ -15,6 +15,7 @@
 - Bounded mutating write queue with backpressure signaling (`NEURODIVERGENT_MEMORY_QUEUE_DEPTH`, `NM_E010`)
 - WIP saturation guardrail warning for in-progress practical tasks (`NEURODIVERGENT_MEMORY_WIP_LIMIT`, `NM_E011`)
 - Development branch release-candidate pipeline that publishes the same npm package name as prereleases (`0.x.x-rc.N`, dist-tag `rc`, where `N=run_number.run_attempt`) and pushes Docker tags `rc-0.x.x` plus `rc-0.x.x-rc.N` derived from the same run sequence
+- Observe-only loop telemetry for `store_memory`, `retrieve_memory`, `update_memory`, and `memory_stats` with repeat counters, ping-pong detection, and recent high-similarity write reporting (`NEURODIVERGENT_MEMORY_REPEAT_THRESHOLD`, `NEURODIVERGENT_MEMORY_LOOP_WINDOW`, `NEURODIVERGENT_MEMORY_PING_PONG_THRESHOLD`)
 
 ### ⚠️ Breaking Change
 
@@ -31,9 +32,9 @@
 
 - Updated roadmap and architecture planning documents to reflect v0.2.0 progress status (persistence, concurrency safety, and structured logging complete; loop telemetry and benchmark baseline pending)
 
-## [0.1.8] - 2026-03-28
+### ⚠️ Research Preview Releases
 
-### ⚠️ Research Preview Release
+## [0.1.8] - 2026-03-28
 
 This patch release forces Docker Hub README refresh on each release and upgrades Node to 24.
 
@@ -49,8 +50,6 @@ This patch release forces Docker Hub README refresh on each release and upgrades
 
 ## [0.1.7] - 2026-03-28
 
-### ⚠️ Research Preview Release
-
 This patch release fixes README GIF and link rendering on Docker Hub and GHCR.
 
 ### Fixed
@@ -58,8 +57,6 @@ This patch release fixes README GIF and link rendering on Docker Hub and GHCR.
 - Replaced relative GIF paths with absolute `raw.githubusercontent.com` URLs so Docker Hub and GHCR can render the preview image and link correctly
 
 ## [0.1.6] - 2026-03-28
-
-### ⚠️ Research Preview Release
 
 This patch release disables Docker `latest` tag generation to comply with immutable tag settings.
 
@@ -70,8 +67,6 @@ This patch release disables Docker `latest` tag generation to comply with immuta
 
 ## [0.1.5] - 2026-03-28
 
-### ⚠️ Research Preview Release
-
 This patch release fixes Docker Hub immutable tag conflict and publishes to the official MCP Registry.
 
 ### Added
@@ -80,8 +75,6 @@ This patch release fixes Docker Hub immutable tag conflict and publishes to the 
 - Added `server.json` for publishing to the official MCP Registry at `registry.modelcontextprotocol.io`
 
 ## [0.1.3] - 2026-03-28
-
-### ⚠️ Research Preview Release
 
 This patch release improves package visibility in GitHub by publishing container images to GitHub Container Registry (GHCR) in addition to Docker Hub.
 
@@ -93,8 +86,6 @@ This patch release improves package visibility in GitHub by publishing container
 
 ## [0.1.2] - 2026-03-28
 
-### ⚠️ Research Preview Release
-
 This patch release focuses on release pipeline reliability and publish resiliency.
 
 ### Fixed
@@ -104,8 +95,6 @@ This patch release focuses on release pipeline reliability and publish resilienc
 - Continued hardening for GitHub Actions JavaScript runtime migration to Node 24
 
 ## [0.1.1] - 2026-03-28
-
-### ⚠️ Research Preview Release
 
 This is a **research preview release**. We are actively developing core features and stability improvements toward 1.0.0. Expect API changes, feature additions, and potential breaking changes in minor version updates during the 0.x series.
 
@@ -136,24 +125,28 @@ This is a **research preview release**. We are actively developing core features
 
 ### Roadmap to 1.0.0
 
-**v0.2.0 (Stability & Observability)**
+#### **v0.2.0 (Stability & Observability)**
+
 - Structured logging with error codes and recovery paths
 - Concurrent write safety (mutex + journal pattern)
 - Resource quotas and performance monitoring
 - Load testing & scaling characteristics documentation
 
-**v0.3.0 (Agent Lifecycle)**
+#### **v0.3.0 (Agent Lifecycle)**
+
 - Agent lifecycle hooks (on_memory_created, on_connection_added, etc.)
 - Agent goal context integration (personalized relevance ranking)
 - Dynamic district creation for adaptive taxonomies
 
-**v0.4.0 (Multi-Agent Orchestration)**
+#### **v0.4.0 (Multi-Agent Orchestration)**
+
 - Council-style agentic workflows: Multiple CLI agents coordinated by orchestrator
 - Kanban orchestration: Task distribution and state tracking across agent workers
 - Inter-agent knowledge sharing patterns
 - Concurrency & contention resolution
 
-**v1.0.0 (Production Ready)**
+#### **v1.0.0 (Production Ready)**
+
 - Sub-second search performance at 100k+ memories
 - Durable persistence guarantees (ACID for updates)
 - Multi-tenant isolation
@@ -163,11 +156,13 @@ This is a **research preview release**. We are actively developing core features
 ### Getting Started
 
 See [README.md](README.md) for installation and usage. This is suitable for:
+
 - Single-agent memory prototyping
 - Proof-of-concept knowledge graphs
 - Research into district-based semantic organization
 
 Not recommended for:
+
 - Multi-agent production systems
 - Mission-critical knowledge storage
 - High-volume scenarios (recommend testing at your scale first)
