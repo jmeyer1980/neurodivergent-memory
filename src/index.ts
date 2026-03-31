@@ -1184,7 +1184,11 @@ function parseIntegerEnv(
 }
 
 function normalizeTag(tag: string): string {
-  return tag.trim().toLowerCase().replace(/[\s-]+/g, "_");
+  return tag
+    .trim()
+    .toLowerCase()
+    .replace(/\s*:\s*/g, ":")
+    .replace(/[\s-]+/g, "_");
 }
 
 function hasTaskInProgressTags(tags: string[] = []): boolean {
