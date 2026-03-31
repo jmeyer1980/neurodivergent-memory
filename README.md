@@ -404,7 +404,7 @@ The Inspector will provide a URL to access debugging tools in your browser.
 
 Here is an example copilot-instructions.md
 
-```memory-driven-issue-executionprompt.md
+```copilot-instructions.md
 # neurodivergent-memory — Agent Bootstrap Instructions
 
 This file is automatically read by GitHub Copilot and compatible agents at the start of every session.
