@@ -11,6 +11,9 @@
   - `NEURODIVERGENT_MEMORY_EVICTION` (`lru`, `access_frequency`, `district_priority`)
 - Structured MCP error helpers with stable `Code` / `Message` / `Recovery` text blocks for tool failures
 - Structured Pino info logging for write-path operations (`store`, `update`, `delete`, `connect`, `import`)
+- Async write serialization via mutex to prevent concurrent mutation races under multi-agent load
+- Bounded mutating write queue with backpressure signaling (`NEURODIVERGENT_MEMORY_QUEUE_DEPTH`, `NM_E010`)
+- WIP saturation guardrail warning for in-progress practical tasks (`NEURODIVERGENT_MEMORY_WIP_LIMIT`, `NM_E011`)
 
 ### ⚠️ Breaking Change
 
