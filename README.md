@@ -79,16 +79,16 @@ Memories are organized by cognitive domain:
 ### Tools (11 memory management operations)
 
 - **`store_memory`** — Create new memory nodes with optional emotional valence and intensity
-- **`retrieve_memory`** — Fetch a specific memory by ID and increment access count
-- **`update_memory`** — Modify content, tags, district, emotional_valence, or intensity
+- **`retrieve_memory`** — Fetch a specific memory by ID
+- **`update_memory`** — Modify content, tags, district, emotional_valence, intensity, or project attribution
 - **`delete_memory`** — Remove a memory and all its connections
 - **`connect_memories`** — Create bidirectional edges between memory nodes
-- **`search_memories`** — BM25-ranked semantic search with optional filters (district, tags, emotional valence, intensity, min_score)
+- **`search_memories`** — BM25-ranked semantic search with optional filters (district, project_id, tags, emotional valence, intensity, min_score)
 - **`traverse_from`** — Graph traversal up to N hops from a starting memory
 - **`related_to`** — Find memories by graph proximity + BM25 semantic blend
-- **`list_memories`** — Paginated listing with optional district/archetype filters
-- **`memory_stats`** — Aggregate statistics (totals, per-district counts, most-accessed, orphans)
-- **`import_memories`** — Bulk-seed memories from JSON array
+- **`list_memories`** — Paginated listing with optional district/archetype/project_id filters
+- **`memory_stats`** — Aggregate statistics (totals, per-district/per-project counts, most-accessed, orphans) with optional project scope
+- **`import_memories`** — Bulk-seed memories from JSON array, including mixed entries with and without project attribution
 
 ### Prompts
 
@@ -117,17 +117,187 @@ Each memory can optionally carry:
 - **emotional_valence** (-1 to 1) — Emotional charge or affective tone
 - **intensity** (0–1) — Mental energy or importance weight
 
+### Project Attribution and Scoped Retrieval
+
+Memories can optionally include a first-class `project_id` for attribution and scoped retrieval across multi-project graphs.
+
+- `project_id` is optional on writes (`store_memory`, `update_memory`, `import_memories`).
+- `update_memory` accepts `project_id: null` to clear existing project attribution.
+- `search_memories`, `list_memories`, and `memory_stats` accept an optional `project_id` filter.
+- Stats now include a `perProject` breakdown.
+- Scoped `memory_stats` reports `totalConnections` only for edges where both endpoints are in scope.
+- `list_memories` includes a `project: ...` segment in each line (`unset` when no project attribution exists).
+- Validation contract: `project_id` must match `^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$` (max length 64).
+- Invalid values return stable error code `NM_E020` with recovery guidance.
+
 ### Knowledge Graph Persistence
 
-Memories are automatically persisted to `~/.neurodivergent-memory/memories.json` on every write. The graph is restored on server startup.
+Memories are persisted with a write-ahead journal (WAL) plus snapshot model:
+
+- Every mutating operation appends to `memories.json.wal.jsonl` first.
+- The in-memory graph is then updated and periodically snapshotted to `memories.json`.
+- On startup, the server loads `memories.json`, replays WAL entries, compacts to a fresh snapshot, then truncates the WAL.
+
+This improves crash recovery behavior compared to snapshot-only persistence.
+
+For explicit control, set one of these environment variables:
+
+- `NEURODIVERGENT_MEMORY_DIR` to choose the directory that contains `memories.json`
+- `NEURODIVERGENT_MEMORY_FILE` to point at a specific snapshot file
+- `NEURODIVERGENT_MEMORY_MAX` to cap total memories (integer; default unlimited)
+- `NEURODIVERGENT_MEMORY_EVICTION` to choose eviction policy when max is reached:
+  - `lru` (default)
+  - `access_frequency`
+  - `district_priority`
+
+Mounts at `/home/node/.neurodivergent-memory` continue to work without any env override — that is the container's `node` user home and is checked automatically.
+
+> **⚠️ Breaking change (v0.1.9):** The image runs as the `node` user and **cannot read `/root`**, so previous mounts at `/root/.neurodivergent-memory` are silently skipped. Agents may appear to have lost all memories. See [Recovering memories after upgrade](#recovering-memories-after-upgrade) below.
+
+#### Recovering memories after upgrade
+
+If you previously mounted data at `/root/.neurodivergent-memory`, your snapshot is still intact on the host volume. Re-mount it using one of these options:
+
+**Option A — explicit `/data` mount (recommended):**
+
+```json
+"-e", "NEURODIVERGENT_MEMORY_DIR=/data",
+"-v", "mydata:/data"
+```
+
+**Option B — mount at the path the `node` user already owns:**
+
+```json
+"-v", "mydata:/home/node/.neurodivergent-memory"
+```
+
+No `NEURODIVERGENT_MEMORY_DIR` override is needed for option B — the server finds the existing snapshot automatically.
+
+For agents: if memories appear missing after upgrading the container, use `import_memories` to reload from a backup export, or ask your AI assistant to re-run `memory_stats` after the volume is remounted correctly to confirm restoration.
 
 ## Release Security
 
-- GitHub Actions runs on **Node.js 20 LTS** for CI and release automation
+- GitHub Actions runs on **Node.js 24 LTS** for CI and release automation
 - npm publishes use **OIDC provenance** with `npm publish --provenance --access public`
 - Docker images are built with **Buildx**, published to Docker Hub, and emitted with **SBOM** and **provenance** metadata
 - GitHub Actions generates **artifact attestations** for the npm tarball and the pushed container image digest
 - Tagged releases upload the npm tarball, checksums, and attestation bundles as release assets
+
+## Development RC Channel
+
+Pushes to the `development` branch publish **release candidates** using the same npm package name (`neurodivergent-memory`) and container repositories.
+
+- npm prereleases are published as `0.x.x-rc.N` with npm dist-tag `rc`.
+- npm prerelease suffix `N` uses `run_number.run_attempt` to avoid collisions on workflow re-runs.
+- Docker images are published with immutable `rc-0.x.x-rc.N` tags only, where `N` is derived from `run_number.run_attempt`.
+- GitHub releases for RC builds are marked as **pre-release**.
+
+These builds are intentionally less stable than the research preview line and should be used only for validation and early integration testing.
+
+### Live Readiness Smoke (project_id)
+
+Use the deterministic live smoke harness to validate `project_id` attribution/scoped retrieval end-to-end:
+
+- Local build target:
+
+```bash
+npm run smoke:project-id
+```
+
+- Latest Docker RC target (PowerShell):
+
+```powershell
+$rc = (Invoke-RestMethod -Uri "https://hub.docker.com/v2/repositories/twgbellok/neurodivergent-memory/tags?page_size=25").results |
+  Where-Object { $_.name -match '^rc-' } |
+  Sort-Object { $_.last_updated } -Descending |
+  Select-Object -First 1 -ExpandProperty name
+node test/live-project-id-smoke.mjs "docker run --rm -i twgbellok/neurodivergent-memory:$rc"
+```
+
+The smoke harness exits non-zero on failed assertions and is suitable as a release-readiness gate.
+
+## Error Contract
+
+Mutating and lookup tool failures are returned with a stable operator-facing shape embedded in the text response:
+
+```text
+❌ <summary>
+Code: NM_EXXX
+Message: Human-readable failure summary
+Recovery: Suggested next action
+```
+
+The leading summary line is contextual, while the `Code`/`Message`/`Recovery` block remains stable for operators to parse and search. This keeps MCP responses readable in chat clients while giving operators a stable code they can search in logs and release notes. Structured logs are written with Pino to stderr and include the same `code` field on known failure paths.
+
+## Concurrency Safety
+
+Mutating tools are serialized through an async mutex to prevent concurrent write races when multiple agents call the server at the same time.
+
+Write queue behavior:
+
+- Pending write operations are bounded by `NEURODIVERGENT_MEMORY_QUEUE_DEPTH` (default: `50`).
+- When the queue is full, mutating tools return `NM_E010` with a retry-oriented recovery message.
+- Queue high-water/clear transitions are logged with structured Pino warnings.
+
+WIP guardrail behavior:
+
+- `store_memory` checks practical in-progress task saturation per `agent_id` when task tags include in-progress markers.
+- The cap is controlled by `NEURODIVERGENT_MEMORY_WIP_LIMIT` (default: `1`; set `0` to disable).
+- Exceeding the cap emits a warning line in the tool response and logs `NM_E011` for operator visibility.
+
+## Loop Telemetry (Observe-Only)
+
+The server now tracks loop signals without blocking behavior changes:
+
+- Repetition detection on `store_memory` compares incoming content against the 10 most recent memories (same `agent_id` when provided) using raw BM25 similarity scores.
+- Stores that meet the repeat threshold set `repeat_detected: true` in the tool response and increment `repeat_write_count` on the matched memory.
+- Read/write ping-pong transitions are tracked in a rolling operation window and increment `ping_pong_counter` when threshold conditions are met.
+- `memory_stats` now includes a `loop_telemetry` block with:
+  - `repeat_write_candidates` (top 5)
+  - `ping_pong_candidates` (top 5)
+  - `recent_high_similarity_writes` (last 5)
+
+Configuration:
+
+- `NEURODIVERGENT_MEMORY_REPEAT_THRESHOLD` (default: `0.85`)
+- `NEURODIVERGENT_MEMORY_LOOP_WINDOW` (default: `20`)
+- `NEURODIVERGENT_MEMORY_PING_PONG_THRESHOLD` (default: `3`)
+
+## Performance Benchmark Baseline
+
+Issue #19 adds a deterministic benchmark harness for end-to-end MCP stdio measurements against the built server.
+
+Run it with:
+
+```bash
+npm run benchmark
+```
+
+The benchmark:
+
+- Uses an isolated temp persistence directory so it does not mutate your local memory graph.
+- Seeds each dataset tier, then measures `store_memory` throughput across 100 writes at the target tier.
+- Measures `search_memories` and `list_memories` latency over 100 iterations at 1k, 5k, and 10k memories.
+- Measures `traverse_from` latency at depths 2, 3, and 5 on a connected graph of 500 memories.
+- Prints the structured JSON report to stdout for automation-friendly capture.
+- Writes run-specific outputs to timestamped files under `benchmark-results/`.
+- Also writes rolling latest aliases:
+  - `benchmark-results/memory-benchmark-latest.json`
+  - `benchmark-results/memory-benchmark-latest.md`
+
+There is also a convenience alias:
+
+```bash
+npm run bench
+```
+
+The committed baseline is intended as a relative regression reference for RC vs stable comparisons, not as a universal absolute performance guarantee across machines.
+
+To intentionally refresh the committed baseline files in place:
+
+```bash
+npm run benchmark -- --update-baseline
+```
 
 ## Development
 
@@ -156,15 +326,138 @@ To use with Claude Desktop, add the server config:
 On MacOS: `~/Library/Application Support/Claude/claude_desktop_config.json`
 On Windows: `%APPDATA%/Claude/claude_desktop_config.json`
 
+For npm:
+
 ```json
 {
   "mcpServers": {
     "neurodivergent-memory": {
-      "command": "/path/to/neurodivergent-memory/build/index.js"
+      "command": "npx",
+      "args": ["neurodivergent-memory"]
     }
   }
 }
 ```
+
+For Docker:
+
+```json
+{
+  "mcpServers": {
+    "neurodivergent-memory": {
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "-e",
+        "NEURODIVERGENT_MEMORY_DIR=/data",
+        "-v",
+        "neurodivergent-memory-data:/data",
+        "docker.io/twgbellok/neurodivergent-memory:latest"
+      ]
+    }
+  }
+}
+```
+
+Fully auto-approved tools:
+
+```json
+{
+  "mcpServers": {
+    "neurodivergent-memory": {
+      "autoApprove": [
+        "store_memory",
+        "retrieve_memory",
+        "connect_memories",
+        "search_memories",
+        "update_memory",
+        "delete_memory",
+        "traverse_from",
+        "related_to",
+        "list_memories",
+        "memory_stats",
+        "import_memories"
+      ],
+      "disabled": false,
+      "timeout": 120,
+      "type": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "-e",
+        "NEURODIVERGENT_MEMORY_DIR=/data",
+        "-v",
+        "neurodivergent-memory-data:/data",
+        "docker.io/twgbellok/neurodivergent-memory:latest"
+      ],
+      "env": {}
+    }
+  }
+}
+```
+
+If you want to use the mcp server in Github Copilot Agent Workflows (github spins up a new VM every time, so cross-workflow memory is non-existent. Session memory is working, but is wiped upon job completion.):
+
+```mcp
+{
+  "mcpServers": {
+    "neurodivergent-memory": {
+      "type": "stdio",
+      "command": "npx",
+      "args": [
+        "neurodivergent-memory@0.1.8"
+      ],
+      "env": {
+        "NEURODIVERGENT_MEMORY_DIR": ".neurodivergent-memory"
+      },
+      "tools": [
+        "retrieve_memory",
+        "connect_memories",
+        "update_memory",
+        "delete_memory",
+        "traverse_from",
+        "related_to",
+        "import_memories",
+        "list_memories",
+        "store_memory",
+        "search_memories",
+        "memory_stats"
+      ]
+    }
+  }
+}
+```
+
+If you want per-project isolation instead of a shared global memory file, mount a project-specific host directory and keep the same container-side target. Use the path separator for your OS:
+
+- **Windows**: `${workspaceFolder}\.neurodivergent-memory:/data`
+- **macOS / Linux**: `${workspaceFolder}/.neurodivergent-memory:/data`
+
+```json
+{
+  "mcpServers": {
+    "neurodivergent-memory": {
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "-e",
+        "NEURODIVERGENT_MEMORY_DIR=/data",
+        "-v",
+        "${workspaceFolder}/.neurodivergent-memory:/data",
+        "docker.io/twgbellok/neurodivergent-memory:latest"
+      ]
+    }
+  }
+}
+```
+
+> **Note:** Replace `/` with `\` on Windows: `${workspaceFolder}\.neurodivergent-memory:/data`
 
 ### Docker Runtime
 
@@ -183,3 +476,91 @@ npm run inspector
 ```
 
 The Inspector will provide a URL to access debugging tools in your browser.
+
+## Appendix
+
+Here is an example copilot-instructions.md
+
+```copilot-instructions.md
+# neurodivergent-memory — Agent Bootstrap Instructions
+
+This file is automatically read by GitHub Copilot and compatible agents at the start of every session.
+It replaces the need to fetch the governance memory (`memory_11`) before working with this MCP server.
+
+---
+
+## What this server is
+
+`neurodivergent-memory` is a **Model Context Protocol (MCP) server** that stores and retrieves memories as a
+knowledge graph. It is designed for neurodivergent thinking patterns: non-linear, associative, tag-rich.
+
+Memories are organised into five **districts** (knowledge domains) and connected via bidirectional edges.
+Search uses **BM25 semantic ranking** — no embedding model or cloud LLM required.
+
+---
+
+## Canonical Tag Schema
+
+Always apply tags from the four namespaces below when calling `store_memory`.
+Multiple tags from different namespaces are expected on every memory.
+
+| Namespace | Purpose | Examples |
+|---|---|---|
+| `topic:X` | Subject matter / domain | `topic:unity-ecs`, `topic:adhd-strategies`, `topic:rust-async` |
+| `scope:X` | Breadth of the memory | `scope:concept`, `scope:project`, `scope:session`, `scope:global` |
+| `kind:X` | Type of knowledge | `kind:insight`, `kind:decision`, `kind:pattern`, `kind:reference`, `kind:task` |
+| `layer:X` | Abstraction level | `layer:architecture`, `layer:implementation`, `layer:debugging`, `layer:research` |
+
+**Example tag set for a Unity ECS memory:**
+```json
+["topic:unity-ecs", "topic:dots", "scope:project", "kind:pattern", "layer:architecture"]
+```
+
+---
+
+## Districts
+
+| Key | Purpose |
+| --- | --- |
+| `logical_analysis` | Structured thinking, analysis, research findings |
+| `emotional_processing` | Feelings, emotional states, affective responses |
+| `practical_execution` | Tasks, plans, implementations, action items |
+| `vigilant_monitoring` | Risks, warnings, constraints, safety concerns |
+| `creative_synthesis` | Novel connections, creative ideas, cross-domain insights |
+
+---
+
+## Available MCP Tools (quick reference)
+
+| Tool | Purpose |
+| --- | --- |
+| `store_memory` | Create a new memory node |
+| `retrieve_memory` | Fetch one memory by ID |
+| `update_memory` | Modify content, tags, district, valence, or intensity |
+| `delete_memory` | Remove a memory and all its connections |
+| `connect_memories` | Add an edge between two memory nodes |
+| `search_memories` | BM25-ranked search with optional `min_score`, district, tag, valence, intensity filters |
+| `traverse_from` | BFS graph walk from a node up to N hops |
+| `related_to` | Hop-proximity + BM25 blend for a given memory ID |
+| `list_memories` | Paginated enumeration of all stored memories |
+| `memory_stats` | Totals, per-district counts, most-accessed, orphans |
+| `import_memories` | Bulk seed from a JSON array |
+
+---
+
+## Persistence
+
+Memories are automatically saved to `~/.neurodivergent-memory/memories.json` on every write.
+The graph is restored on server startup — no data is lost between restarts.
+
+---
+
+## Bootstrap checklist for new agent sessions
+
+1. Call `memory_stats` to see how many memories exist.
+2. Use `search_memories` with a broad query to locate relevant prior context.
+3. Apply the canonical tag schema when calling `store_memory`.
+4. Connect new memories to related existing ones with `connect_memories`.
+5. Use `traverse_from` or `related_to` for associative retrieval rather than repeated searches.
+
+---

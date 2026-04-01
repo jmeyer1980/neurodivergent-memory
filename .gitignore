@@ -157,3 +157,9 @@ vite.config.ts.timestamp-*
 *token
 .mcpregistry_github_token
 .mcpregistry_registry_token
+
+# developmental artifacts not in build
+development-artifacts/
+test-results.txt
+benchmark-results/memory-benchmark-latest.json
+benchmark-results/memory-benchmark-latest.md

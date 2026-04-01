@@ -22,33 +22,19 @@ import {
   GetPromptRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 import * as fs from "fs";
-import * as path from "path";
-import * as os from "os";
-
-/**
- * Memory types representing different thought patterns
- */
-type MemoryArchetype = "scholar" | "merchant" | "mystic" | "guard";
-
-/**
- * Memory entity representing a stored thought/memory
- */
-interface MemoryNPC {
-  id: string;
-  name: string;
-  archetype: MemoryArchetype;
-  district: string;
-  content: string;
-  traits: string[];
-  concerns: string[];
-  connections: string[]; // IDs of connected memories
-  tags: string[];
-  created: Date;
-  last_accessed: Date;
-  access_count: number;
-  emotional_valence?: number; // -1 to 1, representing emotional charge
-  intensity?: number; // 0-1, representing mental energy/importance
-}
+import { logger } from "./core/logger.js";
+import { resolvePersistenceLocation } from "./core/persistence.js";
+import { AsyncMutex } from "./core/async-mutex.js";
+import { LoopTelemetryTracker } from "./core/loop-telemetry.js";
+import {
+  NM_ERRORS,
+  asMcpErrorShape,
+  createNMError,
+  formatMcpError,
+  mcpErrorResult,
+  type McpErrorShape,
+} from "./core/error-codes.js";
+import type { EpistemicStatus, EpistemicStatusFilter, MemoryArchetype, MemoryNPC } from "./core/types.js";
 
 /**
  * Memory district representing a knowledge domain
@@ -67,6 +53,20 @@ interface MemoryDistrict {
 interface ScoredMemory {
   memory: MemoryNPC;
   score: number;
+}
+
+interface StoreMemoryResult {
+  memory: MemoryNPC;
+  repeat_detected: boolean;
+  matched_memory_id?: string;
+  similarity_score?: number;
+  ping_pong_detected?: boolean;
+  ping_pong_count?: number;
+}
+
+interface OperationActorContext {
+  district?: string;
+  agent_id?: string;
 }
 
 /**
@@ -179,8 +179,18 @@ class BM25Index {
 /**
  * Path where memory graph is persisted between restarts.
  */
-const PERSISTENCE_DIR = path.join(os.homedir(), ".neurodivergent-memory");
-const PERSISTENCE_FILE = path.join(PERSISTENCE_DIR, "memories.json");
+const PERSISTENCE_LOCATION = resolvePersistenceLocation();
+const PERSISTENCE_DIR = PERSISTENCE_LOCATION.dir;
+const PERSISTENCE_FILE = PERSISTENCE_LOCATION.file;
+
+logger.info(
+  {
+    persistenceDir: PERSISTENCE_DIR,
+    persistenceFile: PERSISTENCE_FILE,
+    source: PERSISTENCE_LOCATION.source,
+  },
+  "Resolved persistence location",
+);
 
 /**
  * On-disk representation of a MemoryNPC: identical to MemoryNPC except that
@@ -200,6 +210,35 @@ interface MemorySnapshot {
   memories: { [id: string]: PersistedMemoryNPC };
 }
 
+type WalOperation = "store" | "update" | "delete" | "connect" | "import";
+
+const PROJECT_ID_MAX_LENGTH = 64;
+const PROJECT_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$/;
+
+type MemoryUpdatePayload = Partial<Pick<MemoryNPC, "content" | "tags" | "emotional_valence" | "intensity" | "district" | "epistemic_status" | "project_id" | "repeat_write_count" | "repeat_count" | "last_similarity_score" | "ping_pong_counter">> & {
+  project_id?: string | null;
+};
+
+interface WalEntry {
+  op: WalOperation;
+  payload: Record<string, unknown>;
+  timestamp: string;
+  seq: number;
+}
+
+type EvictionPolicy = "lru" | "access_frequency" | "district_priority";
+
+interface ImportMemoryEntry {
+  content: string;
+  district: string;
+  tags?: string[];
+  emotional_valence?: number;
+  intensity?: number;
+  agent_id?: string;
+  project_id?: string;
+  epistemic_status?: EpistemicStatus;
+}
+
 /**
  * Neurodivergent memory system
  */
@@ -208,20 +247,91 @@ class NeurodivergentMemory {
   private memories: { [id: string]: MemoryNPC } = {};
   private nextMemoryId = 1;
   private bm25 = new BM25Index();
+  private walSeq = 1;
+  private readonly walFile = `${PERSISTENCE_FILE}.wal.jsonl`;
+  private readonly maxMemories = this.parseMaxMemories(process.env.NEURODIVERGENT_MEMORY_MAX);
+  private readonly evictionPolicy = this.parseEvictionPolicy(process.env.NEURODIVERGENT_MEMORY_EVICTION);
+  private readonly repeatThreshold = parseNumberEnv(
+    process.env.NEURODIVERGENT_MEMORY_REPEAT_THRESHOLD,
+    0.85,
+    (value) => value > 0,
+  );
+  private readonly loopTelemetryWindowSize = parseIntegerEnv(
+    process.env.NEURODIVERGENT_MEMORY_LOOP_WINDOW,
+    20,
+    (value) => value > 1,
+  );
+  private readonly pingPongThreshold = parseIntegerEnv(
+    process.env.NEURODIVERGENT_MEMORY_PING_PONG_THRESHOLD,
+    3,
+    (value) => value > 0,
+  );
+  private readonly loopTelemetry = new LoopTelemetryTracker({
+    operationWindowSize: this.loopTelemetryWindowSize,
+    pingPongThreshold: this.pingPongThreshold,
+    repeatThreshold: this.repeatThreshold,
+  });
   private saveTimer: ReturnType<typeof setTimeout> | null = null;
   // Promise chain that ensures saves never run concurrently
   private saveChain: Promise<void> = Promise.resolve();
 
   constructor() {
     this.initializeDistricts();
-    this.loadFromDisk();
+    this.ensureStoragePathWritable();
+    this.loadStateWithWalRecovery();
   }
 
   // ── Persistence ────────────────────────────────────────────────────────────
 
-  private loadFromDisk(): void {
+  private ensureStoragePathWritable(): void {
     try {
-      if (!fs.existsSync(PERSISTENCE_FILE)) return;
+      fs.mkdirSync(PERSISTENCE_DIR, { recursive: true });
+      fs.accessSync(PERSISTENCE_DIR, fs.constants.W_OK);
+    } catch (err) {
+      logger.error({ code: NM_ERRORS.STORAGE_PATH_NOT_WRITABLE, persistenceDir: PERSISTENCE_DIR, err }, "Persistence directory is not writable");
+      throw createNMError(
+        NM_ERRORS.STORAGE_PATH_NOT_WRITABLE,
+        `Storage path is not writable: ${PERSISTENCE_DIR}`,
+        "Verify the configured persistence directory exists and is writable by the current process.",
+      );
+    }
+  }
+
+  private loadStateWithWalRecovery(): void {
+    const snapshotLoaded = this.loadSnapshot();
+    const replayResult = this.replayWal();
+    const startupEvictions = this.enforceMaxMemoriesOnStartup();
+
+    if (replayResult.replayed > 0 || startupEvictions > 0) {
+      try {
+        this.saveToDiskSync();
+        fs.writeFileSync(this.walFile, "", "utf-8");
+      } catch (err) {
+        logger.error({ code: NM_ERRORS.PERSISTENCE_WRITE_FAILED, walFile: this.walFile, err }, "Failed to compact snapshot after WAL replay/startup evictions");
+      }
+    }
+
+    const startupMode = replayResult.replayed > 0
+      ? "wal-replay"
+      : (snapshotLoaded ? "snapshot-load" : "fresh");
+    logger.info(
+      {
+        startupMode,
+        replayedWalEntries: replayResult.replayed,
+        appliedWalEntries: replayResult.mutated,
+        skippedWalEntries: replayResult.skipped,
+        startupEvictions,
+        memoryCount: Object.keys(this.memories).length,
+        maxMemories: this.maxMemories ?? "unlimited",
+        evictionPolicy: this.evictionPolicy,
+      },
+      "Memory startup path",
+    );
+  }
+
+  private loadSnapshot(): boolean {
+    try {
+      if (!fs.existsSync(PERSISTENCE_FILE)) return false;
       const raw = fs.readFileSync(PERSISTENCE_FILE, "utf-8");
       const snapshot: MemorySnapshot = JSON.parse(raw);
 
@@ -229,32 +339,130 @@ class NeurodivergentMemory {
 
       const memoriesMap = snapshot.memories ?? {};
       for (const [id, raw_mem] of Object.entries(memoriesMap)) {
-        const now = new Date();
-        const createdDate = new Date((raw_mem as any).created);
-        const lastAccessedDate = new Date((raw_mem as any).last_accessed);
-        const safeCreated =
-          isNaN(createdDate.getTime()) ? now : createdDate;
-        const safeLastAccessed =
-          isNaN(lastAccessedDate.getTime()) ? safeCreated : lastAccessedDate;
-        const mem: MemoryNPC = {
-          ...raw_mem,
-          created: safeCreated,
-          last_accessed: safeLastAccessed,
-        };
-        if (!this.districts[mem.district]) {
-          const valid = Object.keys(this.districts).join(", ");
-          process.stderr.write(`[neurodivergent-memory] Skipping memory ${id}: unknown district "${mem.district}". Valid districts are: ${valid}\n`);
-          continue;
+        const mem = this.deserializeMemory(raw_mem as PersistedMemoryNPC);
+        this.insertMemory(mem);
+      }
+      return true;
+    } catch (err) {
+      logger.warn({ code: NM_ERRORS.SNAPSHOT_LOAD_FAILED, err }, "Failed to load snapshot; starting with empty memory state");
+      this.clearState();
+      return false;
+    }
+  }
+
+  private replayWal(): { replayed: number; mutated: number; skipped: number } {
+    if (!fs.existsSync(this.walFile)) return { replayed: 0, mutated: 0, skipped: 0 };
+
+    let replayed = 0;
+    let mutated = 0;
+    let skipped = 0;
+    try {
+      const lines = fs.readFileSync(this.walFile, "utf-8").split(/\r?\n/);
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed) continue;
+        try {
+          const entry = JSON.parse(trimmed) as WalEntry;
+          this.walSeq = Math.max(this.walSeq, (entry.seq ?? 0) + 1);
+          replayed++;
+          const entryMutated = this.applyWalEntry(entry);
+          if (entryMutated) mutated++;
+        } catch (err) {
+          skipped++;
+          logger.warn({ code: NM_ERRORS.WAL_CORRUPT_ENTRY, walFile: this.walFile, entryPreview: trimmed.slice(0, 120), err }, "Skipping corrupt WAL entry");
         }
-        this.memories[id] = mem;
-        if (!this.districts[mem.district].memories.includes(id)) {
-          this.districts[mem.district].memories.push(id);
-        }
-        this.bm25.addDocument(id, this.documentText(mem));
       }
     } catch (err) {
-      // Corrupt or missing snapshot — start fresh
-      process.stderr.write(`[neurodivergent-memory] Failed to load snapshot: ${err}\n`);
+      logger.warn({ code: NM_ERRORS.WAL_CORRUPT_ENTRY, walFile: this.walFile, err }, "Failed reading WAL; continuing with snapshot state");
+    }
+
+    return { replayed, mutated, skipped };
+  }
+
+  private appendWalEntry(op: WalOperation, payload: Record<string, unknown>): void {
+    const entry: WalEntry = {
+      op,
+      payload,
+      timestamp: new Date().toISOString(),
+      seq: this.walSeq++,
+    };
+    try {
+      fs.appendFileSync(this.walFile, `${JSON.stringify(entry)}\n`, "utf-8");
+    } catch (err) {
+      logger.error({ code: NM_ERRORS.PERSISTENCE_WRITE_FAILED, walFile: this.walFile, err }, "Failed to append WAL entry");
+      throw createNMError(
+        NM_ERRORS.PERSISTENCE_WRITE_FAILED,
+        `Persistence write failed for WAL file: ${this.walFile}`,
+        "Check disk permissions and available space, then retry the mutating operation.",
+      );
+    }
+  }
+
+  private applyWalEntry(entry: WalEntry): boolean {
+    switch (entry.op) {
+      case "store": {
+        const mem = this.deserializeMemory(entry.payload.memory as PersistedMemoryNPC);
+        const inserted = this.insertMemory(mem);
+        if (inserted) {
+          this.nextMemoryId = Math.max(this.nextMemoryId, this.parseMemoryNumericId(mem.id) + 1);
+        }
+        return inserted;
+      }
+      case "update": {
+        const memoryId = String(entry.payload.memory_id ?? "");
+        const updates = (entry.payload.updates ?? {}) as MemoryUpdatePayload;
+        if (this.memories[memoryId]) {
+          this.applyMemoryUpdates(memoryId, updates);
+          return true;
+        }
+        return false;
+      }
+      case "delete": {
+        const memoryId = String(entry.payload.memory_id ?? "");
+        if (this.memories[memoryId]) {
+          this.deleteMemoryInternal(memoryId);
+          return true;
+        }
+        return false;
+      }
+      case "connect": {
+        const memoryId1 = String(entry.payload.memory_id_1 ?? "");
+        const memoryId2 = String(entry.payload.memory_id_2 ?? "");
+        const bidirectional = Boolean(entry.payload.bidirectional ?? true);
+        if (this.memories[memoryId1] && this.memories[memoryId2]) {
+          this.connectMemoriesInternal(memoryId1, memoryId2, bidirectional);
+          return true;
+        }
+        return false;
+      }
+      case "import": {
+        let serializedMemories: PersistedMemoryNPC[] = [];
+        if (Array.isArray(entry.payload.memories)) {
+          serializedMemories = entry.payload.memories as PersistedMemoryNPC[];
+        }
+
+        // Backward compatibility: legacy import WAL payload stored raw entries + optional default agent_id.
+        if (serializedMemories.length === 0 && Array.isArray(entry.payload.entries)) {
+          const legacyEntries = entry.payload.entries as ImportMemoryEntry[];
+          const legacyDefaultAgentId = typeof entry.payload.agent_id === "string"
+            ? entry.payload.agent_id
+            : undefined;
+          const materializedLegacy = this.materializeImportMemories(legacyEntries, legacyDefaultAgentId);
+          serializedMemories = materializedLegacy.map(memory => this.serializeMemory(memory));
+        }
+        let mutated = false;
+        for (const rawMemory of serializedMemories) {
+          const memory = this.deserializeMemory(rawMemory);
+          const inserted = this.insertMemory(memory);
+          if (inserted) {
+            this.nextMemoryId = Math.max(this.nextMemoryId, this.parseMemoryNumericId(memory.id) + 1);
+            mutated = true;
+          }
+        }
+        return mutated;
+      }
+      default:
+        return false;
     }
   }
 
@@ -266,25 +474,14 @@ class NeurodivergentMemory {
       this.saveChain = this.saveChain
         .then(() => this.saveToDiskAsync())
         .catch((err) => {
-          process.stderr.write(`[neurodivergent-memory] Failed to save snapshot: ${err}\n`);
+          logger.error({ err }, "Failed to save snapshot");
         });
     }, 100);
   }
 
   private async saveToDiskAsync(): Promise<void> {
     await fs.promises.mkdir(PERSISTENCE_DIR, { recursive: true });
-    const persistedMemories: { [id: string]: PersistedMemoryNPC } = {};
-    for (const [id, mem] of Object.entries(this.memories)) {
-      persistedMemories[id] = {
-        ...mem,
-        created: mem.created.toISOString(),
-        last_accessed: mem.last_accessed.toISOString(),
-      };
-    }
-    const snapshot: MemorySnapshot = {
-      nextMemoryId: this.nextMemoryId,
-      memories: persistedMemories,
-    };
+    const snapshot = this.createSnapshot();
     // Write to a temp file first, then rename for an atomic swap so a partial
     // write can never corrupt the live snapshot.
     const tmp = PERSISTENCE_FILE + ".tmp";
@@ -292,8 +489,277 @@ class NeurodivergentMemory {
     await fs.promises.rename(tmp, PERSISTENCE_FILE);
   }
 
+  private saveToDiskSync(): void {
+    fs.mkdirSync(PERSISTENCE_DIR, { recursive: true });
+    const snapshot = this.createSnapshot();
+    const tmp = PERSISTENCE_FILE + ".tmp";
+    fs.writeFileSync(tmp, JSON.stringify(snapshot, null, 2), "utf-8");
+    fs.renameSync(tmp, PERSISTENCE_FILE);
+  }
+
+  private createSnapshot(): MemorySnapshot {
+    const persistedMemories: { [id: string]: PersistedMemoryNPC } = {};
+    for (const [id, mem] of Object.entries(this.memories)) {
+      persistedMemories[id] = this.serializeMemory(mem);
+    }
+    return {
+      nextMemoryId: this.nextMemoryId,
+      memories: persistedMemories,
+    };
+  }
+
+  private clearState(): void {
+    this.memories = {};
+    this.nextMemoryId = 1;
+    this.bm25 = new BM25Index();
+    for (const district of Object.values(this.districts)) {
+      district.memories = [];
+    }
+  }
+
+  private serializeMemory(memory: MemoryNPC): PersistedMemoryNPC {
+    return {
+      ...memory,
+      created: memory.created.toISOString(),
+      last_accessed: memory.last_accessed.toISOString(),
+    };
+  }
+
+  private deserializeMemory(rawMem: PersistedMemoryNPC): MemoryNPC {
+    const now = new Date();
+    const createdDate = new Date((rawMem as any).created);
+    const lastAccessedDate = new Date((rawMem as any).last_accessed);
+    const safeCreated = isNaN(createdDate.getTime()) ? now : createdDate;
+    const safeLastAccessed = isNaN(lastAccessedDate.getTime()) ? safeCreated : lastAccessedDate;
+    const repeatWriteCount = rawMem.repeat_write_count ?? rawMem.repeat_count;
+    return {
+      ...rawMem,
+      created: safeCreated,
+      last_accessed: safeLastAccessed,
+      repeat_write_count: repeatWriteCount,
+      repeat_count: repeatWriteCount,
+    };
+  }
+
+  private parseMaxMemories(rawValue?: string): number | undefined {
+    if (!rawValue || !rawValue.trim()) return undefined;
+    const parsed = Number.parseInt(rawValue, 10);
+    if (!Number.isFinite(parsed) || parsed <= 0) return undefined;
+    return parsed;
+  }
+
+  private parseEvictionPolicy(rawValue?: string): EvictionPolicy {
+    if (rawValue === "access_frequency" || rawValue === "district_priority") {
+      return rawValue;
+    }
+    return "lru";
+  }
+
+  private ensureCapacityForInsert(recordWal = true): void {
+    if (!this.maxMemories) return;
+    while (Object.keys(this.memories).length >= this.maxMemories) {
+      const evictedId = this.evictOneMemory(recordWal);
+      if (!evictedId) return;
+      logger.info({ memoryId: evictedId, evictionPolicy: this.evictionPolicy, maxMemories: this.maxMemories }, "Evicted memory due to cap");
+    }
+  }
+
+  private enforceMaxMemoriesOnStartup(): number {
+    if (!this.maxMemories) return 0;
+    let evictions = 0;
+    while (Object.keys(this.memories).length > this.maxMemories) {
+      const evictedId = this.evictOneMemory(false);
+      if (!evictedId) break;
+      evictions++;
+    }
+    return evictions;
+  }
+
+  private evictOneMemory(recordWal = true): string | undefined {
+    const all = Object.values(this.memories);
+    if (all.length === 0) return undefined;
+
+    let candidate: MemoryNPC | undefined;
+    if (this.evictionPolicy === "access_frequency") {
+      candidate = all.reduce((lowest, current) =>
+        current.access_count < lowest.access_count ? current : lowest
+      );
+    } else if (this.evictionPolicy === "district_priority") {
+      const countsByDistrict = new Map<string, number>();
+      for (const memory of all) {
+        countsByDistrict.set(memory.district, (countsByDistrict.get(memory.district) ?? 0) + 1);
+      }
+      let topDistrict = all[0].district;
+      let topCount = -1;
+      for (const [district, count] of countsByDistrict.entries()) {
+        if (count > topCount) {
+          topCount = count;
+          topDistrict = district;
+        }
+      }
+      const districtMemories = all.filter(m => m.district === topDistrict);
+      candidate = districtMemories.reduce((oldest, current) =>
+        current.last_accessed.getTime() < oldest.last_accessed.getTime() ? current : oldest
+      );
+    } else {
+      candidate = all.reduce((oldest, current) =>
+        current.last_accessed.getTime() < oldest.last_accessed.getTime() ? current : oldest
+      );
+    }
+
+    if (!candidate) return undefined;
+    if (recordWal) {
+      this.appendWalEntry("delete", { memory_id: candidate.id, reason: "eviction" });
+    }
+    this.deleteMemoryInternal(candidate.id);
+    return candidate.id;
+  }
+
+  private parseMemoryNumericId(memoryId: string): number {
+    const numericPart = Number.parseInt(memoryId.replace(/^memory_/, ""), 10);
+    return Number.isFinite(numericPart) ? numericPart : 0;
+  }
+
+  private insertMemory(memory: MemoryNPC): boolean {
+    if (!this.districts[memory.district]) {
+      const valid = Object.keys(this.districts).join(", ");
+      logger.warn({ memoryId: memory.id, district: memory.district, validDistricts: valid }, "Skipping memory with unknown district during load");
+      return false;
+    }
+    // If the memory ID already exists in a different district, remove it from the old
+    // district array first to avoid duplicate district membership during WAL replay.
+    const existing = this.memories[memory.id];
+    if (existing && existing.district !== memory.district && this.districts[existing.district]) {
+      const oldDistrictMemories = this.districts[existing.district].memories;
+      const idx = oldDistrictMemories.indexOf(memory.id);
+      if (idx !== -1) {
+        oldDistrictMemories.splice(idx, 1);
+      }
+    }
+    this.memories[memory.id] = memory;
+    if (!this.districts[memory.district].memories.includes(memory.id)) {
+      this.districts[memory.district].memories.push(memory.id);
+    }
+    this.bm25.addDocument(memory.id, this.documentText(memory));
+    return true;
+  }
+
   private documentText(memory: MemoryNPC): string {
     return [memory.content, memory.name, ...memory.tags].join(" ");
+  }
+
+  private detectRepeatCandidate(content: string, agentId?: string): { memory: MemoryNPC; similarityScore: number } | undefined {
+    // Select the 10 most recently created memories for this agent (or globally) in O(N log k) with k=10,
+    // instead of sorting all memories (O(N log N)).
+    const candidates = Object.values(this.memories).filter(memory =>
+      agentId ? memory.agent_id === agentId : true,
+    );
+
+    const recentCandidates: MemoryNPC[] = [];
+    for (const memory of candidates) {
+      const createdTime = memory.created.getTime();
+
+      if (recentCandidates.length === 0) {
+        recentCandidates.push(memory);
+        continue;
+      }
+
+      // If we don't yet have 10 candidates, insert in sorted (descending created) position.
+      if (recentCandidates.length < 10) {
+        let inserted = false;
+        for (let i = 0; i < recentCandidates.length; i++) {
+          if (createdTime > recentCandidates[i].created.getTime()) {
+            recentCandidates.splice(i, 0, memory);
+            inserted = true;
+            break;
+          }
+        }
+        if (!inserted) {
+          recentCandidates.push(memory);
+        }
+        continue;
+      }
+
+      // We already have 10; only insert if this memory is newer than the oldest in the list.
+      const oldest = recentCandidates[recentCandidates.length - 1];
+      if (createdTime <= oldest.created.getTime()) {
+        continue;
+      }
+
+      let inserted = false;
+      for (let i = 0; i < recentCandidates.length; i++) {
+        if (createdTime > recentCandidates[i].created.getTime()) {
+          recentCandidates.splice(i, 0, memory);
+          inserted = true;
+          break;
+        }
+      }
+      if (inserted) {
+        // Trim back to 10 most recent
+        if (recentCandidates.length > 10) {
+          recentCandidates.length = 10;
+        }
+      }
+    }
+    if (recentCandidates.length === 0) {
+      return undefined;
+    }
+
+    const queryTerms = this.bm25.queryTerms(content);
+    const rawScores = recentCandidates.map(memory => ({
+      memory,
+      score: this.bm25.score(memory.id, queryTerms),
+    }));
+
+    // Normalize BM25 scores to a 0–1 similarity range relative to the best candidate,
+    // so that NEURODIVERGENT_MEMORY_REPEAT_THRESHOLD remains stable across corpus sizes.
+    const positiveScores = rawScores.filter(candidate => candidate.score > 0);
+    if (positiveScores.length === 0) {
+      return undefined;
+    }
+
+    const maxScore = positiveScores.reduce(
+      (currentMax, candidate) => (candidate.score > currentMax ? candidate.score : currentMax),
+      positiveScores[0].score,
+    );
+
+    const best = positiveScores.reduce(
+      (currentBest, candidate) => (candidate.score > currentBest.score ? candidate : currentBest),
+      positiveScores[0],
+    );
+
+    return {
+      memory: best.memory,
+      // Return similarity on a 0–1 scale so thresholds remain stable across corpus sizes.
+      similarityScore: best.score / maxScore,
+    };
+  }
+
+  private applyPingPongTelemetry(memory: MemoryNPC, actor?: OperationActorContext): { detected: boolean; count: number } {
+    const pingPong = this.loopTelemetry.recordWrite({
+      memory_id: memory.id,
+      district: actor?.district ?? memory.district,
+      agent_id: actor?.agent_id ?? memory.agent_id,
+    });
+    if (pingPong.pingPongDetected) {
+      memory.ping_pong_counter = (memory.ping_pong_counter ?? 0) + 1;
+      this.appendWalEntry("update", {
+        memory_id: memory.id,
+        updates: { ping_pong_counter: memory.ping_pong_counter },
+      });
+      logger.info(
+        {
+          event: "ping_pong_detected",
+          memory_id: memory.id,
+          count: pingPong.pingPongCount,
+          ping_pong_counter: memory.ping_pong_counter,
+        },
+        "Ping-pong telemetry detected",
+      );
+      return { detected: true, count: pingPong.pingPongCount };
+    }
+
+    return { detected: false, count: pingPong.pingPongCount };
   }
 
   // ── Districts ──────────────────────────────────────────────────────────────
@@ -340,97 +806,283 @@ class NeurodivergentMemory {
 
   // ── Core CRUD ──────────────────────────────────────────────────────────────
 
-  storeMemory(content: string, district: string, tags: string[] = [], emotional_valence?: number, intensity = 0.5): MemoryNPC {
+  storeMemory(
+    content: string,
+    district: string,
+    tags: string[] = [],
+    emotional_valence?: number,
+    intensity = 0.5,
+    agent_id?: string,
+    project_id?: string,
+    epistemic_status?: EpistemicStatus
+  ): StoreMemoryResult {
     if (!this.districts[district]) {
-      throw new Error(`Unknown district: ${district}`);
+      throw createNMError(
+        NM_ERRORS.UNKNOWN_DISTRICT,
+        `Unknown district: ${district}`,
+        `Use one of the configured districts: ${Object.keys(this.districts).join(", ")}.`,
+      );
+    }
+    if (project_id !== undefined) {
+      validateProjectId(project_id);
     }
 
-    const archetype = this.districts[district].archetype;
     const id = `memory_${this.nextMemoryId++}`;
+    const archetype = this.districts[district].archetype;
     const name = this.generateMemoryName(archetype, content);
+    const now = new Date();
+    const repeatCandidate = this.detectRepeatCandidate(content, agent_id);
+
+    let repeatDetected = false;
+    let matchedMemoryId: string | undefined;
+    let similarityScore: number | undefined;
+    let pingPongDetected = false;
+    let pingPongCount: number | undefined;
+
+    if (repeatCandidate && repeatCandidate.similarityScore >= this.loopTelemetry.getRepeatThreshold()) {
+      const matchedMemory = repeatCandidate.memory;
+      const nextRepeatCount = (matchedMemory.repeat_write_count ?? matchedMemory.repeat_count ?? 0) + 1;
+      matchedMemory.repeat_write_count = nextRepeatCount;
+      matchedMemory.repeat_count = nextRepeatCount;
+      matchedMemory.last_similarity_score = repeatCandidate.similarityScore;
+
+      this.appendWalEntry("update", {
+        memory_id: matchedMemory.id,
+        updates: {
+          repeat_write_count: matchedMemory.repeat_write_count,
+          repeat_count: matchedMemory.repeat_count,
+          last_similarity_score: matchedMemory.last_similarity_score,
+        },
+      });
+
+      const pingPongResult = this.applyPingPongTelemetry(matchedMemory, {
+        district,
+        agent_id,
+      });
+      pingPongDetected = pingPongResult.detected;
+      pingPongCount = pingPongResult.count;
+
+      this.loopTelemetry.recordHighSimilarityWrite({
+        memory_id: id,
+        matched_memory_id: matchedMemory.id,
+        similarity_score: repeatCandidate.similarityScore,
+        timestamp: now.toISOString(),
+        district,
+        agent_id,
+      });
+
+      repeatDetected = true;
+      matchedMemoryId = matchedMemory.id;
+      similarityScore = repeatCandidate.similarityScore;
+    }
 
     const memory: MemoryNPC = {
       id,
       name,
       archetype,
+      agent_id,
+      project_id,
       district,
       content,
       traits: this.generateTraits(archetype),
       concerns: this.generateConcerns(archetype),
       connections: [],
       tags,
-      created: new Date(),
-      last_accessed: new Date(),
+      created: now,
+      last_accessed: now,
       access_count: 1,
       emotional_valence,
-      intensity
+      intensity,
+      epistemic_status,
+      last_similarity_score: similarityScore,
     };
 
-    this.memories[id] = memory;
-    this.districts[district].memories.push(id);
-    this.bm25.addDocument(id, this.documentText(memory));
+    this.ensureCapacityForInsert();
+    this.appendWalEntry("store", { memory: this.serializeMemory(memory) });
+    this.insertMemory(memory);
+    this.loopTelemetry.recordWrite(memory);
     this.scheduleSave();
+    logger.info(
+      {
+        operation: "store",
+        memoryId: memory.id,
+        district,
+        agentId: agent_id ?? "unassigned",
+        repeat_detected: repeatDetected,
+        matched_memory_id: matchedMemoryId,
+        similarity_score: similarityScore,
+      },
+      "Stored memory",
+    );
+
+    return {
+      memory,
+      repeat_detected: repeatDetected,
+      matched_memory_id: matchedMemoryId,
+      similarity_score: similarityScore,
+      ping_pong_detected: pingPongDetected,
+      ping_pong_count: pingPongCount,
+    };
+  }
+
+  retrieveMemory(id: string, actor?: OperationActorContext): MemoryNPC | null {
+    const memory = this.memories[id];
+    if (!memory) {
+      return null;
+    }
+
+    this.loopTelemetry.recordRead({
+      memory_id: id,
+      district: actor?.district ?? memory.district,
+      agent_id: actor?.agent_id ?? memory.agent_id,
+    });
 
     return memory;
   }
 
-  retrieveMemory(id: string): MemoryNPC | null {
+  updateMemory(
+    id: string,
+    updates: MemoryUpdatePayload,
+    actor?: OperationActorContext,
+  ): MemoryNPC {
     const memory = this.memories[id];
-    if (memory) {
-      memory.last_accessed = new Date();
-      memory.access_count++;
-      this.scheduleSave();
+    if (!memory) {
+      throw createNMError(
+        NM_ERRORS.MEMORY_NOT_FOUND,
+        `Memory not found: ${id}`,
+        "List or search memories first, then retry with a valid memory ID.",
+      );
     }
-    return memory || null;
-  }
-
-  updateMemory(id: string, updates: Partial<Pick<MemoryNPC, "content" | "tags" | "emotional_valence" | "intensity" | "district">>): MemoryNPC {
-    const memory = this.memories[id];
-    if (!memory) throw new Error(`Memory not found: ${id}`);
 
     if (updates.district !== undefined && !this.districts[updates.district]) {
-      throw new Error(`Unknown district: ${updates.district}`);
+      throw createNMError(
+        NM_ERRORS.UNKNOWN_DISTRICT,
+        `Unknown district: ${updates.district}`,
+        `Use one of the configured districts: ${Object.keys(this.districts).join(", ")}.`,
+      );
+    }
+    if (updates.project_id !== undefined && updates.project_id !== null) {
+      validateProjectId(updates.project_id);
     }
 
-    // Move district reference if district changed
+    this.appendWalEntry("update", { memory_id: id, updates });
+    this.applyMemoryUpdates(id, updates);
+    this.applyPingPongTelemetry(this.memories[id], actor);
+    this.scheduleSave();
+    logger.info({ operation: "update", memoryId: id, changedFields: Object.keys(updates).sort() }, "Updated memory");
+
+    return this.memories[id];
+  }
+
+  deleteMemory(id: string): void {
+    const memory = this.memories[id];
+    if (!memory) {
+      throw createNMError(
+        NM_ERRORS.MEMORY_NOT_FOUND,
+        `Memory not found: ${id}`,
+        "List or search memories first, then retry with a valid memory ID.",
+      );
+    }
+
+    this.appendWalEntry("delete", { memory_id: id });
+    this.deleteMemoryInternal(id);
+    this.scheduleSave();
+    logger.info({ operation: "delete", memoryId: id }, "Deleted memory");
+  }
+
+  connectMemories(memoryId1: string, memoryId2: string, bidirectional = true, _agent_id?: string) {
+    if (!this.memories[memoryId1]) {
+      throw createNMError(
+        NM_ERRORS.MEMORY_NOT_FOUND,
+        `Memory not found: ${memoryId1}`,
+        "List or search memories first, then retry with a valid source memory ID.",
+      );
+    }
+    if (!this.memories[memoryId2]) {
+      throw createNMError(
+        NM_ERRORS.MEMORY_NOT_FOUND,
+        `Memory not found: ${memoryId2}`,
+        "List or search memories first, then retry with a valid target memory ID.",
+      );
+    }
+
+    this.appendWalEntry("connect", {
+      memory_id_1: memoryId1,
+      memory_id_2: memoryId2,
+      bidirectional,
+    });
+    this.connectMemoriesInternal(memoryId1, memoryId2, bidirectional);
+
+    this.scheduleSave();
+    logger.info({ operation: "connect", memoryId1, memoryId2, bidirectional, agentId: _agent_id ?? "unassigned" }, "Connected memories");
+  }
+
+  private applyMemoryUpdates(
+    id: string,
+    updates: MemoryUpdatePayload,
+  ): void {
+    const memory = this.memories[id];
+    if (!memory) return;
+
     if (updates.district !== undefined && updates.district !== memory.district) {
-      this.districts[memory.district].memories = this.districts[memory.district].memories.filter(mid => mid !== id);
-      this.districts[updates.district].memories.push(id);
-      memory.district = updates.district;
+      const nextDistrict = this.districts[updates.district];
+      if (!nextDistrict) {
+        logger.warn(
+          {
+            code: NM_ERRORS.UNKNOWN_DISTRICT,
+            memoryId: id,
+            attemptedDistrict: updates.district,
+          },
+          "Skipping district update with unknown district",
+        );
+      } else {
+        this.districts[memory.district].memories = this.districts[memory.district].memories.filter(mid => mid !== id);
+        nextDistrict.memories.push(id);
+        memory.district = updates.district;
+      }
     }
 
     if (updates.content !== undefined) memory.content = updates.content;
     if (updates.tags !== undefined) memory.tags = updates.tags;
     if (updates.emotional_valence !== undefined) memory.emotional_valence = updates.emotional_valence;
     if (updates.intensity !== undefined) memory.intensity = updates.intensity;
+    if (updates.epistemic_status !== undefined) memory.epistemic_status = updates.epistemic_status;
+    if (updates.repeat_write_count !== undefined) {
+      memory.repeat_write_count = updates.repeat_write_count;
+      memory.repeat_count = updates.repeat_write_count;
+    }
+    if (updates.repeat_count !== undefined) {
+      memory.repeat_count = updates.repeat_count;
+      memory.repeat_write_count = updates.repeat_count;
+    }
+    if (updates.last_similarity_score !== undefined) memory.last_similarity_score = updates.last_similarity_score;
+    if (updates.ping_pong_counter !== undefined) memory.ping_pong_counter = updates.ping_pong_counter;
+    if (Object.prototype.hasOwnProperty.call(updates, "project_id")) {
+      if (updates.project_id === null) {
+        delete memory.project_id;
+      } else if (updates.project_id !== undefined) {
+        memory.project_id = updates.project_id;
+      }
+    }
 
-    // Rebuild BM25 entry with updated text
     this.bm25.addDocument(id, this.documentText(memory));
-    this.scheduleSave();
-
-    return memory;
   }
 
-  deleteMemory(id: string): void {
+  private deleteMemoryInternal(id: string): void {
     const memory = this.memories[id];
-    if (!memory) throw new Error(`Memory not found: ${id}`);
+    if (!memory) return;
 
-    // Remove from district
     this.districts[memory.district].memories = this.districts[memory.district].memories.filter(mid => mid !== id);
-
-    // Remove all incoming connections
     for (const other of Object.values(this.memories)) {
       other.connections = other.connections.filter(cid => cid !== id);
     }
 
     this.bm25.removeDocument(id);
     delete this.memories[id];
-    this.scheduleSave();
   }
 
-  connectMemories(memoryId1: string, memoryId2: string, bidirectional = true) {
-    if (!this.memories[memoryId1]) throw new Error(`Memory not found: ${memoryId1}`);
-    if (!this.memories[memoryId2]) throw new Error(`Memory not found: ${memoryId2}`);
+  private connectMemoriesInternal(memoryId1: string, memoryId2: string, bidirectional: boolean): void {
+    if (!this.memories[memoryId1] || !this.memories[memoryId2]) return;
 
     if (!this.memories[memoryId1].connections.includes(memoryId2)) {
       this.memories[memoryId1].connections.push(memoryId2);
@@ -439,8 +1091,6 @@ class NeurodivergentMemory {
     if (bidirectional && !this.memories[memoryId2].connections.includes(memoryId1)) {
       this.memories[memoryId2].connections.push(memoryId1);
     }
-
-    this.scheduleSave();
   }
 
   // ── Search ─────────────────────────────────────────────────────────────────
@@ -448,7 +1098,9 @@ class NeurodivergentMemory {
   searchMemories(
     query: string,
     district?: string,
+    project_id?: string,
     tags?: string[],
+    epistemic_statuses?: EpistemicStatusFilter[],
     min_score?: number,
     emotional_valence_min?: number,
     emotional_valence_max?: number,
@@ -461,10 +1113,21 @@ class NeurodivergentMemory {
       candidates = candidates.filter(m => m.district === district);
     }
 
+    if (project_id) {
+      candidates = candidates.filter(m => m.project_id === project_id);
+    }
+
     if (tags && tags.length > 0) {
       candidates = candidates.filter(m =>
         tags.some(tag => m.tags.includes(tag))
       );
+    }
+
+    if (epistemic_statuses && epistemic_statuses.length > 0) {
+      candidates = candidates.filter(m => {
+        const status = m.epistemic_status ?? "unset";
+        return epistemic_statuses.includes(status);
+      });
     }
 
     if (emotional_valence_min !== undefined) {
@@ -511,7 +1174,13 @@ class NeurodivergentMemory {
 
   traverseFrom(memoryId: string, depth: number, filterDistrict?: string): MemoryNPC[] {
     const root = this.memories[memoryId];
-    if (!root) throw new Error(`Memory not found: ${memoryId}`);
+    if (!root) {
+      throw createNMError(
+        NM_ERRORS.MEMORY_NOT_FOUND,
+        `Memory not found: ${memoryId}`,
+        "List or search memories first, then retry with a valid memory ID.",
+      );
+    }
 
     const visited = new Set<string>();
     const queue: Array<{ id: string; level: number }> = [{ id: memoryId, level: 0 }];
@@ -546,7 +1215,13 @@ class NeurodivergentMemory {
 
   relatedTo(memoryId: string, query?: string): ScoredMemory[] {
     const root = this.memories[memoryId];
-    if (!root) throw new Error(`Memory not found: ${memoryId}`);
+    if (!root) {
+      throw createNMError(
+        NM_ERRORS.MEMORY_NOT_FOUND,
+        `Memory not found: ${memoryId}`,
+        "List or search memories first, then retry with a valid memory ID.",
+      );
+    }
 
     // Collect memories within 2 hops with their hop distance
     const hopMap = new Map<string, number>();
@@ -596,10 +1271,11 @@ class NeurodivergentMemory {
 
   // ── Listing & Stats ────────────────────────────────────────────────────────
 
-  listMemories(page = 1, page_size = 20, district?: string, archetype?: string): { memories: MemoryNPC[]; total: number; page: number; page_size: number; total_pages: number } {
+  listMemories(page = 1, page_size = 20, district?: string, archetype?: string, project_id?: string): { memories: MemoryNPC[]; total: number; page: number; page_size: number; total_pages: number } {
     let all = Object.values(this.memories);
     if (district) all = all.filter(m => m.district === district);
     if (archetype) all = all.filter(m => m.archetype === archetype);
+    if (project_id) all = all.filter(m => m.project_id === project_id);
 
     all.sort((a, b) => b.created.getTime() - a.created.getTime());
 
@@ -611,27 +1287,85 @@ class NeurodivergentMemory {
     return { memories, total, page, page_size, total_pages };
   }
 
-  memoryStats(): object {
-    const allMems = Object.values(this.memories);
+  memoryStats(project_id?: string): object {
+    const allMems = project_id
+      ? Object.values(this.memories).filter(m => m.project_id === project_id)
+      : Object.values(this.memories);
     const totalMemories = allMems.length;
+    const perAgent: { [key: string]: number } = {};
+    const perProject: { [key: string]: number } = {};
 
     const perDistrict: { [key: string]: number } = {};
+    const epistemicStatusBreakdown: { [key: string]: number } = {
+      draft: 0,
+      validated: 0,
+      outdated: 0,
+      unset: 0,
+    };
+    const KNOWN_EPISTEMIC_STATUSES: EpistemicStatusFilter[] = ["draft", "validated", "outdated", "unset"];
     for (const key of Object.keys(this.districts)) perDistrict[key] = 0;
     for (const m of allMems) perDistrict[m.district] = (perDistrict[m.district] ?? 0) + 1;
+    for (const m of allMems) {
+      const agentKey = m.agent_id ?? "unassigned";
+      const projectKey = m.project_id ?? "(unset)";
+      perAgent[agentKey] = (perAgent[agentKey] ?? 0) + 1;
+      perProject[projectKey] = (perProject[projectKey] ?? 0) + 1;
+      const rawStatus = m.epistemic_status ?? "unset";
+      const statusKey: EpistemicStatusFilter =
+        (KNOWN_EPISTEMIC_STATUSES as string[]).includes(rawStatus) ? (rawStatus as EpistemicStatusFilter) : "unset";
+      epistemicStatusBreakdown[statusKey] = (epistemicStatusBreakdown[statusKey] ?? 0) + 1;
+    }
 
-    // Count unique directed edges (sum of all connections arrays).
-    // Bidirectional edges appear in both endpoints, so the raw sum over-counts
-    // them; we divide by 2 for an approximate undirected edge count.
-    const totalConnections = Math.round(allMems.reduce((sum, m) => sum + m.connections.length, 0) / 2);
+    // Count undirected edges where both endpoints are inside the current scope.
+    // This avoids inflating scoped totals with cross-project links.
+    const scopedIds = new Set(allMems.map(m => m.id));
+    const totalConnections = Math.round(
+      allMems.reduce(
+        (sum, m) => sum + m.connections.filter(connectionId => scopedIds.has(connectionId)).length,
+        0,
+      ) / 2,
+    );
 
     const mostAccessed = [...allMems]
       .sort((a, b) => b.access_count - a.access_count)
       .slice(0, 5)
       .map(m => ({ id: m.id, name: m.name, access_count: m.access_count }));
 
-    const orphans = allMems.filter(m => m.connections.length === 0).map(m => ({ id: m.id, name: m.name }));
+    const orphans = allMems
+      .filter(m => m.connections.filter(connectionId => scopedIds.has(connectionId)).length === 0)
+      .map(m => ({ id: m.id, name: m.name }));
+    const loopTelemetrySummary: any = this.loopTelemetry.summarize(allMems);
+    const loop_telemetry =
+      loopTelemetrySummary && Array.isArray(loopTelemetrySummary.recent_high_similarity_writes)
+        ? {
+            ...loopTelemetrySummary,
+            recent_high_similarity_writes: loopTelemetrySummary.recent_high_similarity_writes.filter(
+              (write: any) => {
+                const candidateIds = [
+                  write?.memory_id,
+                  write?.source_memory_id,
+                  write?.target_memory_id,
+                  write?.memoryId,
+                  write?.sourceId,
+                  write?.targetId,
+                ].filter((id: unknown): id is string => typeof id === "string");
+                return candidateIds.some(id => scopedIds.has(id));
+              },
+            ),
+          }
+        : loopTelemetrySummary;
 
-    return { totalMemories, perDistrict, totalConnections, mostAccessed, orphans };
+    return {
+      totalMemories,
+      perDistrict,
+      perAgent,
+      perProject,
+      epistemicStatusBreakdown,
+      totalConnections,
+      mostAccessed,
+      orphans,
+      loop_telemetry,
+    };
   }
 
   // ── Helpers ────────────────────────────────────────────────────────────────
@@ -695,21 +1429,277 @@ class NeurodivergentMemory {
 
   /**
    * Import memories from a structured JSON array (bootstrap/seed).
-   * Each entry must have: content, district. Optional: tags, emotional_valence, intensity.
+   * Each entry must have: content, district.
+   * Optional per-entry fields:
+   * - tags
+   * - emotional_valence
+   * - intensity
+   * - agent_id (overrides default_agent_id when provided)
+   * - project_id
+   * - epistemic_status (must be a valid EpistemicStatus)
    * Returns the list of newly created memory IDs.
    */
-  importMemories(entries: Array<{ content: string; district: string; tags?: string[]; emotional_valence?: number; intensity?: number }>): string[] {
-    const ids: string[] = [];
-    for (const entry of entries) {
-      const mem = this.storeMemory(entry.content, entry.district, entry.tags ?? [], entry.emotional_valence, entry.intensity ?? 0.5);
-      ids.push(mem.id);
+  importMemories(entries: Array<{ content: string; district: string; tags?: string[]; emotional_valence?: number; intensity?: number; agent_id?: string; project_id?: string; epistemic_status?: EpistemicStatus }>, default_agent_id?: string): string[] {
+    const materialized = this.materializeImportMemories(entries, default_agent_id);
+    // Append WAL entry for the import before mutating in-memory state to preserve the
+    // "append before mutate" invariant used elsewhere in the system.
+    this.appendWalEntry("import", { memories: materialized.map(mem => this.serializeMemory(mem)) });
+    for (const memory of materialized) {
+      this.ensureCapacityForInsert();
+      this.insertMemory(memory);
     }
-    return ids;
+    this.scheduleSave();
+    logger.info({ operation: "import", importedCount: materialized.length, agentId: default_agent_id ?? "unassigned" }, "Imported memories");
+    return materialized.map(mem => mem.id);
+  }
+
+  private materializeImportMemories(
+    entries: ImportMemoryEntry[],
+    default_agent_id?: string,
+  ): MemoryNPC[] {
+    let nextId = this.nextMemoryId;
+    const memories: MemoryNPC[] = [];
+    for (const entry of entries) {
+      if (!this.districts[entry.district]) {
+        throw createNMError(
+          NM_ERRORS.UNKNOWN_DISTRICT,
+          `Unknown district: ${entry.district}`,
+          `Use one of the configured districts: ${Object.keys(this.districts).join(", ")}.`,
+        );
+      }
+
+      const id = `memory_${nextId++}`;
+      const archetype = this.districts[entry.district].archetype;
+      const name = this.generateMemoryName(archetype, entry.content);
+      const now = new Date();
+      if (entry.project_id !== undefined) {
+        validateProjectId(entry.project_id, "entries[].project_id");
+      }
+      const memory: MemoryNPC = {
+        id,
+        name,
+        archetype,
+        agent_id: entry.agent_id ?? default_agent_id,
+        project_id: entry.project_id,
+        district: entry.district,
+        content: entry.content,
+        traits: this.generateTraits(archetype),
+        concerns: this.generateConcerns(archetype),
+        connections: [],
+        tags: entry.tags ?? [],
+        created: now,
+        last_accessed: now,
+        access_count: 1,
+        emotional_valence: entry.emotional_valence,
+        intensity: entry.intensity ?? 0.5,
+        epistemic_status: entry.epistemic_status,
+      };
+      memories.push(memory);
+    }
+    this.nextMemoryId = nextId;
+    return memories;
   }
 }
 
 // Global memory system instance
 const memorySystem = new NeurodivergentMemory();
+
+const DEFAULT_WRITE_QUEUE_DEPTH = 50;
+const DEFAULT_WIP_LIMIT = 1;
+const writeMutex = new AsyncMutex();
+const configuredWriteQueueDepth = parseIntegerEnv(
+  process.env.NEURODIVERGENT_MEMORY_QUEUE_DEPTH,
+  DEFAULT_WRITE_QUEUE_DEPTH,
+  (value) => value > 0,
+);
+const configuredWipLimit = parseIntegerEnv(
+  process.env.NEURODIVERGENT_MEMORY_WIP_LIMIT,
+  DEFAULT_WIP_LIMIT,
+  (value) => value >= 0,
+);
+
+let pendingWriteQueueDepth = 0;
+let queueBackpressureActive = false;
+
+function parseIntegerEnv(
+  rawValue: string | undefined,
+  fallback: number,
+  validator: (value: number) => boolean,
+): number {
+  if (!rawValue || !rawValue.trim()) {
+    return fallback;
+  }
+
+  const parsed = Number.parseInt(rawValue, 10);
+  if (!Number.isFinite(parsed) || !validator(parsed)) {
+    return fallback;
+  }
+
+  return parsed;
+}
+
+function parseNumberEnv(
+  rawValue: string | undefined,
+  fallback: number,
+  validator: (value: number) => boolean,
+): number {
+  if (!rawValue || !rawValue.trim()) {
+    return fallback;
+  }
+
+  const parsed = Number.parseFloat(rawValue);
+  if (!Number.isFinite(parsed) || !validator(parsed)) {
+    return fallback;
+  }
+
+  return parsed;
+}
+
+function validateProjectId(projectId: string, fieldPath = "project_id"): void {
+  if (typeof projectId !== "string") {
+    throw createNMError(
+      NM_ERRORS.INPUT_VALIDATION_FAILED,
+      `Invalid ${fieldPath}: must be a string.`,
+      `Provide a string value for ${fieldPath} matching ${PROJECT_ID_PATTERN.toString()}.`,
+    );
+  }
+  // Keep an explicit length check for a clearer operator-facing error than regex mismatch.
+  if (projectId.length > PROJECT_ID_MAX_LENGTH) {
+    throw createNMError(
+      NM_ERRORS.INPUT_VALIDATION_FAILED,
+      `Invalid ${fieldPath}: maximum length is ${PROJECT_ID_MAX_LENGTH}.`,
+      `Use a shorter ${fieldPath} matching ${PROJECT_ID_PATTERN.toString()}.`,
+    );
+  }
+
+  if (!PROJECT_ID_PATTERN.test(projectId)) {
+    throw createNMError(
+      NM_ERRORS.INPUT_VALIDATION_FAILED,
+      `Invalid ${fieldPath}: must match ${PROJECT_ID_PATTERN.toString()}.`,
+      `Use letters/numbers and . _ : - only, starting with an alphanumeric character.`,
+    );
+  }
+}
+
+function normalizeTag(tag: string): string {
+  return tag
+    .trim()
+    .toLowerCase()
+    .replace(/\s*:\s*/g, ":")
+    .replace(/[\s-]+/g, "_");
+}
+
+function hasTaskInProgressTags(tags: string[] = []): boolean {
+  const normalizedTags = new Set(tags.map(normalizeTag));
+
+  const hasTaskTag =
+    normalizedTags.has("kind:task") ||
+    normalizedTags.has("type:task") ||
+    normalizedTags.has("task");
+
+  const hasInProgressTag =
+    normalizedTags.has("status:in_progress") ||
+    normalizedTags.has("state:in_progress") ||
+    normalizedTags.has("in_progress");
+
+  return hasTaskTag && hasInProgressTag;
+}
+
+function findExistingInProgressTasks(agentId: string): MemoryNPC[] {
+  return memorySystem
+    .getAllMemories()
+    .filter(memory =>
+      memory.district === "practical_execution" &&
+      memory.agent_id === agentId &&
+      hasTaskInProgressTags(memory.tags),
+    );
+}
+
+function buildWipGuardrailWarning(agentId: string, existingTasks: MemoryNPC[]): string {
+  const existingPreview = existingTasks
+    .slice(0, 3)
+    .map(memory => `${memory.id} (${memory.name})`)
+    .join(", ");
+
+  return `⚠️ WIP guardrail: agent ${agentId} already has ${existingTasks.length} in-progress practical task(s): ${existingPreview}. Consider completing or re-triaging before adding more in-progress work.`;
+}
+
+async function runMutatingTool<T>(toolName: string, operation: () => Promise<T> | T): Promise<T> {
+  if (pendingWriteQueueDepth >= configuredWriteQueueDepth) {
+    throw createNMError(
+      NM_ERRORS.WRITE_QUEUE_CAPACITY,
+      "Write queue is at capacity. Retry after a brief delay.",
+      "Wait for pending writes to drain, then retry the mutating call.",
+    );
+  }
+
+  pendingWriteQueueDepth += 1;
+  if (!queueBackpressureActive && pendingWriteQueueDepth >= configuredWriteQueueDepth) {
+    queueBackpressureActive = true;
+    logger.warn(
+      {
+        toolName,
+        code: NM_ERRORS.WRITE_QUEUE_CAPACITY,
+        queueDepth: pendingWriteQueueDepth,
+        queueCapacity: configuredWriteQueueDepth,
+      },
+      "Write queue high-water mark reached",
+    );
+  }
+
+  try {
+    return await writeMutex.runExclusive(operation);
+  } finally {
+    pendingWriteQueueDepth = Math.max(0, pendingWriteQueueDepth - 1);
+    if (queueBackpressureActive && pendingWriteQueueDepth < configuredWriteQueueDepth) {
+      queueBackpressureActive = false;
+      logger.warn(
+        {
+          toolName,
+          code: NM_ERRORS.WRITE_QUEUE_CAPACITY,
+          queueDepth: pendingWriteQueueDepth,
+          queueCapacity: configuredWriteQueueDepth,
+        },
+        "Write queue high-water mark cleared",
+      );
+    }
+  }
+}
+
+function normalizeToolError(error: unknown, fallback: McpErrorShape): McpErrorShape {
+  return asMcpErrorShape(error, fallback);
+}
+
+function logToolFailure(toolName: string, error: McpErrorShape, originalError?: unknown): void {
+  const logPayload: Record<string, unknown> = {
+    toolName,
+    code: error.code,
+  };
+
+  if (error.message) {
+    logPayload.message = error.message;
+  }
+
+  if (originalError && originalError !== error) {
+    if (originalError instanceof Error) {
+      logPayload.originalError = {
+        name: originalError.name,
+        message: originalError.message,
+        stack: originalError.stack,
+      };
+    } else {
+      logPayload.originalError = originalError;
+    }
+  }
+
+  logger.warn(logPayload, "Tool request failed");
+}
+
+function toolErrorResult(toolName: string, summary: string, error: unknown, fallback: McpErrorShape) {
+  const normalizedError = normalizeToolError(error, fallback);
+  logToolFailure(toolName, normalizedError, error);
+  return mcpErrorResult(summary, normalizedError);
+}
 
 /**
  * Create an MCP server with capabilities for resources (to list/read memories),
@@ -772,7 +1762,11 @@ server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
     const district = districts.find(d => d.name.toLowerCase() === districtKey.toLowerCase());
 
     if (!district) {
-      throw new Error(`District not found: ${districtKey}`);
+      throw createNMError(
+        NM_ERRORS.UNKNOWN_DISTRICT,
+        `District not found: ${districtKey}`,
+        "List resources to discover valid district URIs before retrying.",
+      );
     }
 
     // Map district display names back to internal keys
@@ -812,7 +1806,11 @@ server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
     const memory = memorySystem.retrieveMemory(memoryId);
 
     if (!memory) {
-      throw new Error(`Memory not found: ${memoryId}`);
+      throw createNMError(
+        NM_ERRORS.MEMORY_NOT_FOUND,
+        `Memory not found: ${memoryId}`,
+        "List or search memories first, then retry with a valid memory URI.",
+      );
     }
 
     const connectedMemories = memorySystem.getConnectedMemories(memoryId);
@@ -834,7 +1832,11 @@ server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
     };
   }
 
-  throw new Error(`Invalid URI: ${request.params.uri}`);
+  throw createNMError(
+    NM_ERRORS.INPUT_VALIDATION_FAILED,
+    `Invalid URI: ${request.params.uri}`,
+    "Use a memory://district/... or memory://memory/... URI from list_resources.",
+  );
 });
 
 /**
@@ -875,6 +1877,19 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
               minimum: 0,
               maximum: 1,
               description: "Mental energy/importance (0-1)"
+            },
+            agent_id: {
+              type: "string",
+              description: "Optional creator agent identifier"
+            },
+            project_id: {
+              type: "string",
+              description: "Optional project identifier for attribution and scoped retrieval"
+            },
+            epistemic_status: {
+              type: "string",
+              enum: ["draft", "validated", "outdated"],
+              description: "Optional epistemic status for planning memories"
             }
           },
           required: ["content", "district"]
@@ -889,6 +1904,15 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             memory_id: {
               type: "string",
               description: "ID of the memory to retrieve"
+            },
+            district: {
+              type: "string",
+              enum: ["logical_analysis", "emotional_processing", "practical_execution", "vigilant_monitoring", "creative_synthesis"],
+              description: "Optional caller district for loop telemetry attribution"
+            },
+            agent_id: {
+              type: "string",
+              description: "Optional caller agent identifier for loop telemetry attribution"
             }
           },
           required: ["memory_id"]
@@ -896,7 +1920,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: "update_memory",
-        description: "Update an existing memory's content, tags, district, emotional_valence, or intensity",
+        description: "Update an existing memory's content, tags, district, emotional_valence, intensity, or epistemic_status",
         inputSchema: {
           type: "object",
           properties: {
@@ -929,6 +1953,24 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
               minimum: 0,
               maximum: 1,
               description: "New intensity (optional)"
+            },
+            actor_district: {
+              type: "string",
+              enum: ["logical_analysis", "emotional_processing", "practical_execution", "vigilant_monitoring", "creative_synthesis"],
+              description: "Optional caller district for loop telemetry attribution"
+            },
+            agent_id: {
+              type: "string",
+              description: "Optional caller agent identifier for loop telemetry attribution"
+            },
+            project_id: {
+              type: ["string", "null"],
+              description: "New project identifier (optional); pass null to clear existing project attribution"
+            },
+            epistemic_status: {
+              type: "string",
+              enum: ["draft", "validated", "outdated"],
+              description: "New epistemic status (optional)"
             }
           },
           required: ["memory_id"]
@@ -966,6 +2008,10 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
               type: "boolean",
               description: "Whether connection goes both ways",
               default: true
+            },
+            agent_id: {
+              type: "string",
+              description: "Optional agent identifier performing the connection"
             }
           },
           required: ["memory_id_1", "memory_id_2"]
@@ -986,10 +2032,19 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
               enum: ["logical_analysis", "emotional_processing", "practical_execution", "vigilant_monitoring", "creative_synthesis"],
               description: "Optional district filter"
             },
+            project_id: {
+              type: "string",
+              description: "Optional project_id filter"
+            },
             tags: {
               type: "array",
               items: { type: "string" },
               description: "Optional tag filters (OR logic)"
+            },
+            epistemic_statuses: {
+              type: "array",
+              items: { type: "string", enum: ["draft", "validated", "outdated", "unset"] },
+              description: "Optional epistemic status filters"
             },
             min_score: {
               type: "number",
@@ -1094,6 +2149,10 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
               type: "string",
               enum: ["scholar", "merchant", "mystic", "guard"],
               description: "Optional archetype filter"
+            },
+            project_id: {
+              type: "string",
+              description: "Optional project_id filter"
             }
           }
         }
@@ -1103,12 +2162,17 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         description: "Return aggregate statistics: total count, per-district counts, connection count, most-accessed nodes, and orphan nodes",
         inputSchema: {
           type: "object",
-          properties: {}
+          properties: {
+            project_id: {
+              type: "string",
+              description: "Optional project_id scope for filtered stats"
+            }
+          }
         }
       },
       {
         name: "import_memories",
-        description: "Bulk-import memories from a JSON array. Each entry requires content and district; tags, emotional_valence, and intensity are optional.",
+        description: "Bulk-import memories from a JSON array. Each entry requires content and district; tags, emotional_valence, intensity, and epistemic_status are optional.",
         inputSchema: {
           type: "object",
           properties: {
@@ -1124,11 +2188,18 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
                   },
                   tags: { type: "array", items: { type: "string" } },
                   emotional_valence: { type: "number", minimum: -1, maximum: 1 },
-                  intensity: { type: "number", minimum: 0, maximum: 1 }
+                  intensity: { type: "number", minimum: 0, maximum: 1 },
+                  agent_id: { type: "string" },
+                  project_id: { type: "string" },
+                  epistemic_status: { type: "string", enum: ["draft", "validated", "outdated"] }
                 },
                 required: ["content", "district"]
               },
               description: "Array of memory entries to import"
+            },
+            agent_id: {
+              type: "string",
+              description: "Optional default agent identifier applied to entries without agent_id"
             }
           },
           required: ["entries"]
@@ -1145,145 +2216,241 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
 server.setRequestHandler(CallToolRequestSchema, async (request) => {
   switch (request.params.name) {
     case "store_memory": {
-      const { content, district, tags = [], emotional_valence, intensity = 0.5 } = request.params.arguments as any;
+      const { content, district, tags = [], emotional_valence, intensity = 0.5, agent_id, project_id, epistemic_status } = request.params.arguments as any;
 
       try {
-        const memory = memorySystem.storeMemory(content, district, tags, emotional_valence, intensity);
+        const shouldCheckWipLimit =
+          configuredWipLimit > 0 &&
+          district === "practical_execution" &&
+          typeof agent_id === "string" &&
+          hasTaskInProgressTags(tags);
+
+        let wipWarning: string | undefined;
+
+        const storeResult = await runMutatingTool(
+          "store_memory",
+          () => {
+            if (shouldCheckWipLimit) {
+              const existingInProgressTasks = findExistingInProgressTasks(agent_id);
+              if (existingInProgressTasks.length >= configuredWipLimit) {
+                wipWarning = buildWipGuardrailWarning(agent_id, existingInProgressTasks);
+                logger.warn(
+                  {
+                    toolName: "store_memory",
+                    code: NM_ERRORS.WIP_LIMIT_EXCEEDED,
+                    agentId: agent_id,
+                    limit: configuredWipLimit,
+                    currentInProgressCount: existingInProgressTasks.length,
+                  },
+                  "WIP guardrail warning emitted",
+                );
+              }
+            }
+
+            return memorySystem.storeMemory(
+              content,
+              district,
+              tags,
+              emotional_valence,
+              intensity,
+              agent_id,
+              project_id,
+              epistemic_status,
+            );
+          },
+        );
+        const memory = storeResult.memory;
+        const warningLine = wipWarning ? `\n${wipWarning}` : "";
+        const repeatLines = [
+          `repeat_detected: ${storeResult.repeat_detected ? "true" : "false"}`,
+          storeResult.matched_memory_id ? `matched_memory_id: ${storeResult.matched_memory_id}` : undefined,
+          storeResult.similarity_score !== undefined ? `similarity_score: ${storeResult.similarity_score.toFixed(3)}` : undefined,
+          storeResult.ping_pong_detected ? `ping_pong_detected: true (transition_count=${storeResult.ping_pong_count ?? 0})` : undefined,
+        ].filter(Boolean).join("\n");
         return {
           content: [{
             type: "text",
-            text: `🧠 Stored memory "${memory.name}" in ${memorySystem.getAllDistricts().find(d => d.name.toLowerCase().replace(/\s+/g, '_') === district)?.name || district}\nID: ${memory.id}\nArchetype: ${memory.archetype}`
+            text: `🧠 Stored memory "${memory.name}" in ${memorySystem.getAllDistricts().find(d => d.name.toLowerCase().replace(/\s+/g, '_') === district)?.name || district}\nID: ${memory.id}\nArchetype: ${memory.archetype}\nAgent: ${memory.agent_id ?? "unassigned"}\nProject: ${memory.project_id ?? "unset"}\nEpistemic status: ${memory.epistemic_status ?? "unset"}\n${repeatLines}${warningLine}`
           }]
         };
       } catch (error) {
-        return {
-          content: [{
-            type: "text",
-            text: `❌ Failed to store memory: ${error instanceof Error ? error.message : String(error)}`
-          }],
-          isError: true
-        };
+        return toolErrorResult(
+          "store_memory",
+          "Failed to store memory",
+          error,
+          formatMcpError(
+            NM_ERRORS.INPUT_VALIDATION_FAILED,
+            "Store memory request was invalid.",
+            "Verify required arguments and retry the store_memory call.",
+          ),
+        );
       }
     }
 
     case "retrieve_memory": {
-      const { memory_id } = request.params.arguments as any;
-      const memory = memorySystem.retrieveMemory(memory_id);
+      const { memory_id, district, agent_id } = request.params.arguments as any;
+      const memory = memorySystem.retrieveMemory(memory_id, { district, agent_id });
 
       if (!memory) {
-        return {
-          content: [{
-            type: "text",
-            text: `❌ Memory not found: ${memory_id}`
-          }],
-          isError: true
-        };
+        return toolErrorResult(
+          "retrieve_memory",
+          "Failed to retrieve memory",
+          createNMError(
+            NM_ERRORS.MEMORY_NOT_FOUND,
+            `Memory not found: ${memory_id}`,
+            "List or search memories first, then retry with a valid memory ID.",
+          ),
+          formatMcpError(
+            NM_ERRORS.MEMORY_NOT_FOUND,
+            `Memory not found: ${memory_id}`,
+            "List or search memories first, then retry with a valid memory ID.",
+          ),
+        );
       }
 
       return {
         content: [{
           type: "text",
-          text: `🧠 Retrieved memory "${memory.name}"\nDistrict: ${memory.district}\nContent: ${memory.content}\nTags: ${memory.tags.join(', ')}\nEmotional valence: ${memory.emotional_valence ?? 'unset'}\nIntensity: ${memory.intensity ?? 'unset'}\nAccess count: ${memory.access_count}`
+          text: `🧠 Retrieved memory "${memory.name}"\nDistrict: ${memory.district}\nAgent: ${memory.agent_id ?? 'unassigned'}\nProject: ${memory.project_id ?? 'unset'}\nEpistemic status: ${memory.epistemic_status ?? 'unset'}\nContent: ${memory.content}\nTags: ${memory.tags.join(', ')}\nEmotional valence: ${memory.emotional_valence ?? 'unset'}\nIntensity: ${memory.intensity ?? 'unset'}\nAccess count: ${memory.access_count}`
         }]
       };
     }
 
     case "update_memory": {
-      const { memory_id, content, district, tags, emotional_valence, intensity } = request.params.arguments as any;
+      const { memory_id, content, district, tags, emotional_valence, intensity, epistemic_status, project_id, actor_district, agent_id } = request.params.arguments as any;
       try {
-      const updates: Partial<Pick<MemoryNPC, "content" | "tags" | "emotional_valence" | "intensity" | "district">> = {};
+        const updates: MemoryUpdatePayload = {};
         if (content !== undefined) updates.content = content;
         if (district !== undefined) updates.district = district;
         if (tags !== undefined) updates.tags = tags;
         if (emotional_valence !== undefined) updates.emotional_valence = emotional_valence;
         if (intensity !== undefined) updates.intensity = intensity;
+        if (epistemic_status !== undefined) updates.epistemic_status = epistemic_status;
+        if (project_id !== undefined) updates.project_id = project_id;
 
-        const memory = memorySystem.updateMemory(memory_id, updates);
+        const memory = await runMutatingTool(
+          "update_memory",
+          () => memorySystem.updateMemory(memory_id, updates, { district: actor_district, agent_id }),
+        );
         return {
           content: [{
             type: "text",
-            text: `✏️ Updated memory "${memory.name}" (${memory_id})\nDistrict: ${memory.district}\nTags: ${memory.tags.join(', ')}`
+            text: `✏️ Updated memory "${memory.name}" (${memory_id})\nDistrict: ${memory.district}\nProject: ${memory.project_id ?? 'unset'}\nEpistemic status: ${memory.epistemic_status ?? 'unset'}\nTags: ${memory.tags.join(', ')}`
           }]
         };
       } catch (error) {
-        return {
-          content: [{ type: "text", text: `❌ Failed to update memory: ${error instanceof Error ? error.message : String(error)}` }],
-          isError: true
-        };
+        return toolErrorResult(
+          "update_memory",
+          "Failed to update memory",
+          error,
+          formatMcpError(
+            NM_ERRORS.INPUT_VALIDATION_FAILED,
+            "Update memory request was invalid.",
+            "Verify the memory ID and supplied fields, then retry update_memory.",
+          ),
+        );
       }
     }
 
     case "delete_memory": {
       const { memory_id } = request.params.arguments as any;
       try {
-        memorySystem.deleteMemory(memory_id);
+        await runMutatingTool("delete_memory", () => memorySystem.deleteMemory(memory_id));
         return {
           content: [{ type: "text", text: `🗑️ Deleted memory ${memory_id}` }]
         };
       } catch (error) {
-        return {
-          content: [{ type: "text", text: `❌ Failed to delete memory: ${error instanceof Error ? error.message : String(error)}` }],
-          isError: true
-        };
+        return toolErrorResult(
+          "delete_memory",
+          "Failed to delete memory",
+          error,
+          formatMcpError(
+            NM_ERRORS.INPUT_VALIDATION_FAILED,
+            "Delete memory request was invalid.",
+            "Verify the memory ID and retry delete_memory.",
+          ),
+        );
       }
     }
 
     case "connect_memories": {
-      const { memory_id_1, memory_id_2, bidirectional = true } = request.params.arguments as any;
+      const { memory_id_1, memory_id_2, bidirectional = true, agent_id } = request.params.arguments as any;
 
       try {
-        memorySystem.connectMemories(memory_id_1, memory_id_2, bidirectional);
+        await runMutatingTool(
+          "connect_memories",
+          () => memorySystem.connectMemories(memory_id_1, memory_id_2, bidirectional, agent_id),
+        );
         return {
           content: [{
             type: "text",
-            text: `🔗 Connected memories ${memory_id_1} and ${memory_id_2}${bidirectional ? ' (bidirectional)' : ' (unidirectional)'}`
+            text: `🔗 Connected memories ${memory_id_1} and ${memory_id_2}${bidirectional ? ' (bidirectional)' : ' (unidirectional)'}\nAgent: ${agent_id ?? 'unassigned'}`
           }]
         };
       } catch (error) {
-        return {
-          content: [{
-            type: "text",
-            text: `❌ Failed to connect memories: ${error instanceof Error ? error.message : String(error)}`
-          }],
-          isError: true
-        };
+        return toolErrorResult(
+          "connect_memories",
+          "Failed to connect memories",
+          error,
+          formatMcpError(
+            NM_ERRORS.INPUT_VALIDATION_FAILED,
+            "Connect memories request was invalid.",
+            "Verify both memory IDs and retry connect_memories.",
+          ),
+        );
       }
     }
 
     case "search_memories": {
       const {
-        query, district, tags,
+        query, district, project_id, tags, epistemic_statuses,
         min_score,
         emotional_valence_min, emotional_valence_max,
         intensity_min, intensity_max
       } = request.params.arguments as any;
+      try {
+        if (project_id !== undefined) {
+          validateProjectId(project_id);
+        }
 
-      const results = memorySystem.searchMemories(
-        query, district, tags,
-        min_score,
-        emotional_valence_min, emotional_valence_max,
-        intensity_min, intensity_max
-      );
+        const results = memorySystem.searchMemories(
+          query, district, project_id, tags, epistemic_statuses,
+          min_score,
+          emotional_valence_min, emotional_valence_max,
+          intensity_min, intensity_max
+        );
 
-      if (results.length === 0) {
+        if (results.length === 0) {
+          return {
+            content: [{
+              type: "text",
+              text: `🔍 No memories found matching query: "${query}"`
+            }]
+          };
+        }
+
+        const resultText = results.map(({ memory, score }) =>
+          `• [${score.toFixed(3)}] ${memory.id} — ${memory.name} (${memory.archetype})\n  ${memory.content.substring(0, 80)}${memory.content.length > 80 ? '…' : ''}`
+        ).join('\n');
+
         return {
           content: [{
             type: "text",
-            text: `🔍 No memories found matching query: "${query}"`
+            text: `🔍 Found ${results.length} memories (ranked by BM25 relevance):\n${resultText}`
           }]
         };
+      } catch (error) {
+        return toolErrorResult(
+          "search_memories",
+          "Search failed",
+          error,
+          formatMcpError(
+            NM_ERRORS.INPUT_VALIDATION_FAILED,
+            "Search request was invalid.",
+            "Verify query and filter arguments, then retry search_memories.",
+          ),
+        );
       }
-
-      const resultText = results.map(({ memory, score }) =>
-        `• [${score.toFixed(3)}] ${memory.id} — ${memory.name} (${memory.archetype})\n  ${memory.content.substring(0, 80)}${memory.content.length > 80 ? '…' : ''}`
-      ).join('\n');
-
-      return {
-        content: [{
-          type: "text",
-          text: `🔍 Found ${results.length} memories (ranked by BM25 relevance):\n${resultText}`
-        }]
-      };
     }
 
     case "traverse_from": {
@@ -1298,7 +2465,16 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         ).join('\n');
         return { content: [{ type: "text", text: `🕸️ Traversal from ${memory_id} (depth ${depth}) — ${results.length} results:\n${text}` }] };
       } catch (error) {
-        return { content: [{ type: "text", text: `❌ Traversal failed: ${error instanceof Error ? error.message : String(error)}` }], isError: true };
+        return toolErrorResult(
+          "traverse_from",
+          "Traversal failed",
+          error,
+          formatMcpError(
+            NM_ERRORS.INPUT_VALIDATION_FAILED,
+            "Traversal request was invalid.",
+            "Verify the memory ID and traversal depth, then retry traverse_from.",
+          ),
+        );
       }
     }
 
@@ -1314,51 +2490,117 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         ).join('\n');
         return { content: [{ type: "text", text: `🔗 Related memories for ${memory_id} (${results.length} results):\n${text}` }] };
       } catch (error) {
-        return { content: [{ type: "text", text: `❌ related_to failed: ${error instanceof Error ? error.message : String(error)}` }], isError: true };
+        return toolErrorResult(
+          "related_to",
+          "related_to failed",
+          error,
+          formatMcpError(
+            NM_ERRORS.INPUT_VALIDATION_FAILED,
+            "related_to request was invalid.",
+            "Verify the memory ID and retry related_to.",
+          ),
+        );
       }
     }
 
     case "list_memories": {
-      const { page = 1, page_size = 20, district, archetype } = request.params.arguments as any;
-      const result = memorySystem.listMemories(page, page_size, district, archetype);
-      if (result.memories.length === 0) {
-        return { content: [{ type: "text", text: `📋 No memories found (page ${page})` }] };
+      const { page = 1, page_size = 20, district, archetype, project_id } = request.params.arguments as any;
+      try {
+        if (project_id !== undefined) {
+          validateProjectId(project_id);
+        }
+        const result = memorySystem.listMemories(page, page_size, district, archetype, project_id);
+        if (result.memories.length === 0) {
+          return { content: [{ type: "text", text: `📋 No memories found (page ${page})` }] };
+        }
+        const text = result.memories.map(m =>
+          `• ${m.id} — ${m.name} [${m.district}] | project: ${m.project_id ?? 'unset'} | tags: ${m.tags.join(', ') || 'none'}`
+        ).join('\n');
+        return {
+          content: [{
+            type: "text",
+            text: `📋 Memories (page ${result.page}/${result.total_pages}, total ${result.total}):\n${text}`
+          }]
+        };
+      } catch (error) {
+        return toolErrorResult(
+          "list_memories",
+          "List memories failed",
+          error,
+          formatMcpError(
+            NM_ERRORS.INPUT_VALIDATION_FAILED,
+            "List memories request was invalid.",
+            "Verify pagination and filter arguments, then retry list_memories.",
+          ),
+        );
       }
-      const text = result.memories.map(m =>
-        `• ${m.id} — ${m.name} [${m.district}] | tags: ${m.tags.join(', ') || 'none'}`
-      ).join('\n');
-      return {
-        content: [{
-          type: "text",
-          text: `📋 Memories (page ${result.page}/${result.total_pages}, total ${result.total}):\n${text}`
-        }]
-      };
     }
 
     case "memory_stats": {
-      const stats = memorySystem.memoryStats() as any;
-      const districtLines = Object.entries(stats.perDistrict)
-        .map(([k, v]) => `  ${k}: ${v}`)
-        .join('\n');
-      const topAccessed = stats.mostAccessed
-        .map((m: any) => `  ${m.id} — ${m.name} (${m.access_count} accesses)`)
-        .join('\n');
-      const orphanList = stats.orphans.length > 0
-        ? stats.orphans.map((m: any) => `  ${m.id} — ${m.name}`).join('\n')
-        : '  (none)';
+      const { project_id } = request.params.arguments as any;
+      try {
+        if (project_id !== undefined) {
+          validateProjectId(project_id);
+        }
+        const stats = memorySystem.memoryStats(project_id) as any;
+        const districtLines = Object.entries(stats.perDistrict)
+          .map(([k, v]) => `  ${k}: ${v}`)
+          .join('\n');
+        const perAgentLines = Object.entries(stats.perAgent)
+          .map(([k, v]) => `  ${k}: ${v}`)
+          .join('\n');
+        const perProjectLines = Object.entries(stats.perProject)
+          .map(([k, v]) => `  ${k}: ${v}`)
+          .join('\n');
+        const epistemicLines = Object.entries(stats.epistemicStatusBreakdown)
+          .map(([k, v]) => `  ${k}: ${v}`)
+          .join('\n');
+        const topAccessed = stats.mostAccessed
+          .map((m: any) => `  ${m.id} — ${m.name} (${m.access_count} accesses)`)
+          .join('\n');
+        const orphanList = stats.orphans.length > 0
+          ? stats.orphans.map((m: any) => `  ${m.id} — ${m.name}`).join('\n')
+          : '  (none)';
+        const repeatCandidates = stats.loop_telemetry?.repeat_write_candidates?.length > 0
+          ? stats.loop_telemetry.repeat_write_candidates
+              .map((m: any) => `  ${m.id} — ${m.name} (repeat_write_count=${m.repeat_write_count}, last_similarity=${(m.last_similarity_score ?? 0).toFixed(3)})`)
+              .join("\n")
+          : "  (none)";
+        const pingPongCandidates = stats.loop_telemetry?.ping_pong_candidates?.length > 0
+          ? stats.loop_telemetry.ping_pong_candidates
+              .map((m: any) => `  ${m.id} — ${m.name} (ping_pong_counter=${m.ping_pong_counter})`)
+              .join("\n")
+          : "  (none)";
+        const recentSimilarityWrites = stats.loop_telemetry?.recent_high_similarity_writes?.length > 0
+          ? stats.loop_telemetry.recent_high_similarity_writes
+              .map((entry: any) => `  ${entry.memory_id} -> ${entry.matched_memory_id} (score=${Number(entry.similarity_score).toFixed(3)}, district=${entry.district}, agent=${entry.agent_id ?? "unassigned"})`)
+              .join("\n")
+          : "  (none)";
 
-      return {
-        content: [{
-          type: "text",
-          text: `📊 Memory Stats\nTotal memories: ${stats.totalMemories}\nTotal connections: ${stats.totalConnections}\n\nPer district:\n${districtLines}\n\nMost accessed:\n${topAccessed}\n\nOrphans (no connections):\n${orphanList}`
-        }]
-      };
+        return {
+          content: [{
+            type: "text",
+            text: `📊 Memory Stats\nScope project_id: ${project_id ?? 'all'}\nTotal memories: ${stats.totalMemories}\nTotal connections: ${stats.totalConnections}\n\nPer district:\n${districtLines}\n\nPer agent:\n${perAgentLines || '  (none)'}\n\nPer project:\n${perProjectLines || '  (none)'}\n\nEpistemic status:\n${epistemicLines || '  (none)'}\n\nMost accessed:\n${topAccessed}\n\nOrphans (no connections):\n${orphanList}\n\nLoop telemetry:\nrepeat_write_candidates:\n${repeatCandidates}\nping_pong_candidates:\n${pingPongCandidates}\nrecent_high_similarity_writes:\n${recentSimilarityWrites}`
+          }]
+        };
+      } catch (error) {
+        return toolErrorResult(
+          "memory_stats",
+          "Memory stats failed",
+          error,
+          formatMcpError(
+            NM_ERRORS.INPUT_VALIDATION_FAILED,
+            "Memory stats request was invalid.",
+            "Verify optional filters and retry memory_stats.",
+          ),
+        );
+      }
     }
 
     case "import_memories": {
-      const { entries } = request.params.arguments as any;
+      const { entries, agent_id } = request.params.arguments as any;
       try {
-        const ids = memorySystem.importMemories(entries);
+        const ids = await runMutatingTool("import_memories", () => memorySystem.importMemories(entries, agent_id));
         return {
           content: [{
             type: "text",
@@ -1366,15 +2608,34 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           }]
         };
       } catch (error) {
-        return {
-          content: [{ type: "text", text: `❌ Import failed: ${error instanceof Error ? error.message : String(error)}` }],
-          isError: true
-        };
+        return toolErrorResult(
+          "import_memories",
+          "Import failed",
+          error,
+          formatMcpError(
+            NM_ERRORS.INPUT_VALIDATION_FAILED,
+            "Import request was invalid.",
+            "Verify each entry includes valid required fields, then retry import_memories.",
+          ),
+        );
       }
     }
 
     default:
-      throw new Error(`Unknown tool: ${request.params.name}`);
+      return toolErrorResult(
+        String(request.params.name),
+        "Unknown tool",
+        createNMError(
+          NM_ERRORS.UNKNOWN_TOOL,
+          `Unknown tool: ${request.params.name}`,
+          "Call list_tools to discover supported tool names before retrying.",
+        ),
+        formatMcpError(
+          NM_ERRORS.UNKNOWN_TOOL,
+          `Unknown tool: ${request.params.name}`,
+          "Call list_tools to discover supported tool names before retrying.",
+        ),
+      );
   }
 });
 
@@ -1479,7 +2740,11 @@ server.setRequestHandler(GetPromptRequestSchema, async (request) => {
     }
 
     default:
-      throw new Error(`Unknown prompt: ${request.params.name}`);
+      throw createNMError(
+        NM_ERRORS.INPUT_VALIDATION_FAILED,
+        `Unknown prompt: ${request.params.name}`,
+        "Call list_prompts to discover supported prompt names before retrying.",
+      );
   }
 });
 
@@ -1493,6 +2758,6 @@ async function main() {
 }
 
 main().catch((error) => {
-  console.error("Server error:", error);
+  logger.fatal({ err: error }, "Server failed to start");
   process.exit(1);
 });
