@@ -189,10 +189,32 @@ Pushes to the `development` branch publish **release candidates** using the same
 
 - npm prereleases are published as `0.x.x-rc.N` with npm dist-tag `rc`.
 - npm prerelease suffix `N` uses `run_number.run_attempt` to avoid collisions on workflow re-runs.
-- Docker images are published with `rc-0.x.x` (moving) and `rc-0.x.x-rc.N` tags, where `N` is derived from `run_number.run_attempt` (immutable per run attempt).
+- Docker images are published with immutable `rc-0.x.x-rc.N` tags only, where `N` is derived from `run_number.run_attempt`.
 - GitHub releases for RC builds are marked as **pre-release**.
 
 These builds are intentionally less stable than the research preview line and should be used only for validation and early integration testing.
+
+### Live Readiness Smoke (project_id)
+
+Use the deterministic live smoke harness to validate `project_id` attribution/scoped retrieval end-to-end:
+
+- Local build target:
+
+```bash
+npm run smoke:project-id
+```
+
+- Latest Docker RC target (PowerShell):
+
+```powershell
+$rc = (Invoke-RestMethod -Uri "https://hub.docker.com/v2/repositories/twgbellok/neurodivergent-memory/tags?page_size=25").results |
+  Where-Object { $_.name -match '^rc-' } |
+  Sort-Object { $_.last_updated } -Descending |
+  Select-Object -First 1 -ExpandProperty name
+node test/live-project-id-smoke.mjs "docker run --rm -i twgbellok/neurodivergent-memory:$rc"
+```
+
+The smoke harness exits non-zero on failed assertions and is suitable as a release-readiness gate.
 
 ## Error Contract
 

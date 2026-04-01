@@ -30,6 +30,7 @@
 - Docker named volume at `/data` is now pre-created with `node` ownership in the image, preventing EACCES errors when no bind-mount ownership is set
 - Docker examples updated to use explicit `/data` data directory and document per-project isolation with cross-platform path guidance
 - Tool handlers now normalize known failures to the NM_E taxonomy instead of returning inconsistent plain-text error messages
+- RC container publish now emits immutable per-run tags only (`rc-0.x.x-rc.N`) to avoid Docker Hub immutability failures when updating floating base tags
 
 ### Documentation
 

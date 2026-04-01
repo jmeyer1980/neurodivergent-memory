@@ -35,6 +35,8 @@
     "bench": "npm run benchmark",
     "build": "tsc && node -e \"require('fs').chmodSync('build/index.js', '755')\"",
     "test": "npm run build && node --test",
+    "smoke:project-id": "npm run build && node test/live-project-id-smoke.mjs",
+    "smoke:project-id:target": "node test/live-project-id-smoke.mjs",
     "benchmark": "npm run build && node benchmarks/memory-benchmark.mjs",
     "prepare": "npm run build",
     "watch": "tsc --watch",
