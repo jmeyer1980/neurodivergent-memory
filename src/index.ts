@@ -1295,7 +1295,26 @@ class NeurodivergentMemory {
       .map(m => ({ id: m.id, name: m.name, access_count: m.access_count }));
 
     const orphans = allMems.filter(m => m.connections.length === 0).map(m => ({ id: m.id, name: m.name }));
-    const loop_telemetry = this.loopTelemetry.summarize(allMems);
+    const loopTelemetrySummary: any = this.loopTelemetry.summarize(allMems);
+    const loop_telemetry =
+      loopTelemetrySummary && Array.isArray(loopTelemetrySummary.recent_high_similarity_writes)
+        ? {
+            ...loopTelemetrySummary,
+            recent_high_similarity_writes: loopTelemetrySummary.recent_high_similarity_writes.filter(
+              (write: any) => {
+                const candidateIds = [
+                  write?.memory_id,
+                  write?.source_memory_id,
+                  write?.target_memory_id,
+                  write?.memoryId,
+                  write?.sourceId,
+                  write?.targetId,
+                ].filter((id: unknown): id is string => typeof id === "string");
+                return candidateIds.some(id => scopedIds.has(id));
+              },
+            ),
+          }
+        : loopTelemetrySummary;
 
     return {
       totalMemories,
