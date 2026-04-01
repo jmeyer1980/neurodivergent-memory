@@ -24,6 +24,11 @@
       <p>
         This TypeScript-based MCP server implements a memory system inspired by neurodivergent cognitive styles. It organizes thoughts into five <strong>districts</strong> (knowledge domains), ranks search results using <strong>BM25 semantic ranking</strong>, and stores memories as a persistent knowledge graph with bidirectional connections.
       </p>
+      <blockquote>
+        <p>
+          <strong>Design note:</strong> The district model is rooted in <a href="https://gitlab.com/tiny-walnut-games/fractalstat">FractalSemantics (FractalStat)</a> addressing, where every entity inherits ancestry from a single anchor point called <strong>LUCA</strong> (Last Universal Common Ancestor). These concepts are also used in <a href="https://gitlab.com/tiny-walnut-games/the-seed/-/tree/4884b3a22da8a487e7c7931cb7426e20def0d7ba/warbler-cda-package">Warbler-CDA</a> and <a href="https://gitlab.com/tiny-walnut-games/the-seed">the seed</a>. The five canonical districts are the five direct children of LUCA in the default schema. Custom districts in later milestones must declare a valid LUCA-derived address, making ancestry explicit and traceable rather than assumed.
+        </p>
+      </blockquote>
     </td>
   </tr>
 </table>
@@ -152,7 +157,7 @@ For explicit control, set one of these environment variables:
 
 Mounts at `/home/node/.neurodivergent-memory` continue to work without any env override — that is the container's `node` user home and is checked automatically.
 
-> **⚠️ Breaking change (v0.1.9):** The image runs as the `node` user and **cannot read `/root`**, so previous mounts at `/root/.neurodivergent-memory` are silently skipped. Agents may appear to have lost all memories. See [Recovering memories after upgrade](#recovering-memories-after-upgrade) below.
+> **⚠️ Breaking change (v0.2.0):** The image runs as the `node` user and **cannot read `/root`**, so previous mounts at `/root/.neurodivergent-memory` are silently skipped. Agents may appear to have lost all memories. See [Recovering memories after upgrade](#recovering-memories-after-upgrade) below.
 
 #### Recovering memories after upgrade
 
@@ -402,7 +407,7 @@ Fully auto-approved tools:
 
 If you want to use the mcp server in Github Copilot Agent Workflows (github spins up a new VM every time, so cross-workflow memory is non-existent. Session memory is working, but is wiped upon job completion.):
 
-```mcp
+```json
 {
   "mcpServers": {
     "neurodivergent-memory": {
@@ -476,6 +481,43 @@ npm run inspector
 ```
 
 The Inspector will provide a URL to access debugging tools in your browser.
+
+## Agent Workflow Setup
+
+This repository ships a reusable **agent customization kit** at [`.github/agent-kit/`](.github/agent-kit/).
+It contains ready-to-use templates for wiring neurodivergent-memory into any agent that supports MCP — regardless of platform, language, or project type.
+
+### Contents
+
+| File | Purpose |
+|---|---|
+| `templates/neurodivergent-agent.agent.md` | Full-featured Memory-Driven Development Coordinator agent. Five-phase workflow: pull context → research → improve memories → plan → act & hand off. |
+| `templates/memory-driven-template.agent.md` | Minimal generic agent template — a lighter starting point if you want to build your own workflow on top. |
+| `templates/nd-memory-workflow.instructions.md` | Shared instruction file that reinforces memory-driven habits in day-to-day coding sessions without requiring explicit agent invocation. |
+| `templates/setup-nd-memory.prompt.md` | Guided setup prompt that asks the user to choose an install policy before anything is installed. |
+| `templates/copilot-instructions.md` | Bootstrap reference for GitHub Copilot sessions — tag schema, district table, tool quick-reference, and session checklist in one file. |
+| `templates/explore_memory_city.prompt.md` | Prompt for guided exploration of memory districts and graph structure. |
+| `templates/memory-driven-issue-execution.prompt.md` | Prompt for executing a tracked issue with full memory-driven context (pull → plan → act → update). |
+
+### How to use these templates
+
+**Copy** the files you need into your project's standard customization locations — do not move them, so the originals remain available as a reference for future agents or contributors.
+
+The right target directories vary by agent platform. Use whatever location your agent natively reads from. Common examples:
+
+- `.github/agents/` for agent definitions
+- `.github/instructions/` for shared instructions
+- `.github/prompts/` for prompts
+- `.github/` root for `copilot-instructions.md`
+
+### Install policy handshake
+
+Before installing neurodivergent-memory MCP in any project, ask the user which policy to apply:
+
+- **`prompt-first`** *(default)* — Ask for explicit approval before installing.
+- **`auto-setup`** — Install automatically without prompting.
+
+Update the imported agent file's installation section to reflect the chosen policy. If no preference is stated, default to `prompt-first`.
 
 ## Appendix
 
@@ -562,5 +604,6 @@ The graph is restored on server startup — no data is lost between restarts.
 3. Apply the canonical tag schema when calling `store_memory`.
 4. Connect new memories to related existing ones with `connect_memories`.
 5. Use `traverse_from` or `related_to` for associative retrieval rather than repeated searches.
+6. **No Quick Task exemption**: any file edit, decision, or finding in this repo is memory-worthy — write the memory before moving on. If you catch yourself thinking "this is too small" — that is the trigger, not a bypass.
 
 ---
