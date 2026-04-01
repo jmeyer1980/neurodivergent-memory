@@ -9,6 +9,7 @@ export interface MemoryNPC {
   name: string;
   archetype: MemoryArchetype;
   agent_id?: string;
+  project_id?: string;
   district: string;
   content: string;
   traits: string[];
