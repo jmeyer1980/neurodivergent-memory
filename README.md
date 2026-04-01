@@ -400,6 +400,38 @@ Fully auto-approved tools:
 }
 ```
 
+If you want to use the mcp server in Github Copilot Agent Workflows (github spins up a new VM every time, so cross-workflow memory is non-existent. Session memory is working, but is wiped upon job completion.):
+
+```mcp
+{
+  "mcpServers": {
+    "neurodivergent-memory": {
+      "type": "stdio",
+      "command": "npx",
+      "args": [
+        "neurodivergent-memory@0.1.8"
+      ],
+      "env": {
+        "NEURODIVERGENT_MEMORY_DIR": ".neurodivergent-memory"
+      },
+      "tools": [
+        "retrieve_memory",
+        "connect_memories",
+        "update_memory",
+        "delete_memory",
+        "traverse_from",
+        "related_to",
+        "import_memories",
+        "list_memories",
+        "store_memory",
+        "search_memories",
+        "memory_stats"
+      ]
+    }
+  }
+}
+```
+
 If you want per-project isolation instead of a shared global memory file, mount a project-specific host directory and keep the same container-side target. Use the path separator for your OS:
 
 - **Windows**: `${workspaceFolder}\.neurodivergent-memory:/data`
