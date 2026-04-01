@@ -4,5 +4,33 @@
 			"path": "."
 		}
 	],
-	"settings": {}
+	"settings": {
+		"files.exclude": {
+			"**/development-artifacts": true,
+			"**/development-artifacts/**": true
+		},
+		"search.exclude": {
+			"**/development-artifacts": true,
+			"**/development-artifacts/**": true
+		},
+		"files.watcherExclude": {
+			"**/development-artifacts/**": true
+		},
+		"python.analysis.exclude": [
+			"development-artifacts",
+			"development-artifacts/**",
+			"**/development-artifacts/**"
+		],
+		"python.analysis.ignore": [
+			"development-artifacts",
+			"development-artifacts/**",
+			"**/development-artifacts/**"
+		],
+		"js/ts.tsserver.watchOptions": {
+			"excludeDirectories": [
+				"**/development-artifacts",
+				"**/development-artifacts/**"
+			]
+		}
+	}
 }
