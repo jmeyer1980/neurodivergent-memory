@@ -58,7 +58,7 @@ Environment:
 - Platform: `win32 10.0.26200 (x64)`
 - CPU: `Intel(R) Core(TM) i7-10870H CPU @ 2.20GHz` (16 logical cores)
 - Memory: `31.91 GB`
-- Commit: `54e44ad`
+- Commit: `c66cf0d`
 
 Method:
 
@@ -70,9 +70,9 @@ Method:
 
 | Dataset | Measured Writes | Store Throughput ops/s | Search p95 ms | List p95 ms | Traverse d2 p95 ms | Traverse d3 p95 ms | Traverse d5 p95 ms |
 | ---- | ----: | ----: | ----: | ----: | ----: | ----: | ----: |
-| 1000 | 100 | 654.1 | 5.39 | 1.02 | 0.40 | 0.45 | 0.38 |
-| 5000 | 100 | 260.5 | 27.99 | 3.24 | 0.43 | 0.39 | 0.37 |
-| 10000 | 100 | 175.4 | 71.97 | 8.58 | 0.49 | 0.43 | 0.58 |
+| 1000 | 100 | 720.4 | 5.31 | 1.41 | 0.54 | 0.42 | 0.43 |
+| 5000 | 100 | 274.3 | 31.96 | 3.52 | 0.52 | 0.42 | 0.45 |
+| 10000 | 100 | 111.2 | 73.35 | 8.02 | 0.56 | 0.58 | 0.58 |
 
 Baseline artifacts (committed, not overwritten by default):
 

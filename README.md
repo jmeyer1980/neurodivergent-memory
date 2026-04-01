@@ -249,7 +249,7 @@ WIP guardrail behavior:
 
 The server now tracks loop signals without blocking behavior changes:
 
-- Repetition detection on `store_memory` compares incoming content against the 10 most recent memories (same `agent_id` when provided) using normalized BM25 scoring.
+- Repetition detection on `store_memory` compares incoming content against the 10 most recent memories (same `agent_id` when provided) using raw BM25 similarity scores.
 - Stores that meet the repeat threshold set `repeat_detected: true` in the tool response and increment `repeat_write_count` on the matched memory.
 - Read/write ping-pong transitions are tracked in a rolling operation window and increment `ping_pong_counter` when threshold conditions are met.
 - `memory_stats` now includes a `loop_telemetry` block with:

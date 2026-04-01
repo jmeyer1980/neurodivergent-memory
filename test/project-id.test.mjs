@@ -32,6 +32,7 @@ function startServer(options = {}) {
       ...process.env,
       NEURODIVERGENT_MEMORY_DIR: tempDir,
       NEURODIVERGENT_MEMORY_LOG_LEVEL: "error",
+      ...(options.env ?? {}),
     },
     stdio: ["pipe", "pipe", "pipe"],
   });
@@ -324,6 +325,102 @@ test("startup tolerates WAL updates targeting unknown districts", async () => {
       page_size: 20,
     });
     assert.match(resultText(listUnknown), /No memories found/);
+  } finally {
+    server.stop();
+  }
+});
+
+test("startup enforces NEURODIVERGENT_MEMORY_MAX against snapshot+WAL state", async () => {
+  const snapshot = {
+    nextMemoryId: 4,
+    memories: {
+      memory_1: {
+        id: "memory_1",
+        name: "Snapshot 1",
+        archetype: "scholar",
+        district: "logical_analysis",
+        content: "snapshot memory 1",
+        traits: ["analytical"],
+        concerns: ["accuracy"],
+        connections: [],
+        tags: ["topic:test", "scope:project", "kind:reference", "layer:research"],
+        created: "2026-03-31T00:00:00.000Z",
+        last_accessed: "2026-03-31T00:00:00.000Z",
+        access_count: 1,
+      },
+      memory_2: {
+        id: "memory_2",
+        name: "Snapshot 2",
+        archetype: "merchant",
+        district: "practical_execution",
+        content: "snapshot memory 2",
+        traits: ["practical"],
+        concerns: ["results"],
+        connections: [],
+        tags: ["topic:test", "scope:project", "kind:task", "layer:implementation"],
+        created: "2026-03-31T00:00:01.000Z",
+        last_accessed: "2026-03-31T00:00:01.000Z",
+        access_count: 1,
+      },
+    },
+  };
+
+  const walLines = [
+    {
+      op: "store",
+      payload: {
+        memory: {
+          id: "memory_3",
+          name: "Wal 3",
+          archetype: "guard",
+          district: "vigilant_monitoring",
+          content: "wal memory 3",
+          traits: ["vigilant"],
+          concerns: ["safety"],
+          connections: [],
+          tags: ["topic:test", "scope:project", "kind:task", "layer:debugging"],
+          created: "2026-03-31T00:00:02.000Z",
+          last_accessed: "2026-03-31T00:00:02.000Z",
+          access_count: 1,
+        },
+      },
+      timestamp: new Date().toISOString(),
+      seq: 1,
+    },
+  ];
+
+  const server = startServer({
+    snapshot,
+    walLines,
+    env: {
+      NEURODIVERGENT_MEMORY_MAX: "2",
+      NEURODIVERGENT_MEMORY_EVICTION: "lru",
+    },
+  });
+
+  try {
+    const stats = await server.callTool(50, "memory_stats", {});
+    assert.match(resultText(stats), /Total memories: 2/);
+  } finally {
+    server.stop();
+  }
+});
+
+test("retrieve_memory is side-effect free for access counters", async () => {
+  const server = startServer();
+
+  try {
+    await server.callTool(60, "store_memory", {
+      content: "retrieve target",
+      district: "logical_analysis",
+      tags: ["topic:test", "scope:session", "kind:reference", "layer:research"],
+    });
+
+    const before = await server.callTool(61, "retrieve_memory", { memory_id: "memory_1" });
+    assert.match(resultText(before), /Access count: 1/);
+
+    const after = await server.callTool(62, "retrieve_memory", { memory_id: "memory_1" });
+    assert.match(resultText(after), /Access count: 1/);
   } finally {
     server.stop();
   }

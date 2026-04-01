@@ -1,6 +1,6 @@
 import pino from "pino";
 
-const destination = pino.destination({ fd: 2, sync: false });
+const destination = pino.destination({ fd: 2, sync: true });
 
 export const logger = pino(
   {

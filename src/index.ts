@@ -300,6 +300,7 @@ class NeurodivergentMemory {
   private loadStateWithWalRecovery(): void {
     const snapshotLoaded = this.loadSnapshot();
     const replayResult = this.replayWal();
+    const startupEvictions = this.enforceMaxMemoriesOnStartup();
 
     if (replayResult.replayed > 0) {
       try {
@@ -319,6 +320,7 @@ class NeurodivergentMemory {
         replayedWalEntries: replayResult.replayed,
         appliedWalEntries: replayResult.mutated,
         skippedWalEntries: replayResult.skipped,
+        startupEvictions,
         memoryCount: Object.keys(this.memories).length,
         maxMemories: this.maxMemories ?? "unlimited",
         evictionPolicy: this.evictionPolicy,
@@ -560,6 +562,17 @@ class NeurodivergentMemory {
       if (!evictedId) return;
       logger.info({ memoryId: evictedId, evictionPolicy: this.evictionPolicy, maxMemories: this.maxMemories }, "Evicted memory due to cap");
     }
+  }
+
+  private enforceMaxMemoriesOnStartup(): number {
+    if (!this.maxMemories) return 0;
+    let evictions = 0;
+    while (Object.keys(this.memories).length > this.maxMemories) {
+      const evictedId = this.evictOneMemory(false);
+      if (!evictedId) break;
+      evictions++;
+    }
+    return evictions;
   }
 
   private evictOneMemory(recordWal = true): string | undefined {
@@ -867,8 +880,8 @@ class NeurodivergentMemory {
       last_similarity_score: similarityScore,
     };
 
-    this.appendWalEntry("store", { memory: this.serializeMemory(memory) });
     this.ensureCapacityForInsert();
+    this.appendWalEntry("store", { memory: this.serializeMemory(memory) });
     this.insertMemory(memory);
     this.loopTelemetry.recordWrite(memory);
     this.scheduleSave();
@@ -895,18 +908,8 @@ class NeurodivergentMemory {
     };
   }
 
-  retrieveMemory(id: string, actor?: OperationActorContext): MemoryNPC | null {
+  retrieveMemory(id: string, _actor?: OperationActorContext): MemoryNPC | null {
     const memory = this.memories[id];
-    if (memory) {
-      memory.last_accessed = new Date();
-      memory.access_count++;
-      this.loopTelemetry.recordRead({
-        memory_id: memory.id,
-        district: actor?.district ?? memory.district,
-        agent_id: actor?.agent_id ?? memory.agent_id,
-      });
-      this.scheduleSave();
-    }
     return memory || null;
   }
 
@@ -1380,11 +1383,11 @@ class NeurodivergentMemory {
    */
   importMemories(entries: Array<{ content: string; district: string; tags?: string[]; emotional_valence?: number; intensity?: number; agent_id?: string; project_id?: string; epistemic_status?: EpistemicStatus }>, default_agent_id?: string): string[] {
     const materialized = this.materializeImportMemories(entries, default_agent_id);
-    this.appendWalEntry("import", { memories: materialized.map(mem => this.serializeMemory(mem)) });
     for (const memory of materialized) {
       this.ensureCapacityForInsert();
       this.insertMemory(memory);
     }
+    this.appendWalEntry("import", { memories: materialized.map(mem => this.serializeMemory(mem)) });
     this.scheduleSave();
     logger.info({ operation: "import", importedCount: materialized.length, agentId: default_agent_id ?? "unassigned" }, "Imported memories");
     return materialized.map(mem => mem.id);
