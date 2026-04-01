@@ -302,12 +302,12 @@ class NeurodivergentMemory {
     const replayResult = this.replayWal();
     const startupEvictions = this.enforceMaxMemoriesOnStartup();
 
-    if (replayResult.replayed > 0) {
+    if (replayResult.replayed > 0 || startupEvictions > 0) {
       try {
         this.saveToDiskSync();
         fs.writeFileSync(this.walFile, "", "utf-8");
       } catch (err) {
-        logger.error({ code: NM_ERRORS.PERSISTENCE_WRITE_FAILED, walFile: this.walFile, err }, "Failed to compact snapshot after WAL replay");
+        logger.error({ code: NM_ERRORS.PERSISTENCE_WRITE_FAILED, walFile: this.walFile, err }, "Failed to compact snapshot after WAL replay/startup evictions");
       }
     }
 
@@ -626,6 +626,16 @@ class NeurodivergentMemory {
       logger.warn({ memoryId: memory.id, district: memory.district, validDistricts: valid }, "Skipping memory with unknown district during load");
       return false;
     }
+    // If the memory ID already exists in a different district, remove it from the old
+    // district array first to avoid duplicate district membership during WAL replay.
+    const existing = this.memories[memory.id];
+    if (existing && existing.district !== memory.district && this.districts[existing.district]) {
+      const oldDistrictMemories = this.districts[existing.district].memories;
+      const idx = oldDistrictMemories.indexOf(memory.id);
+      if (idx !== -1) {
+        oldDistrictMemories.splice(idx, 1);
+      }
+    }
     this.memories[memory.id] = memory;
     if (!this.districts[memory.district].memories.includes(memory.id)) {
       this.districts[memory.district].memories.push(memory.id);
@@ -701,20 +711,27 @@ class NeurodivergentMemory {
       score: this.bm25.score(memory.id, queryTerms),
     }));
 
-    // Find the best-scoring candidate using the raw BM25 score as a stable similarity metric.
-    const best = rawScores.reduce(
-      (currentBest, candidate) => (candidate.score > currentBest.score ? candidate : currentBest),
-      rawScores[0],
-    );
-
-    // If even the best candidate has a non-positive score, treat this as "no repeat detected".
-    if (best.score <= 0) {
+    // Normalize BM25 scores to a 0–1 similarity range relative to the best candidate,
+    // so that NEURODIVERGENT_MEMORY_REPEAT_THRESHOLD remains stable across corpus sizes.
+    const positiveScores = rawScores.filter(candidate => candidate.score > 0);
+    if (positiveScores.length === 0) {
       return undefined;
     }
 
+    const maxScore = positiveScores.reduce(
+      (currentMax, candidate) => (candidate.score > currentMax ? candidate.score : currentMax),
+      positiveScores[0].score,
+    );
+
+    const best = positiveScores.reduce(
+      (currentBest, candidate) => (candidate.score > currentBest.score ? candidate : currentBest),
+      positiveScores[0],
+    );
+
     return {
       memory: best.memory,
-      similarityScore: best.score,
+      // Return similarity on a 0–1 scale so thresholds remain stable across corpus sizes.
+      similarityScore: best.score / maxScore,
     };
   }
 
@@ -1314,7 +1331,9 @@ class NeurodivergentMemory {
       .slice(0, 5)
       .map(m => ({ id: m.id, name: m.name, access_count: m.access_count }));
 
-    const orphans = allMems.filter(m => m.connections.length === 0).map(m => ({ id: m.id, name: m.name }));
+    const orphans = allMems
+      .filter(m => m.connections.filter(connectionId => scopedIds.has(connectionId)).length === 0)
+      .map(m => ({ id: m.id, name: m.name }));
     const loopTelemetrySummary: any = this.loopTelemetry.summarize(allMems);
     const loop_telemetry =
       loopTelemetrySummary && Array.isArray(loopTelemetrySummary.recent_high_similarity_writes)
@@ -1537,6 +1556,13 @@ function parseNumberEnv(
 }
 
 function validateProjectId(projectId: string, fieldPath = "project_id"): void {
+  if (typeof projectId !== "string") {
+    throw createNMError(
+      NM_ERRORS.INPUT_VALIDATION_FAILED,
+      `Invalid ${fieldPath}: must be a string.`,
+      `Provide a string value for ${fieldPath} matching ${PROJECT_ID_PATTERN.toString()}.`,
+    );
+  }
   // Keep an explicit length check for a clearer operator-facing error than regex mismatch.
   if (projectId.length > PROJECT_ID_MAX_LENGTH) {
     throw createNMError(
