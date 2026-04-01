@@ -215,7 +215,7 @@ type WalOperation = "store" | "update" | "delete" | "connect" | "import";
 const PROJECT_ID_MAX_LENGTH = 64;
 const PROJECT_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$/;
 
-type MemoryUpdatePayload = Partial<Pick<MemoryNPC, "content" | "tags" | "emotional_valence" | "intensity" | "district" | "epistemic_status" | "project_id">> & {
+type MemoryUpdatePayload = Partial<Pick<MemoryNPC, "content" | "tags" | "emotional_valence" | "intensity" | "district" | "epistemic_status" | "project_id" | "repeat_write_count" | "repeat_count" | "last_similarity_score" | "ping_pong_counter">> & {
   project_id?: string | null;
 };
 
@@ -908,9 +908,19 @@ class NeurodivergentMemory {
     };
   }
 
-  retrieveMemory(id: string, _actor?: OperationActorContext): MemoryNPC | null {
+  retrieveMemory(id: string, actor?: OperationActorContext): MemoryNPC | null {
     const memory = this.memories[id];
-    return memory || null;
+    if (!memory) {
+      return null;
+    }
+
+    this.loopTelemetry.recordRead({
+      memory_id: id,
+      district: actor?.district ?? memory.district,
+      agent_id: actor?.agent_id ?? memory.agent_id,
+    });
+
+    return memory;
   }
 
   updateMemory(
@@ -1020,6 +1030,16 @@ class NeurodivergentMemory {
     if (updates.emotional_valence !== undefined) memory.emotional_valence = updates.emotional_valence;
     if (updates.intensity !== undefined) memory.intensity = updates.intensity;
     if (updates.epistemic_status !== undefined) memory.epistemic_status = updates.epistemic_status;
+    if (updates.repeat_write_count !== undefined) {
+      memory.repeat_write_count = updates.repeat_write_count;
+      memory.repeat_count = updates.repeat_write_count;
+    }
+    if (updates.repeat_count !== undefined) {
+      memory.repeat_count = updates.repeat_count;
+      memory.repeat_write_count = updates.repeat_count;
+    }
+    if (updates.last_similarity_score !== undefined) memory.last_similarity_score = updates.last_similarity_score;
+    if (updates.ping_pong_counter !== undefined) memory.ping_pong_counter = updates.ping_pong_counter;
     if (Object.prototype.hasOwnProperty.call(updates, "project_id")) {
       if (updates.project_id === null) {
         delete memory.project_id;

@@ -425,3 +425,89 @@ test("retrieve_memory is side-effect free for access counters", async () => {
     server.stop();
   }
 });
+
+test("retrieve_memory contributes read context for ping-pong telemetry", async () => {
+  const server = startServer({
+    env: {
+      NEURODIVERGENT_MEMORY_PING_PONG_THRESHOLD: "1",
+    },
+  });
+
+  try {
+    await server.callTool(70, "store_memory", {
+      content: "telemetry target",
+      district: "logical_analysis",
+      tags: ["topic:test", "scope:session", "kind:reference", "layer:research"],
+      agent_id: "writer",
+    });
+
+    await server.callTool(71, "retrieve_memory", {
+      memory_id: "memory_1",
+      district: "creative_synthesis",
+      agent_id: "reader",
+    });
+
+    await server.callTool(72, "update_memory", {
+      memory_id: "memory_1",
+      content: "telemetry target updated",
+      actor_district: "logical_analysis",
+      agent_id: "writer",
+    });
+
+    const stats = await server.callTool(73, "memory_stats", {});
+    assert.match(resultText(stats), /ping_pong_counter=1/);
+  } finally {
+    server.stop();
+  }
+});
+
+test("wal replay restores telemetry fields from update entries", async () => {
+  const snapshot = {
+    nextMemoryId: 2,
+    memories: {
+      memory_1: {
+        id: "memory_1",
+        name: "Baseline",
+        archetype: "scholar",
+        district: "logical_analysis",
+        content: "baseline memory",
+        traits: ["analytical"],
+        concerns: ["accuracy"],
+        connections: [],
+        tags: ["topic:test", "scope:project", "kind:task", "layer:implementation"],
+        created: "2026-03-31T00:00:00.000Z",
+        last_accessed: "2026-03-31T00:00:00.000Z",
+        access_count: 1,
+      },
+    },
+  };
+
+  const walLines = [
+    {
+      op: "update",
+      payload: {
+        memory_id: "memory_1",
+        updates: {
+          repeat_write_count: 4,
+          repeat_count: 4,
+          last_similarity_score: 0.932,
+          ping_pong_counter: 2,
+        },
+      },
+      timestamp: new Date().toISOString(),
+      seq: 1,
+    },
+  ];
+
+  const server = startServer({ snapshot, walLines });
+
+  try {
+    const stats = await server.callTool(80, "memory_stats", {});
+    const statsText = resultText(stats);
+    assert.match(statsText, /repeat_write_count=4/);
+    assert.match(statsText, /last_similarity=0.932/);
+    assert.match(statsText, /ping_pong_counter=2/);
+  } finally {
+    server.stop();
+  }
+});
