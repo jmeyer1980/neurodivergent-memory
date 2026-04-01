@@ -8,11 +8,20 @@ import { spawn } from "node:child_process";
 function startServer(options = {}) {
   const tempDir = options.tempDir ?? fs.mkdtempSync(path.join(os.tmpdir(), "ndm-project-id-test-"));
 
+  fs.mkdirSync(tempDir, { recursive: true });
+
   if (options.snapshot) {
-    fs.mkdirSync(tempDir, { recursive: true });
     fs.writeFileSync(
       path.join(tempDir, "memories.json"),
       JSON.stringify(options.snapshot, null, 2),
+      "utf-8",
+    );
+  }
+
+  if (Array.isArray(options.walLines) && options.walLines.length > 0) {
+    fs.writeFileSync(
+      path.join(tempDir, "memories.json.wal.jsonl"),
+      `${options.walLines.map((line) => JSON.stringify(line)).join("\n")}\n`,
       "utf-8",
     );
   }
@@ -261,6 +270,60 @@ test("update_memory accepts project_id null to clear project attribution", async
 
     const listAll = await server.callTool(33, "list_memories", { page_size: 20 });
     assert.match(resultText(listAll), /project: unset/);
+  } finally {
+    server.stop();
+  }
+});
+
+test("startup tolerates WAL updates targeting unknown districts", async () => {
+  const snapshot = {
+    nextMemoryId: 2,
+    memories: {
+      memory_1: {
+        id: "memory_1",
+        name: "Legacy Memory",
+        archetype: "scholar",
+        district: "logical_analysis",
+        content: "legacy snapshot entry",
+        traits: ["analytical"],
+        concerns: ["accuracy"],
+        connections: [],
+        tags: ["topic:legacy", "scope:project", "kind:reference", "layer:architecture"],
+        created: "2026-03-31T00:00:00.000Z",
+        last_accessed: "2026-03-31T00:00:00.000Z",
+        access_count: 1,
+      },
+    },
+  };
+
+  const walLines = [
+    {
+      op: "update",
+      payload: {
+        memory_id: "memory_1",
+        updates: {
+          district: "unknown_district",
+        },
+      },
+      timestamp: new Date().toISOString(),
+      seq: 1,
+    },
+  ];
+
+  const server = startServer({ snapshot, walLines });
+
+  try {
+    const listLogical = await server.callTool(40, "list_memories", {
+      district: "logical_analysis",
+      page_size: 20,
+    });
+    assert.match(resultText(listLogical), /memory_1/);
+
+    const listUnknown = await server.callTool(41, "list_memories", {
+      district: "unknown_district",
+      page_size: 20,
+    });
+    assert.match(resultText(listUnknown), /No memories found/);
   } finally {
     server.stop();
   }

@@ -995,9 +995,21 @@ class NeurodivergentMemory {
     if (!memory) return;
 
     if (updates.district !== undefined && updates.district !== memory.district) {
-      this.districts[memory.district].memories = this.districts[memory.district].memories.filter(mid => mid !== id);
-      this.districts[updates.district].memories.push(id);
-      memory.district = updates.district;
+      const nextDistrict = this.districts[updates.district];
+      if (!nextDistrict) {
+        logger.warn(
+          {
+            code: NM_ERRORS.UNKNOWN_DISTRICT,
+            memoryId: id,
+            attemptedDistrict: updates.district,
+          },
+          "Skipping district update with unknown district",
+        );
+      } else {
+        this.districts[memory.district].memories = this.districts[memory.district].memories.filter(mid => mid !== id);
+        nextDistrict.memories.push(id);
+        memory.district = updates.district;
+      }
     }
 
     if (updates.content !== undefined) memory.content = updates.content;
