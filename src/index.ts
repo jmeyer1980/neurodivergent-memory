@@ -1402,11 +1402,13 @@ class NeurodivergentMemory {
    */
   importMemories(entries: Array<{ content: string; district: string; tags?: string[]; emotional_valence?: number; intensity?: number; agent_id?: string; project_id?: string; epistemic_status?: EpistemicStatus }>, default_agent_id?: string): string[] {
     const materialized = this.materializeImportMemories(entries, default_agent_id);
+    // Append WAL entry for the import before mutating in-memory state to preserve the
+    // "append before mutate" invariant used elsewhere in the system.
+    this.appendWalEntry("import", { memories: materialized.map(mem => this.serializeMemory(mem)) });
     for (const memory of materialized) {
       this.ensureCapacityForInsert();
       this.insertMemory(memory);
     }
-    this.appendWalEntry("import", { memories: materialized.map(mem => this.serializeMemory(mem)) });
     this.scheduleSave();
     logger.info({ operation: "import", importedCount: materialized.length, agentId: default_agent_id ?? "unassigned" }, "Imported memories");
     return materialized.map(mem => mem.id);
