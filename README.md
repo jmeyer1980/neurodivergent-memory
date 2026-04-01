@@ -79,7 +79,7 @@ Memories are organized by cognitive domain:
 ### Tools (11 memory management operations)
 
 - **`store_memory`** — Create new memory nodes with optional emotional valence and intensity
-- **`retrieve_memory`** — Fetch a specific memory by ID and increment access count
+- **`retrieve_memory`** — Fetch a specific memory by ID
 - **`update_memory`** — Modify content, tags, district, emotional_valence, intensity, or project attribution
 - **`delete_memory`** — Remove a memory and all its connections
 - **`connect_memories`** — Create bidirectional edges between memory nodes
