@@ -2206,7 +2206,21 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
               type: "string",
               description: "Optional default agent identifier applied to entries without agent_id"
             }
-          }
+          },
+          oneOf: [
+            {
+              required: ["entries"],
+              not: {
+                required: ["file_path"]
+              }
+            },
+            {
+              required: ["file_path"],
+              not: {
+                required: ["entries"]
+              }
+            }
+          ]
         }
       }
     ]
@@ -2606,6 +2620,23 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       try {
         let entriesToImport: ImportMemoryEntry[];
 
+        if (file_path !== undefined && entries !== undefined) {
+          return toolErrorResult(
+            "import_memories",
+            "Import failed",
+            createNMError(
+              NM_ERRORS.INPUT_VALIDATION_FAILED,
+              "Provide either 'entries' or 'file_path', not both.",
+              "Remove one of the two parameters and retry import_memories.",
+            ),
+            formatMcpError(
+              NM_ERRORS.INPUT_VALIDATION_FAILED,
+              "Provide either 'entries' or 'file_path', not both.",
+              "Remove one of the two parameters and retry import_memories.",
+            ),
+          );
+        }
+
         if (file_path !== undefined) {
           // Security: require absolute paths to prevent relative path traversal.
           if (typeof file_path !== "string" || !path.isAbsolute(file_path)) {
@@ -2624,9 +2655,46 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
               ),
             );
           }
+          // Security: resolve realpath and constrain to the persistence directory.
+          let resolvedPath: string;
+          try {
+            resolvedPath = fs.realpathSync(file_path);
+          } catch {
+            return toolErrorResult(
+              "import_memories",
+              "Import failed",
+              createNMError(
+                NM_ERRORS.INPUT_VALIDATION_FAILED,
+                "file_path does not exist or cannot be resolved.",
+                "Verify the file exists and is readable, then retry import_memories.",
+              ),
+              formatMcpError(
+                NM_ERRORS.INPUT_VALIDATION_FAILED,
+                "file_path does not exist or cannot be resolved.",
+                "Verify the file exists and is readable, then retry import_memories.",
+              ),
+            );
+          }
+          const allowedRoot = fs.realpathSync(PERSISTENCE_DIR);
+          if (!resolvedPath.startsWith(allowedRoot + path.sep)) {
+            return toolErrorResult(
+              "import_memories",
+              "Import failed",
+              createNMError(
+                NM_ERRORS.INPUT_VALIDATION_FAILED,
+                "file_path must be within the persistence directory.",
+                `Only files inside ${allowedRoot} may be imported. Verify the path and retry import_memories.`,
+              ),
+              formatMcpError(
+                NM_ERRORS.INPUT_VALIDATION_FAILED,
+                "file_path must be within the persistence directory.",
+                `Only files inside ${allowedRoot} may be imported. Verify the path and retry import_memories.`,
+              ),
+            );
+          }
           let raw: string;
           try {
-            raw = fs.readFileSync(file_path, "utf-8");
+            raw = await fs.promises.readFile(resolvedPath, "utf-8");
           } catch (readErr) {
             return toolErrorResult(
               "import_memories",
@@ -2654,7 +2722,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
               ),
             );
           }
-          if (!snapshot || typeof snapshot.memories !== "object" || Array.isArray(snapshot.memories)) {
+          if (!snapshot || snapshot.memories === null || snapshot.memories === undefined || typeof snapshot.memories !== "object" || Array.isArray(snapshot.memories)) {
             return toolErrorResult(
               "import_memories",
               "Import failed",
@@ -2670,16 +2738,117 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
               ),
             );
           }
-          entriesToImport = Object.values(snapshot.memories as Record<string, any>).map((mem) => ({
-            content: mem.content,
-            district: mem.district,
-            tags: mem.tags,
-            emotional_valence: mem.emotional_valence,
-            intensity: mem.intensity,
-            agent_id: mem.agent_id,
-            project_id: mem.project_id,
-            epistemic_status: mem.epistemic_status,
-          } as ImportMemoryEntry));
+          const rawMemories = snapshot.memories as Record<string, any>;
+          const validatedEntries: ImportMemoryEntry[] = [];
+          for (const [memId, mem] of Object.entries(rawMemories)) {
+            if (typeof mem !== "object" || mem === null) {
+              return toolErrorResult(
+                "import_memories",
+                "Import failed",
+                createNMError(
+                  NM_ERRORS.INPUT_VALIDATION_FAILED,
+                  `Snapshot memory '${memId}' is invalid: entry must be an object.`,
+                  "Ensure all memories in the snapshot are JSON objects and retry import_memories.",
+                ),
+                formatMcpError(
+                  NM_ERRORS.INPUT_VALIDATION_FAILED,
+                  `Snapshot memory '${memId}' is invalid: entry must be an object.`,
+                  "Ensure all memories in the snapshot are JSON objects and retry import_memories.",
+                ),
+              );
+            }
+            if (typeof mem.content !== "string") {
+              return toolErrorResult(
+                "import_memories",
+                "Import failed",
+                createNMError(
+                  NM_ERRORS.INPUT_VALIDATION_FAILED,
+                  `Snapshot memory '${memId}' is invalid: 'content' must be a string.`,
+                  "Ensure each memory has a string 'content' field and retry import_memories.",
+                ),
+                formatMcpError(
+                  NM_ERRORS.INPUT_VALIDATION_FAILED,
+                  `Snapshot memory '${memId}' is invalid: 'content' must be a string.`,
+                  "Ensure each memory has a string 'content' field and retry import_memories.",
+                ),
+              );
+            }
+            if (mem.tags !== undefined && !Array.isArray(mem.tags)) {
+              return toolErrorResult(
+                "import_memories",
+                "Import failed",
+                createNMError(
+                  NM_ERRORS.INPUT_VALIDATION_FAILED,
+                  `Snapshot memory '${memId}' is invalid: 'tags' must be an array when present.`,
+                  "Ensure 'tags' is an array of strings or omit it, then retry import_memories.",
+                ),
+                formatMcpError(
+                  NM_ERRORS.INPUT_VALIDATION_FAILED,
+                  `Snapshot memory '${memId}' is invalid: 'tags' must be an array when present.`,
+                  "Ensure 'tags' is an array of strings or omit it, then retry import_memories.",
+                ),
+              );
+            }
+            if (mem.district !== undefined && typeof mem.district !== "string") {
+              return toolErrorResult(
+                "import_memories",
+                "Import failed",
+                createNMError(
+                  NM_ERRORS.INPUT_VALIDATION_FAILED,
+                  `Snapshot memory '${memId}' is invalid: 'district' must be a string when present.`,
+                  "Ensure 'district' is a string (e.g. 'logical_analysis') or omit it, then retry import_memories.",
+                ),
+                formatMcpError(
+                  NM_ERRORS.INPUT_VALIDATION_FAILED,
+                  `Snapshot memory '${memId}' is invalid: 'district' must be a string when present.`,
+                  "Ensure 'district' is a string (e.g. 'logical_analysis') or omit it, then retry import_memories.",
+                ),
+              );
+            }
+            if (mem.emotional_valence !== undefined && typeof mem.emotional_valence !== "number") {
+              return toolErrorResult(
+                "import_memories",
+                "Import failed",
+                createNMError(
+                  NM_ERRORS.INPUT_VALIDATION_FAILED,
+                  `Snapshot memory '${memId}' is invalid: 'emotional_valence' must be a number when present.`,
+                  "Ensure 'emotional_valence' is a number or omit it, then retry import_memories.",
+                ),
+                formatMcpError(
+                  NM_ERRORS.INPUT_VALIDATION_FAILED,
+                  `Snapshot memory '${memId}' is invalid: 'emotional_valence' must be a number when present.`,
+                  "Ensure 'emotional_valence' is a number or omit it, then retry import_memories.",
+                ),
+              );
+            }
+            if (mem.intensity !== undefined && typeof mem.intensity !== "number") {
+              return toolErrorResult(
+                "import_memories",
+                "Import failed",
+                createNMError(
+                  NM_ERRORS.INPUT_VALIDATION_FAILED,
+                  `Snapshot memory '${memId}' is invalid: 'intensity' must be a number when present.`,
+                  "Ensure 'intensity' is a number or omit it, then retry import_memories.",
+                ),
+                formatMcpError(
+                  NM_ERRORS.INPUT_VALIDATION_FAILED,
+                  `Snapshot memory '${memId}' is invalid: 'intensity' must be a number when present.`,
+                  "Ensure 'intensity' is a number or omit it, then retry import_memories.",
+                ),
+              );
+            }
+            validatedEntries.push({
+              content: mem.content,
+              district: mem.district,
+              tags: mem.tags,
+              emotional_valence: mem.emotional_valence,
+              intensity: mem.intensity,
+              agent_id: mem.agent_id,
+              project_id: mem.project_id,
+              epistemic_status: mem.epistemic_status,
+            } as ImportMemoryEntry);
+          }
+          entriesToImport = validatedEntries;
         } else if (Array.isArray(entries)) {
           entriesToImport = entries as ImportMemoryEntry[];
         } else {
