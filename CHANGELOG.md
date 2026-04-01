@@ -14,7 +14,7 @@
 - Async write serialization via mutex to prevent concurrent mutation races under multi-agent load
 - Bounded mutating write queue with backpressure signaling (`NEURODIVERGENT_MEMORY_QUEUE_DEPTH`, `NM_E010`)
 - WIP saturation guardrail warning for in-progress practical tasks (`NEURODIVERGENT_MEMORY_WIP_LIMIT`, `NM_E011`)
-- Development branch release-candidate pipeline that publishes the same npm package name as prereleases (`0.x.x-rc.N`, dist-tag `rc`, where `N=run_number.run_attempt`) and pushes Docker tags `rc-0.x.x` plus `rc-0.x.x-rc.N` derived from the same run sequence
+- Development branch release-candidate pipeline that publishes the same npm package name as prereleases (`0.x.x-rc.N`, dist-tag `rc`, where `N=run_number.run_attempt`) and pushes immutable per-run Docker tags `rc-0.x.x-rc.N` derived from the same run sequence
 - Observe-only loop telemetry for `store_memory`, `retrieve_memory`, `update_memory`, and `memory_stats` with repeat counters, ping-pong detection, and recent high-similarity write reporting (`NEURODIVERGENT_MEMORY_REPEAT_THRESHOLD`, `NEURODIVERGENT_MEMORY_LOOP_WINDOW`, `NEURODIVERGENT_MEMORY_PING_PONG_THRESHOLD`)
 - Deterministic MCP stdio benchmark harness at `benchmarks/memory-benchmark.mjs` with published 1k/5k/10k baseline outputs in `benchmark-results/`, including 100-write throughput samples and `traverse_from` depth latency coverage
 - Optional first-class `project_id` support for memory attribution and scoped retrieval across `store_memory`, `update_memory`, `import_memories`, `search_memories`, `list_memories`, and `memory_stats` (including per-project stats breakdown)
