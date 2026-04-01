@@ -34,7 +34,7 @@ import {
   mcpErrorResult,
   type McpErrorShape,
 } from "./core/error-codes.js";
-import type { EpistemicStatus, EpistemicStatusFilter, MemoryArchetype, MemoryNPC } from "./core/types.js";
+import type { DistilledArtifact, EpistemicStatus, EpistemicStatusFilter, MemoryArchetype, MemoryNPC } from "./core/types.js";
 
 /**
  * Memory district representing a knowledge domain
@@ -1428,32 +1428,13 @@ class NeurodivergentMemory {
   }
 
   /**
-   * Import memories from a structured JSON array (bootstrap/seed).
-   * Each entry must have: content, district.
-   * Optional per-entry fields:
-   * - tags
-   * - emotional_valence
-   * - intensity
-   * - agent_id (overrides default_agent_id when provided)
-   * - project_id
-   * - epistemic_status (must be a valid EpistemicStatus)
-   * Returns the list of newly created memory IDs.
-   */
-  /**
    * Distill an emotional memory into a structured logical artifact.
    * Translates raw emotional processing content into signals, triggers, constraints,
    * next_actions, and risk_flags that logical/planning agents can consume efficiently.
    */
   distillMemory(sourceMemoryId: string, agent_id?: string): {
     distilled: MemoryNPC;
-    artifact: {
-      signals: string[];
-      triggers: string[];
-      constraints: string[];
-      next_actions: string[];
-      risk_flags: string[];
-      abstracted_from: string;
-    };
+    artifact: DistilledArtifact;
   } {
     const sourceMemory = this.memories[sourceMemoryId];
     if (!sourceMemory) {
@@ -1568,7 +1549,7 @@ class NeurodivergentMemory {
     }
 
     // Build artifact
-    const artifact = {
+    const artifact: DistilledArtifact = {
       signals,
       triggers,
       constraints,
@@ -1580,11 +1561,14 @@ class NeurodivergentMemory {
     // Create distilled memory in logical_analysis district
     const id = `memory_${this.nextMemoryId++}`;
     const now = new Date();
-    const distilledContent = `Distilled artifact from ${sourceMemoryId}: signals=[${signals.join(", ")}], triggers=[${triggers.join(", ")}], actions=[${next_actions.join(", ")}], risks=[${risk_flags.join(", ")}]`;
+    const distilledContent = `Distilled artifact from ${sourceMemoryId}: signals=[${signals.join(", ")}], triggers=[${triggers.join(", ")}], constraints=[${constraints.join(", ")}], actions=[${next_actions.join(", ")}], risks=[${risk_flags.join(", ")}]`;
+
+    // Compute updated connections before WAL write to preserve "append before mutate" invariant
+    const updatedConnections = [...sourceMemory.connections, id];
 
     const distilledMemory: MemoryNPC = {
       id,
-      name: `Distilled ${sourceMemory.name}`,
+      name: `distilled_${sourceMemoryId}_${now.toISOString()}`,
       archetype: "scholar",
       agent_id,
       project_id: sourceMemory.project_id,
@@ -1593,7 +1577,7 @@ class NeurodivergentMemory {
       traits: ["analytical", "structured"],
       concerns: ["clarity", "actionability"],
       connections: [sourceMemoryId],
-      tags: ["kind:distilled", "scope:derived", "layer:abstraction"],
+      tags: ["topic:distillation", "scope:derived", "kind:distilled", "layer:abstraction"],
       created: now,
       last_accessed: now,
       access_count: 1,
@@ -1603,13 +1587,13 @@ class NeurodivergentMemory {
       epistemic_status: sourceMemory.epistemic_status,
     };
 
-    // Connect source to distilled (bidirectional)
-    sourceMemory.connections.push(id);
-
+    // Append WAL entries before mutating in-memory state (durability invariant)
     this.ensureCapacityForInsert();
     this.appendWalEntry("store", { memory: this.serializeMemory(distilledMemory) });
-    this.appendWalEntry("update", { memory_id: sourceMemoryId, updates: { connections: sourceMemory.connections } });
+    this.appendWalEntry("update", { memory_id: sourceMemoryId, updates: { connections: updatedConnections } });
     this.insertMemory(distilledMemory);
+    // Apply mutations after WAL writes
+    sourceMemory.connections = updatedConnections;
     this.scheduleSave();
 
     logger.info(
