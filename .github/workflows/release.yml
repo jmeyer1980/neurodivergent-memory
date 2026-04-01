@@ -285,7 +285,6 @@ jobs:
           - npm install: npm install neurodivergent-memory@${{ steps.rc_meta.outputs.rc_version }}
           - npm dist-tag: rc
           - Docker tags:
-            - ${{ steps.rc_meta.outputs.moving_tag }}
             - ${{ steps.rc_meta.outputs.release_tag }}
 
           Use with caution for validation and early integration testing only.

@@ -79,8 +79,31 @@ function extractMemoryId(responseText) {
 }
 
 function assertSuccess(response, toolName) {
+  const toolLabel = toolName ?? "tool";
+
+  // Transport-level JSON-RPC error
   if (response?.error) {
-    throw new Error(`${toolName} returned error: ${JSON.stringify(response.error)}`);
+    throw new Error(`${toolLabel} returned error: ${JSON.stringify(response.error)}`);
+  }
+
+  // Tool-level error encoded in the result payload
+  const result = response?.result;
+  if (result?.isError) {
+    const code = result.Code ?? result.code;
+    const message = result.Message ?? result.message ?? "Unknown tool error";
+    const recovery = result.Recovery ?? result.recovery;
+
+    const errorDetails = {
+      code,
+      message,
+      recovery,
+      // include full result for debugging in case the shape changes
+      rawResult: result,
+    };
+
+    throw new Error(
+      `${toolLabel} returned tool-level error: ${JSON.stringify(errorDetails)}`
+    );
   }
 }
 
