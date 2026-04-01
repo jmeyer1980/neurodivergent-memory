@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-04-01
+
 ### Added
 
 - Write-ahead journal persistence (`memories.json.wal.jsonl`) for mutating operations with startup replay and compaction into `memories.json`

@@ -409,7 +409,7 @@ If you want to use the mcp server in Github Copilot Agent Workflows (github spin
       "type": "stdio",
       "command": "npx",
       "args": [
-        "neurodivergent-memory@0.1.8"
+        "neurodivergent-memory@0.2.0"
       ],
       "env": {
         "NEURODIVERGENT_MEMORY_DIR": ".neurodivergent-memory"
