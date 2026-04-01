@@ -17,6 +17,7 @@ Run mode: isolated persistence for deterministic results
 ## Scenario Design
 
 The test models executive-function support using five districts:
+
 - `logical_analysis`
 - `emotional_processing`
 - `practical_execution`
@@ -32,6 +33,7 @@ Successful responses: 19
 Tool-level failures: 0
 
 Phases exercised:
+
 1. Create 8 memories with canonical tags.
 2. Create graph connections.
 3. Run semantic and filtered searches.
@@ -42,20 +44,25 @@ Phases exercised:
 ## Key Outcomes
 
 1. Storage and district assignment
+
 - 8 memories stored, all districts represented.
 
-2. Search behavior
+1. Search behavior
+
 - BM25 ranking produced coherent results for scenario-specific queries.
 - Tag and district constraints returned focused subsets.
 
-3. Graph behavior
+1. Graph behavior
+
 - Connections were created and later surfaced by traversal/related queries.
 - Traversal from `memory_1` returned reachable nodes within depth 2.
 
-4. Update behavior
+1. Update behavior
+
 - `update_memory` accepted current API shape (`content`, `intensity`) and completed successfully.
 
-5. System stats
+1. System stats
+
 - Final run snapshot:
   - total memories: 8
   - total connections: 3
@@ -66,6 +73,7 @@ Phases exercised:
 The run confirms current operational health for the tested workflow on 0.2.0.
 
 Additionally, this revalidation surfaced and fixed stale harness assumptions from older versions:
+
 - old memory IDs (`mem_*`) were updated to `memory_*`
 - legacy update fields were aligned with current tool schema
 - test narrative references updated to Node 24 and v0.2.0 context

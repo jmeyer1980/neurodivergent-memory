@@ -2,7 +2,7 @@
 goal: Memory Core Roadmap Execution Plan (v0.2.0 to v0.3.0)
 version: 1.0
 date_created: 2026-03-29
-last_updated: 2026-03-31
+last_updated: 2026-04-01
 owner: jmeyer1980 + Copilot
 status: 'In progress'
 tags: [architecture, feature, roadmap, telemetry, distillation]
@@ -26,10 +26,18 @@ This document defines the implementation sequence for roadmap milestones v0.2.0 
 - **REQ-008**: Distillation source eligibility is cross-district by default; emotional_processing is a high-priority source but not an exclusive source.
 - **REQ-009**: Distillation policy must support allowlist/blocklist district constraints via configuration without code changes.
 - **REQ-010**: Memories used as planning artifacts must support an explicit `epistemic_status` field: `draft | validated | outdated`. Agents must not treat `draft` or `outdated` memories as authoritative without human confirmation. (Source: council synthesis 2026-03-29.)
+- **REQ-011**: Add storage diagnostics visibility so operators can deterministically retrieve resolved snapshot path, WAL path, and environment-source precedence used at runtime.
+- **REQ-012**: Extend import workflow to support file-based ingestion (`file_path`) in addition to existing `entries` payload mode.
+- **REQ-013**: Add import `dry_run` preflight with deterministic `would_import`, `would_skip`, `would_fail`, and categorized reason codes.
+- **REQ-014**: Add import dedupe policy selector (`none | content_hash | content_plus_tags`) with stable skip reason taxonomy.
+- **REQ-015**: Define explicit snapshot migration flags (`preserve_ids`, `merge_connections`) and enforce safety checks for ID collisions and invalid edges.
+- **REQ-016**: Provide capability/introspection metadata so clients can detect whether runtime exposes prompts, tools, and optional import/storage features.
 - **SEC-001**: Validate all new numeric input ranges in MCP input schemas and runtime guards.
 - **SEC-002**: Do not expose private raw emotional content when returning distilled artifacts unless explicitly requested.
+- **SEC-003**: File-based import must constrain readable paths to configured allowlist roots and reject path traversal attempts.
 - **CON-001**: Single-file core architecture in src/index.ts is current state; incremental modular extraction is allowed but not required in v0.2.0.
 - **CON-002**: Existing persistence file format must continue to load old snapshots without migration failure.
+- **CON-003**: `import_memories` entries-based mode must remain backward compatible and unchanged by default.
 - **GUD-001**: Prefer additive interfaces and optional fields over breaking schema changes.
 - **GUD-002**: Every new server-side behavior must have test coverage and failure-path tests.
 - **GUD-003**: New planning memories default to `epistemic_status: draft`. Transition to `validated` requires either human action or an explicit agent assertion with a rationale note stored as a connected memory. Transition to `outdated` may be automated when a superseding memory is connected via `abstracted_from` or a conflict edge. (Source: council synthesis 2026-03-29.)
@@ -84,6 +92,29 @@ This document defines the implementation sequence for roadmap milestones v0.2.0 
 | TASK-024 | Bump package.json version for v0.2.0 then v0.3.0, update server.json metadata consistently. |  |  |
 | TASK-025 | Execute full verification: npm run build, smoke scripts, benchmark scripts, and report outputs checked into tracked docs only. |  |  |
 
+### Implementation Phase 4
+
+- **GOAL-004**: Close migration and interoperability gaps by adding storage diagnostics, file-based import, preflight validation, and capability introspection.
+
+| Task | Description | Completed | Date |
+|------|-------------|-----------|------|
+| TASK-026 | Add `resolve_storage_paths` MCP tool in src/index.ts returning resolved `snapshotPath`, `walPath`, `baseDir`, and env precedence metadata. |  |  |
+| TASK-027 | Extend `import_memories` input schema in src/index.ts to accept either `entries` or `file_path` (mutually exclusive) plus optional `dry_run`, `dedupe_policy`, `preserve_ids`, and `merge_connections`. |  |  |
+| TASK-028 | Implement file-based import reader in src/core/persistence.ts with allowlist-root validation and explicit NM_E0xx error mapping for invalid path, unreadable file, malformed JSON, and schema mismatch. |  |  |
+| TASK-029 | Implement import planner in src/core/import-planner.ts that computes preflight counts and reason codes before writes; wire `dry_run=true` to return planner output without mutations. |  |  |
+| TASK-030 | Implement dedupe evaluation in src/core/import-planner.ts supporting `none`, `content_hash`, and `content_plus_tags`; include deterministic skip reason codes in final summary. |  |  |
+| TASK-031 | Implement snapshot migration path for `preserve_ids` and `merge_connections` in src/index.ts with collision detection and explicit fallback behavior when flags are false. |  |  |
+| TASK-032 | Add capability/introspection MCP resource or tool in src/index.ts reporting enabled optional features (`file_import`, `import_dry_run`, `dedupe_policy`, `preserve_ids`, `merge_connections`, `storage_diagnostics`). |  |  |
+| TASK-033 | Update README.md and ROADMAP references with example client configs (`npx` and Docker) that map to the same persistence location and include verification steps using `resolve_storage_paths`. |  |  |
+
+#### Phase 4 Release Target Mapping
+
+| Item | Target Release | Tracking |
+|------|----------------|----------|
+| TASK-026 through TASK-031 | v0.3.0 | Issue #49 is primary tracker for file-path import scope; related implementation tasks are grouped under GOAL-004. |
+| TASK-032 through TASK-033 | v1.0.0 | Capability contract hardening + client profile parity docs must align with stable API contract milestone. |
+| Cross-process writer coordination follow-on (see roadmap v0.4.0) | v0.4.0 | Tracked as orchestration safety work, not in-scope for GOAL-004 implementation batch. |
+
 ## 3. Alternatives
 
 - **ALT-001**: Implement full Warbler RetrievalAPI and FractalStat bridge directly in TypeScript. Not chosen because it introduces large conceptual surface before v0.2.0 hardening is complete.
@@ -98,6 +129,8 @@ This document defines the implementation sequence for roadmap milestones v0.2.0 
 - **DEP-003**: Existing persisted snapshots at ~/.neurodivergent-memory/memories.json must be readable after WAL introduction.
 - **DEP-004**: Existing test harness scripts (test-memory-graph.ps1, test-memory-graph.ts) must be adapted only where output text changes.
 - **DEP-005**: FractalSemantics reference model for district metadata and LUCA lineage is read from development-artifacts/fractalsemantics/fractalsemantics/*.py and not imported at runtime.
+- **DEP-006**: File-based import requires Node fs/path behavior parity across Windows, macOS, Linux, and containerized execution contexts.
+- **DEP-007**: Tool schema and response updates must remain compatible with MCP clients that cache tool definitions per session.
 
 ## 5. Files
 
@@ -113,6 +146,10 @@ This document defines the implementation sequence for roadmap milestones v0.2.0 
 - **FILE-010**: tests/benchmarks/memory-benchmark.ts — deterministic perf baseline runner.
 - **FILE-011**: README.md — user-facing tool and parameter docs.
 - **FILE-012**: CHANGELOG.md — release notes and migration notes.
+- **FILE-013**: src/core/import-planner.ts — import preflight, dedupe, and summary reason-code planner.
+- **FILE-014**: src/core/persistence.ts — file-path ingestion, allowlist validation, and storage diagnostics resolver exposure.
+- **FILE-015**: tests/import-from-file.spec.ts — file import and preflight behavior tests.
+- **FILE-016**: tests/storage-diagnostics.spec.ts — resolved path diagnostics tests.
 
 ## 6. Testing
 
@@ -124,6 +161,11 @@ This document defines the implementation sequence for roadmap milestones v0.2.0 
 - **TEST-006**: Unit test custom district registration: parent must resolve to canonical chain rooted in LUCA.
 - **TEST-007**: Integration test store/retrieve/update/search/traverse/related/memory_stats regression parity.
 - **TEST-008**: Benchmark test outputs persisted and compared against baseline threshold gates.
+- **TEST-009**: Unit test file-based import success path using canonical snapshot fixture and deterministic summary output.
+- **TEST-010**: Unit test import `dry_run` returns identical counts to execution mode without mutating persisted data.
+- **TEST-011**: Unit test dedupe policies produce expected skip counts and reason codes across duplicate fixtures.
+- **TEST-012**: Unit test `preserve_ids` collision handling and `merge_connections` edge-validation behavior.
+- **TEST-013**: Unit test `resolve_storage_paths` reports consistent paths and precedence metadata for env-var combinations.
 
 ## 7. Risks & Assumptions
 
@@ -133,6 +175,9 @@ This document defines the implementation sequence for roadmap milestones v0.2.0 
 - **RISK-004**: Custom district registration can fragment taxonomy if parent validation is weak.
 - **RISK-005**: Cross-district distillation can over-normalize content if policy thresholds are too permissive.
 - **RISK-006**: Stored plans may be treated as authoritative by future agent sessions even after superseding decisions are made. Mitigation: `epistemic_status` transitions (REQ-010, GUD-003) and the loop telemetry ping-pong detector (TASK-008) both surface stale plan reuse. (Source: council synthesis 2026-03-29.)
+- **RISK-007**: File import with `preserve_ids` can create partial migration states if collisions are not atomically handled.
+- **RISK-008**: Import dedupe semantics may be perceived as data loss without transparent reason-code reporting and dry-run previews.
+- **RISK-009**: Clients may mis-handle additive introspection fields unless response contract is clearly versioned and documented.
 - **ASSUMPTION-001**: Existing clients tolerate additive output fields in tool responses.
 - **ASSUMPTION-002**: Versioned release cadence allows v0.2.0 and v0.3.0 as separate hardening checkpoints.
 - **ASSUMPTION-003**: Warbler remains untracked reference material under ignored development-artifacts path.

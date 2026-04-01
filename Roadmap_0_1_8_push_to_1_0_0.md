@@ -2,7 +2,7 @@
 
 This page tracks the milestones from the current research preview toward the 1.0.0 production release.
 
-> **Design note:** The district model is rooted in FractalSemantics addressing, where every entity inherits ancestry from a single anchor point called **LUCA** (Last Universal Common Ancestor). The five canonical districts are the five direct children of LUCA in the default schema. Custom districts in later milestones must declare a valid LUCA-derived address, making ancestry explicit and traceable rather than assumed.
+> **Design note:** The district model is rooted in [FractalSemantics(FractalStat)](https://gitlab.com/tiny-walnut-games/fractalstat) addressing, where every entity inherits ancestry from a single anchor point called **LUCA** (Last Universal Common Ancestor). These concepts are also used in [Warbler-CDA](https://gitlab.com/tiny-walnut-games/the-seed/-/tree/4884b3a22da8a487e7c7931cb7426e20def0d7ba/warbler-cda-package), and [the seed](https://gitlab.com/tiny-walnut-games/the-seed). The five canonical districts are the five direct children of LUCA in the default schema. Custom districts in later milestones must declare a valid LUCA-derived address, making ancestry explicit and traceable rather than assumed.
 
 ---
 
@@ -229,17 +229,17 @@ For full details see [[Release Notes]].
 The following unresolved pain points are now mapped to execution targets in the approved plan:
 
 - **v0.3.0**
-	- Storage diagnostics visibility (`resolve_storage_paths` + env precedence)
-	- File-based import (`file_path`) with backward-compatible `entries` mode
-	- Import `dry_run` preflight with deterministic summary counts
-	- Import dedupe policy support and stable skip reason codes
-	- Snapshot migration flags (`preserve_ids`, `merge_connections`) with safety guards
-	- Primary tracking: **Issue #49** (`import_memories` file-path support)
+- Storage diagnostics visibility (`resolve_storage_paths` + env precedence)
+- File-based import (`file_path`) with backward-compatible `entries` mode
+- Import `dry_run` preflight with deterministic summary counts
+- Import dedupe policy support and stable skip reason codes
+- Snapshot migration flags (`preserve_ids`, `merge_connections`) with safety guards
+- Primary tracking: **Issue #49** (`import_memories` file-path support)
 
 - **v0.4.0**
-	- Cross-process write coordination mode and contention guidance (shared directory safety)
+- Cross-process write coordination mode and contention guidance (shared directory safety)
 
 - **v1.0.0**
-	- Runtime capability/introspection contract + canonical client profile parity docs
+- Runtime capability/introspection contract + canonical client profile parity docs
 
 > See also: [[Architecture]] · [[Release Notes]] · [[Getting Started]] · [[White Paper]]
