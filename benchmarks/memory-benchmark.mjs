@@ -79,8 +79,40 @@ function extractMemoryId(responseText) {
 }
 
 function assertSuccess(response, toolName) {
+  const toolLabel = toolName ?? "tool";
+
+  // Transport-level JSON-RPC error
   if (response?.error) {
-    throw new Error(`${toolName} returned error: ${JSON.stringify(response.error)}`);
+    throw new Error(`${toolLabel} returned error: ${JSON.stringify(response.error)}`);
+  }
+
+  // Tool-level error encoded in the result payload
+  const result = response?.result;
+  if (result?.isError) {
+    const code = result.Code ?? result.code;
+    const extractedText = extractText(response);
+    let message = result.Message ?? result.message;
+    if (!message && extractedText) {
+      message = extractedText;
+    }
+    if (!message) {
+      message = "Unknown tool error";
+    }
+    const recovery = result.Recovery ?? result.recovery;
+
+    const errorDetails = {
+      code,
+      message,
+      recovery,
+      // plain-text error details from the tool (e.g. NM_E codes/messages)
+      text: extractedText || undefined,
+      // include full result for debugging in case the shape changes
+      rawResult: result,
+    };
+
+    throw new Error(
+      `${toolLabel} returned tool-level error: ${JSON.stringify(errorDetails)}`
+    );
   }
 }
 
