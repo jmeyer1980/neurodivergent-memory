@@ -1439,6 +1439,196 @@ class NeurodivergentMemory {
    * - epistemic_status (must be a valid EpistemicStatus)
    * Returns the list of newly created memory IDs.
    */
+  /**
+   * Distill an emotional memory into a structured logical artifact.
+   * Translates raw emotional processing content into signals, triggers, constraints,
+   * next_actions, and risk_flags that logical/planning agents can consume efficiently.
+   */
+  distillMemory(sourceMemoryId: string, agent_id?: string): {
+    distilled: MemoryNPC;
+    artifact: {
+      signals: string[];
+      triggers: string[];
+      constraints: string[];
+      next_actions: string[];
+      risk_flags: string[];
+      abstracted_from: string;
+    };
+  } {
+    const sourceMemory = this.memories[sourceMemoryId];
+    if (!sourceMemory) {
+      throw createNMError(
+        NM_ERRORS.MEMORY_NOT_FOUND,
+        `Memory not found: ${sourceMemoryId}`,
+        "List or search memories first, then retry with a valid memory ID.",
+      );
+    }
+    if (sourceMemory.district !== "emotional_processing") {
+      throw createNMError(
+        NM_ERRORS.INPUT_VALIDATION_FAILED,
+        `Memory ${sourceMemoryId} is not in emotional_processing district (it is in ${sourceMemory.district})`,
+        "distill_memory only operates on emotional_processing memories.",
+      );
+    }
+
+    const content = sourceMemory.content.toLowerCase();
+    const originalIntensity = sourceMemory.intensity ?? 0.5;
+    const distilledIntensity = Math.max(0, originalIntensity * 0.4); // Reduced intensity for logical consumption
+
+    // Extract signals: look for patterns indicating emotional states or needs
+    const signalPatterns = [
+      { pattern: /shame|guilt|embarrass/i, signal: "shame_cycle_detected" },
+      { pattern: /avoidanc|procrastinat|put\s*off/i, signal: "avoidance_behavior" },
+      { pattern: /overwhelm|too\s*much|can't\s*(start|begin|do)/i, signal: "overwhelm_state" },
+      { pattern: /perfection|perfect|just\s*right/i, signal: "perfectionism_tendency" },
+      { pattern: /focus|distract|wander|drift/i, signal: "attention_fragmentation" },
+      { pattern: /energy|tired|exhaust|fatigue/i, signal: "energy_depletion" },
+      { pattern: /motivat|drive|want|need/i, signal: "motivation_signal" },
+      { pattern: /frustrat|anger|annoy|irritat/i, signal: "frustration_state" },
+      { pattern: /anxiet|worried|fear|panic/i, signal: "anxiety_signal" },
+      { pattern: /creativ|insight|idea|connection/i, signal: "creative_insight" },
+    ];
+
+    const signals: string[] = signalPatterns
+      .filter(({ pattern }) => pattern.test(content))
+      .map(({ signal }) => signal);
+
+    if (signals.length === 0) {
+      signals.push("unclassified_emotional_state");
+    }
+
+    // Extract triggers: conditions that may have caused the emotional state
+    const triggerPatterns = [
+      { pattern: /deadline|due|time\s*press|urgent/i, trigger: "time_pressure" },
+      { pattern: /complex|hard|difficult|confusing/i, trigger: "task_complexity" },
+      { pattern: /interrup|noise|distraction|environment/i, trigger: "environmental_disruption" },
+      { pattern: /expect|pressure|demand|require/i, trigger: "external_expectation" },
+      { pattern: /unclear|unknown|unsure|ambiguous/i, trigger: "ambiguity" },
+      { pattern: /transit|switch|context.?switch|multi.?task/i, trigger: "context_switching" },
+      { pattern: /social|people|meeting|group/i, trigger: "social_demand" },
+      { pattern: /novel|new|unfamiliar|unknown/i, trigger: "novelty" },
+    ];
+
+    const triggers: string[] = triggerPatterns
+      .filter(({ pattern }) => pattern.test(content))
+      .map(({ trigger }) => trigger);
+
+    if (triggers.length === 0) {
+      triggers.push("unspecified_trigger");
+    }
+
+    // Extract constraints: limitations or boundaries relevant to the situation
+    const constraints: string[] = [];
+    if (/time|schedule|deadline/i.test(content)) constraints.push("time_bounded");
+    if (/energy|fatigue|tired/i.test(content)) constraints.push("energy_limited");
+    if (/attention|focus|distract/i.test(content)) constraints.push("attention_fragmented");
+    if (/resource|budget|money/i.test(content)) constraints.push("resource_limited");
+    if (/support|help|alone/i.test(content)) constraints.push("support_dependent");
+    if (/deadline|must|need.*by/i.test(content)) constraints.push("time_sensitive");
+    if (constraints.length === 0) constraints.push("no_explicit_constraints");
+
+    // Extract next actions: actionable recommendations
+    const actionPatterns = [
+      { pattern: /break.*down|slice|chunk|split/i, action: "decompose_task" },
+      { pattern: /time.?box|timer|pomodoro|minute/i, action: "apply_timeboxing" },
+      { pattern: /rest|break|pause|stop/i, action: "schedule_rest" },
+      { pattern: /write|note|document|record/i, action: "externalize_thought" },
+      { pattern: /ask|help|collaborate|support/i, action: "seek_support" },
+      { pattern: /simplify|reduce|strip/i, action: "reduce_scope" },
+      { pattern: /start|begin|first.*step|just.*do/i, action: "initiate_minimum_effort" },
+      { pattern: /review|reflect|check|assess/i, action: "reflect_on_pattern" },
+      { pattern: /connect|link|relate/i, action: "connect_related_knowledge" },
+    ];
+
+    const next_actions: string[] = actionPatterns
+      .filter(({ pattern }) => pattern.test(content))
+      .map(({ action }) => action);
+
+    if (next_actions.length === 0) {
+      next_actions.push("monitor_for_clarity");
+    }
+
+    // Extract risk flags: warning indicators
+    const riskPatterns = [
+      { pattern: /shame|cycle|rut|stuck|loop/i, risk: "negative_feedback_loop" },
+      { pattern: /avoid|escape|quit|give.?up/i, risk: "task_abandonment" },
+      { pattern: /perfection|all.?or.?nothing|binary/i, risk: "perfectionism_trap" },
+      { pattern: /compare|others|worse|inferior/i, risk: "comparison_distortion" },
+      { pattern: /catastroph|worst|always|never/i, risk: "catastrophizing" },
+      { pattern: /burnout|empty|hollow|numb/i, risk: "burnout_indicator" },
+      { pattern: /impulse|rash|without.?thinking/i, risk: "impulsive_decision" },
+    ];
+
+    const risk_flags: string[] = riskPatterns
+      .filter(({ pattern }) => pattern.test(content))
+      .map(({ risk }) => risk);
+
+    if (/ruminate|repeat|same.?thought|spiral/i.test(content)) {
+      risk_flags.push("rumination_loop");
+    }
+
+    // Build artifact
+    const artifact = {
+      signals,
+      triggers,
+      constraints,
+      next_actions,
+      risk_flags,
+      abstracted_from: sourceMemoryId,
+    };
+
+    // Create distilled memory in logical_analysis district
+    const id = `memory_${this.nextMemoryId++}`;
+    const now = new Date();
+    const distilledContent = `Distilled artifact from ${sourceMemoryId}: signals=[${signals.join(", ")}], triggers=[${triggers.join(", ")}], actions=[${next_actions.join(", ")}], risks=[${risk_flags.join(", ")}]`;
+
+    const distilledMemory: MemoryNPC = {
+      id,
+      name: `Distilled ${sourceMemory.name}`,
+      archetype: "scholar",
+      agent_id,
+      project_id: sourceMemory.project_id,
+      district: "logical_analysis",
+      content: distilledContent,
+      traits: ["analytical", "structured"],
+      concerns: ["clarity", "actionability"],
+      connections: [sourceMemoryId],
+      tags: ["kind:distilled", "scope:derived", "layer:abstraction"],
+      created: now,
+      last_accessed: now,
+      access_count: 1,
+      emotional_valence: 0, // Neutral emotional valence for logical consumption
+      intensity: distilledIntensity,
+      abstracted_from: sourceMemoryId,
+      epistemic_status: sourceMemory.epistemic_status,
+    };
+
+    // Connect source to distilled (bidirectional)
+    sourceMemory.connections.push(id);
+
+    this.ensureCapacityForInsert();
+    this.appendWalEntry("store", { memory: this.serializeMemory(distilledMemory) });
+    this.appendWalEntry("update", { memory_id: sourceMemoryId, updates: { connections: sourceMemory.connections } });
+    this.insertMemory(distilledMemory);
+    this.scheduleSave();
+
+    logger.info(
+      {
+        operation: "distill",
+        sourceMemoryId,
+        distilledMemoryId: id,
+        signalCount: signals.length,
+        riskFlagCount: risk_flags.length,
+      },
+      "Distilled emotional memory",
+    );
+
+    return {
+      distilled: distilledMemory,
+      artifact,
+    };
+  }
+
   importMemories(entries: Array<{ content: string; district: string; tags?: string[]; emotional_valence?: number; intensity?: number; agent_id?: string; project_id?: string; epistemic_status?: EpistemicStatus }>, default_agent_id?: string): string[] {
     const materialized = this.materializeImportMemories(entries, default_agent_id);
     // Append WAL entry for the import before mutating in-memory state to preserve the
@@ -2204,6 +2394,24 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           },
           required: ["entries"]
         }
+      },
+      {
+        name: "distill_memory",
+        description: "Translate an emotional_processing memory into a structured logical artifact (signals, triggers, constraints, next_actions, risk_flags). Creates a distilled memory in logical_analysis district with reduced intensity and neutral valence for efficient consumption by planning agents. Only operates on emotional_processing memories.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            memory_id: {
+              type: "string",
+              description: "ID of the emotional_processing memory to distill"
+            },
+            agent_id: {
+              type: "string",
+              description: "Optional agent identifier for the distilled memory"
+            }
+          },
+          required: ["memory_id"]
+        }
       }
     ]
   };
@@ -2616,6 +2824,43 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             NM_ERRORS.INPUT_VALIDATION_FAILED,
             "Import request was invalid.",
             "Verify each entry includes valid required fields, then retry import_memories.",
+          ),
+        );
+      }
+    }
+
+    case "distill_memory": {
+      const { memory_id, agent_id } = request.params.arguments as any;
+      try {
+        const result = await runMutatingTool(
+          "distill_memory",
+          () => memorySystem.distillMemory(memory_id, agent_id),
+        );
+        const artifact = result.artifact;
+        const distilled = result.distilled;
+        const artifactText = [
+          `signals: ${artifact.signals.length > 0 ? artifact.signals.join(", ") : "(none)"}`,
+          `triggers: ${artifact.triggers.length > 0 ? artifact.triggers.join(", ") : "(none)"}`,
+          `constraints: ${artifact.constraints.length > 0 ? artifact.constraints.join(", ") : "(none)"}`,
+          `next_actions: ${artifact.next_actions.length > 0 ? artifact.next_actions.join(", ") : "(none)"}`,
+          `risk_flags: ${artifact.risk_flags.length > 0 ? artifact.risk_flags.join(", ") : "(none)"}`,
+        ].join("\n");
+
+        return {
+          content: [{
+            type: "text",
+            text: `🔬 Distilled memory ${memory_id}\nCreated distilled memory: ${distilled.id}\nDistrict: ${distilled.district}\nIntensity: ${(distilled.intensity ?? 0).toFixed(2)} (reduced from source)\nValence: 0 (neutral)\n\nArtifact:\n${artifactText}`
+          }]
+        };
+      } catch (error) {
+        return toolErrorResult(
+          "distill_memory",
+          "Distillation failed",
+          error,
+          formatMcpError(
+            NM_ERRORS.INPUT_VALIDATION_FAILED,
+            "Distillation request was invalid.",
+            "Verify the memory ID is a valid emotional_processing memory, then retry distill_memory.",
           ),
         );
       }
