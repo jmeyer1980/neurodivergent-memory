@@ -254,7 +254,7 @@ class NeurodivergentMemory {
   private readonly repeatThreshold = parseNumberEnv(
     process.env.NEURODIVERGENT_MEMORY_REPEAT_THRESHOLD,
     0.85,
-    (value) => value >= 0 && value <= 1,
+    (value) => value > 0,
   );
   private readonly loopTelemetryWindowSize = parseIntegerEnv(
     process.env.NEURODIVERGENT_MEMORY_LOOP_WINDOW,
