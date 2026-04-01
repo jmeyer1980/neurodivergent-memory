@@ -233,7 +233,34 @@ test("legacy snapshots without project_id load successfully", async () => {
 
     const stats = await server.callTool(21, "memory_stats", {});
     const statsText = resultText(stats);
-    assert.match(statsText, /Per project:\n  unset: 1/);
+    assert.match(statsText, /Per project:\n  \(unset\): 1/);
+  } finally {
+    server.stop();
+  }
+});
+
+test("update_memory accepts project_id null to clear project attribution", async () => {
+  const server = startServer();
+
+  try {
+    await server.callTool(30, "store_memory", {
+      content: "clearable project memory",
+      district: "practical_execution",
+      tags: ["topic:test", "scope:session", "kind:task", "layer:implementation"],
+      project_id: "alpha",
+    });
+
+    const clearProject = await server.callTool(31, "update_memory", {
+      memory_id: "memory_1",
+      project_id: null,
+    });
+    assert.match(resultText(clearProject), /Project: unset/);
+
+    const listAlpha = await server.callTool(32, "list_memories", { project_id: "alpha", page_size: 20 });
+    assert.match(resultText(listAlpha), /No memories found/);
+
+    const listAll = await server.callTool(33, "list_memories", { page_size: 20 });
+    assert.match(resultText(listAll), /project: unset/);
   } finally {
     server.stop();
   }

@@ -122,8 +122,11 @@ Each memory can optionally carry:
 Memories can optionally include a first-class `project_id` for attribution and scoped retrieval across multi-project graphs.
 
 - `project_id` is optional on writes (`store_memory`, `update_memory`, `import_memories`).
+- `update_memory` accepts `project_id: null` to clear existing project attribution.
 - `search_memories`, `list_memories`, and `memory_stats` accept an optional `project_id` filter.
 - Stats now include a `perProject` breakdown.
+- Scoped `memory_stats` reports `totalConnections` only for edges where both endpoints are in scope.
+- `list_memories` includes a `project: ...` segment in each line (`unset` when no project attribution exists).
 - Validation contract: `project_id` must match `^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$` (max length 64).
 - Invalid values return stable error code `NM_E020` with recovery guidance.
 

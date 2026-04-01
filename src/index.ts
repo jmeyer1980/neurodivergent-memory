@@ -215,6 +215,10 @@ type WalOperation = "store" | "update" | "delete" | "connect" | "import";
 const PROJECT_ID_MAX_LENGTH = 64;
 const PROJECT_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$/;
 
+type MemoryUpdatePayload = Partial<Pick<MemoryNPC, "content" | "tags" | "emotional_valence" | "intensity" | "district" | "epistemic_status" | "project_id">> & {
+  project_id?: string | null;
+};
+
 interface WalEntry {
   op: WalOperation;
   payload: Record<string, unknown>;
@@ -404,7 +408,7 @@ class NeurodivergentMemory {
       }
       case "update": {
         const memoryId = String(entry.payload.memory_id ?? "");
-        const updates = (entry.payload.updates ?? {}) as Partial<Pick<MemoryNPC, "content" | "tags" | "emotional_valence" | "intensity" | "district" | "epistemic_status" | "project_id">>;
+        const updates = (entry.payload.updates ?? {}) as MemoryUpdatePayload;
         if (this.memories[memoryId]) {
           this.applyMemoryUpdates(memoryId, updates);
           return true;
@@ -908,7 +912,7 @@ class NeurodivergentMemory {
 
   updateMemory(
     id: string,
-    updates: Partial<Pick<MemoryNPC, "content" | "tags" | "emotional_valence" | "intensity" | "district" | "epistemic_status" | "project_id">>,
+    updates: MemoryUpdatePayload,
     actor?: OperationActorContext,
   ): MemoryNPC {
     const memory = this.memories[id];
@@ -927,7 +931,7 @@ class NeurodivergentMemory {
         `Use one of the configured districts: ${Object.keys(this.districts).join(", ")}.`,
       );
     }
-    if (updates.project_id !== undefined) {
+    if (updates.project_id !== undefined && updates.project_id !== null) {
       validateProjectId(updates.project_id);
     }
 
@@ -985,7 +989,7 @@ class NeurodivergentMemory {
 
   private applyMemoryUpdates(
     id: string,
-    updates: Partial<Pick<MemoryNPC, "content" | "tags" | "emotional_valence" | "intensity" | "district" | "epistemic_status" | "project_id">>,
+    updates: MemoryUpdatePayload,
   ): void {
     const memory = this.memories[id];
     if (!memory) return;
@@ -1001,7 +1005,13 @@ class NeurodivergentMemory {
     if (updates.emotional_valence !== undefined) memory.emotional_valence = updates.emotional_valence;
     if (updates.intensity !== undefined) memory.intensity = updates.intensity;
     if (updates.epistemic_status !== undefined) memory.epistemic_status = updates.epistemic_status;
-    if (updates.project_id !== undefined) memory.project_id = updates.project_id;
+    if (Object.prototype.hasOwnProperty.call(updates, "project_id")) {
+      if (updates.project_id === null) {
+        delete memory.project_id;
+      } else if (updates.project_id !== undefined) {
+        memory.project_id = updates.project_id;
+      }
+    }
 
     this.bm25.addDocument(id, this.documentText(memory));
   }
@@ -1254,10 +1264,15 @@ class NeurodivergentMemory {
       epistemicStatusBreakdown[statusKey] = (epistemicStatusBreakdown[statusKey] ?? 0) + 1;
     }
 
-    // Count unique directed edges (sum of all connections arrays).
-    // Bidirectional edges appear in both endpoints, so the raw sum over-counts
-    // them; we divide by 2 for an approximate undirected edge count.
-    const totalConnections = Math.round(allMems.reduce((sum, m) => sum + m.connections.length, 0) / 2);
+    // Count undirected edges where both endpoints are inside the current scope.
+    // This avoids inflating scoped totals with cross-project links.
+    const scopedIds = new Set(allMems.map(m => m.id));
+    const totalConnections = Math.round(
+      allMems.reduce(
+        (sum, m) => sum + m.connections.filter(connectionId => scopedIds.has(connectionId)).length,
+        0,
+      ) / 2,
+    );
 
     const mostAccessed = [...allMems]
       .sort((a, b) => b.access_count - a.access_count)
@@ -1466,6 +1481,7 @@ function parseNumberEnv(
 }
 
 function validateProjectId(projectId: string, fieldPath = "project_id"): void {
+  // Keep an explicit length check for a clearer operator-facing error than regex mismatch.
   if (projectId.length > PROJECT_ID_MAX_LENGTH) {
     throw createNMError(
       NM_ERRORS.INPUT_VALIDATION_FAILED,
@@ -1866,8 +1882,8 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
               description: "Optional caller agent identifier for loop telemetry attribution"
             },
             project_id: {
-              type: "string",
-              description: "New project identifier (optional)"
+              type: ["string", "null"],
+              description: "New project identifier (optional); pass null to clear existing project attribution"
             },
             epistemic_status: {
               type: "string",
@@ -2221,7 +2237,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     case "update_memory": {
       const { memory_id, content, district, tags, emotional_valence, intensity, epistemic_status, project_id, actor_district, agent_id } = request.params.arguments as any;
       try {
-        const updates: Partial<Pick<MemoryNPC, "content" | "tags" | "emotional_valence" | "intensity" | "district" | "epistemic_status" | "project_id">> = {};
+        const updates: MemoryUpdatePayload = {};
         if (content !== undefined) updates.content = content;
         if (district !== undefined) updates.district = district;
         if (tags !== undefined) updates.tags = tags;
