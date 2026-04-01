@@ -9,6 +9,7 @@ Status: PASS
 This run revalidated core MCP functionality after recent release pipeline, Docker, and registry changes.
 
 Validated areas:
+
 - TypeScript build and executable generation
 - MCP stdio tool calls across storage, search, graph operations, update, listing, and stats
 - Canonical tagging and district distribution behavior
@@ -36,23 +37,29 @@ Validated areas:
 ## Functional Checks
 
 1. Memory creation (all 5 districts)
+
 - PASS: 8 memories stored (`memory_1` through `memory_8`)
 
-2. Connections
+1. Connections
+
 - PASS: 3 connections created successfully
 - Note: current scripted scenario creates 3 edges in this run
 
-3. Search
+1. Search
+
 - PASS: BM25 ranking returned relevant results for all scripted queries
 - Example query (`time blindness dopamine task initiation`) returned 5 ranked memories
 
-4. Update
+1. Update
+
 - PASS: `update_memory` executed against `memory_4` with `content` and `intensity`
 
-5. Traversal and related
+1. Traversal and related
+
 - PASS: `traverse_from` and `related_to` returned connected memories
 
-6. Enumeration and stats
+1. Enumeration and stats
+
 - PASS: list and stats returned consistent graph state
 - Final stats snapshot:
   - Total memories: 8
@@ -69,6 +76,7 @@ Validated areas:
 The legacy script referenced outdated conventions from earlier versions.
 
 Resolved before final pass:
+
 - Memory IDs updated from `mem_*` to `memory_*`
 - `update_memory` argument keys aligned to current API (`content`, `intensity`)
 - Scenario strings updated to current context (v0.1.8, Node 24)

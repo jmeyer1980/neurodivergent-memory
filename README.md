@@ -489,7 +489,7 @@ Multiple tags from different namespaces are expected on every memory.
 ## Districts
 
 | Key | Purpose |
-|---|---|
+| --- | --- |
 | `logical_analysis` | Structured thinking, analysis, research findings |
 | `emotional_processing` | Feelings, emotional states, affective responses |
 | `practical_execution` | Tasks, plans, implementations, action items |
@@ -501,7 +501,7 @@ Multiple tags from different namespaces are expected on every memory.
 ## Available MCP Tools (quick reference)
 
 | Tool | Purpose |
-|---|---|
+| --- | --- |
 | `store_memory` | Create a new memory node |
 | `retrieve_memory` | Fetch one memory by ID |
 | `update_memory` | Modify content, tags, district, valence, or intensity |
@@ -530,4 +530,5 @@ The graph is restored on server startup — no data is lost between restarts.
 3. Apply the canonical tag schema when calling `store_memory`.
 4. Connect new memories to related existing ones with `connect_memories`.
 5. Use `traverse_from` or `related_to` for associative retrieval rather than repeated searches.
-```
+
+---

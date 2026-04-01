@@ -1,4 +1,5 @@
 # Neurodivergent Memory MCP Server - Smoke Test Report
+
 ## Docker Tag: neurodivergent-memory:review-followups
 
 **Date**: 2026-03-31  
@@ -15,6 +16,7 @@
 All smoke tests passed successfully. The new `review-followups` Docker tag is production-ready with full MCP functionality validated across all 11 memory management tools.
 
 ### Key Metrics
+
 - **Total MCP requests executed**: 13
 - **Successful responses**: 13 (100%)
 - **Tool-level errors**: 0
@@ -27,26 +29,35 @@ All smoke tests passed successfully. The new `review-followups` Docker tag is pr
 ## 1. Build & Preparation
 
 ### 1.1 TypeScript Build
+
 ```bash
 npm run build
 ```
+
 ✅ **Status**: PASS  
+
 - Zero compilation errors
 - Executable generated and permissions set correctly
 
 ### 1.2 Unit Tests
+
 ```bash
 npm test
 ```
+
 ✅ **Status**: PASS  
+
 - 4/4 persistence path tests passing
 - Duration: 176.7ms
 
 ### 1.3 Docker Image Build
+
 ```bash
 docker build -t neurodivergent-memory:review-followups -t neurodivergent-memory:latest .
 ```
+
 ✅ **Status**: PASS  
+
 - Build time: 15.2 seconds
 - Final image size: 257MB
 - Runtime layer optimized with production dependencies only
@@ -56,13 +67,15 @@ docker build -t neurodivergent-memory:review-followups -t neurodivergent-memory:
 ## 2. Docker Tag Strategy
 
 | Tag | Image ID | Purpose | Status |
-|-----|----------|---------|--------|
+| ----- | ---------- | --------- | -------- |
 | `neurodivergent-memory:review-followups` | c13509607802 | **Current production build** from feat/pr-29-review-followups | ✅ Active |
 | `neurodivergent-memory:latest` | c13509607802 | Latest stable build (aliased to review-followups) | ✅ Active |
 | `neurodivergent-memory:issue-25-local` | fe9b490f63d3 | Previous build (kept for fallback) | ✅ Available |
 
 ### 2.1 MCP Client Configuration Updates
+
 ✅ Both configs updated to use new tag:
+
 - ✅ `~/.config/Claude/claude_desktop_config.json`
 - ✅ `~/.claude-dev/settings/cline_mcp_settings.json`
 
@@ -71,15 +84,17 @@ docker build -t neurodivergent-memory:review-followups -t neurodivergent-memory:
 ## 3. MCP Integration Test Suite
 
 ### Test Input
+
 - **Test file**: `test-input.jsonl`
 - **Requests**: 13 sequential MCP calls
 - **Scope**: All core memory graph operations
 
 ### 3.1 Memory Creation (6 operations)
+
 All memories stored successfully with proper district assignment:
 
 | Request | District | Memory ID | Status |
-|---------|----------|-----------|--------|
+| --------- | ---------- | ----------- | -------- |
 | #1 | logical_analysis | memory_30 | ✅ Stored |
 | #2 | emotional_processing | memory_31 | ✅ Stored |
 | #3 | practical_execution | memory_32 | ✅ Stored |
@@ -90,20 +105,24 @@ All memories stored successfully with proper district assignment:
 **Checkpoint**: Memories 30-35 properly created with canonical tags
 
 ### 3.2 Search Functionality (3 operations)
+
 BM25 relevance ranking validated across semantic queries:
 
 #### Query 1: Executive dysfunction
+
 - **Results**: 16 ranked memories
 - **Top match**: memory_30 (perfect relevance: 1.000)
 - **Secondary matches**: 15 related memories ranked properly
 - ✅ Status: PASS
 
 #### Query 2: ADHD risks
+
 - **Results**: 3 ranked memories
 - **Top match**: memory_33 (perfect relevance: 1.000)
 - ✅ Status: PASS
 
 #### Query 3: ADHD insights
+
 - **Results**: 3 ranked memories  
 - **Top match**: memory_34 (perfect relevance: 1.000)
 - ✅ Status: PASS
@@ -113,6 +132,7 @@ BM25 relevance ranking validated across semantic queries:
 ### 3.3 List Operations (2 operations)
 
 #### List Request (Page 1)
+
 - **Total memories**: 37
 - **Page size**: Full enumeration
 - **Data integrity**: All memories properly formatted with:
@@ -124,6 +144,7 @@ BM25 relevance ranking validated across semantic queries:
 - ✅ Status: PASS
 
 #### Memory Stats
+
 - **Total connections**: 15
 - **Per-district distribution**:
   - logical_analysis: 11
@@ -142,6 +163,7 @@ BM25 relevance ranking validated across semantic queries:
 ## 4. Startup Diagnostics
 
 ### WAL Recovery Telemetry
+
 ```json
 {
   "startupMode": "snapshot-load",
@@ -155,12 +177,14 @@ BM25 relevance ranking validated across semantic queries:
 ```
 
 ✅ **Interpretation**:
+
 - Fresh snapshot load (no WAL replay needed)
 - Max memory unbounded; LRU eviction ready if needed
 - No corrupted WAL entries
 - Baseline stable
 
 ### Persistence Configuration
+
 - **Location**: `/data/memories.json`
 - **Auto-resolved**: Via `NEURODIVERGENT_MEMORY_DIR` env var
 - **Volume mount**: `C:\Users\jerio\.neurodivergent-memory:/data`
@@ -171,7 +195,9 @@ BM25 relevance ranking validated across semantic queries:
 ## 5. Configuration Validation
 
 ### MCP Server Runtime
+
 ✅ All 11 memory management tools operational:
+
 - `retrieve_memory`
 - `connect_memories`
 - `update_memory`
@@ -185,14 +211,17 @@ BM25 relevance ranking validated across semantic queries:
 - `memory_stats`
 
 ### Canonical Tag Schema
+
 All stored memories properly use 4-namespace tags:
+
 - `topic:*` (domain/subject)
 - `scope:*` (breadth: concept/project/session/global)
 - `kind:*` (knowledge type: insight/decision/pattern/reference)
 - `layer:*` (abstraction level: architecture/implementation/debugging/research)
 
 ✅ **Example**:
-```
+
+```none
 topic:adhd-executive-function, scope:concept, kind:insight, layer:research
 ```
 
@@ -201,6 +230,7 @@ topic:adhd-executive-function, scope:concept, kind:insight, layer:research
 ## 6. Known State
 
 ### PR #31 Integration
+
 - **Status**: ✅ **MERGED** (2026-03-31T12:50:51Z)
 - **Merged by**: jmeyer1980
 - **Latest commit**: a5a25b5
@@ -212,6 +242,7 @@ topic:adhd-executive-function, scope:concept, kind:insight, layer:research
   - Closes issue #30
 
 ### Roadmap Status
+
 - ✅ Issue #15 (WAL persistence hardening): Merged via PR #29
 - ✅ Post-merge cleanup: PR #31 merged successfully
 - ⏳ Next: Prepare for v0.2.0 feature window or additional hardening tasks
@@ -221,12 +252,14 @@ topic:adhd-executive-function, scope:concept, kind:insight, layer:research
 ## 7. Risk Assessment
 
 ### Zero Regressions Found
+
 - All existing functionality operational
 - New WAL replay logic working correctly
 - Search index responsive and accurate
 - Persistence path resolution stable
 
 ### Readiness Checklist
+
 - ✅ TypeScript compilation clean
 - ✅ All unit tests passing
 - ✅ Docker build successful
@@ -242,15 +275,18 @@ topic:adhd-executive-function, scope:concept, kind:insight, layer:research
 ## 8. Action Items
 
 ### Immediate (Applied)
+
 - ✅ Built new Docker image with tag `neurodivergent-memory:review-followups`
 - ✅ Updated claude_desktop_config.json to use new tag
 - ✅ Updated cline_mcp_settings.json to use new tag
 - ✅ Verified all MCP tools functional with new container
 
 ### In Progress
+
 - 🔄 PR #31 review cycle (awaiting automated review)
 
 ### Next Release Cycle
+
 - ⏳ Prepare for v0.2.0 feature additions once PR #31 merged
 - ⏳ Consider formalizing release notes from CHANGELOG
 
@@ -259,7 +295,7 @@ topic:adhd-executive-function, scope:concept, kind:insight, layer:research
 ## Appendix: Test Environment
 
 | Property | Value |
-|----------|-------|
+| ---------- | ------- |
 | Host OS | Windows |
 | Docker Runtime | Docker Desktop (Linux VM) |
 | Node.js | 24-alpine |
@@ -273,6 +309,7 @@ topic:adhd-executive-function, scope:concept, kind:insight, layer:research
 ## Conclusion
 
 The `neurodivergent-memory:review-followups` Docker tag is **production-ready** with:
+
 - ✅ Clean TypeScript builds
 - ✅ Passing unit and integration tests
 - ✅ Full MCP specification compliance
