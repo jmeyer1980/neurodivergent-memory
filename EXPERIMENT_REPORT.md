@@ -1,11 +1,11 @@
-# Smoke Test Experiment: Executive Function Support Network (0.1.8)
+# Smoke Test Experiment: Executive Function Support Network (0.2.0)
 
 ## Overview
 
 This experiment reruns the narrative memory-graph scenario used for earlier releases, updated for current server behavior and release context.
 
-Date: 2026-03-29
-Version under test: 0.1.8
+Date: 2026-04-01
+Version under test: 0.2.0
 Run mode: isolated persistence for deterministic results
 
 ## Goals
@@ -63,12 +63,12 @@ Phases exercised:
 
 ## Findings
 
-The run confirms current operational health for the tested workflow on 0.1.8.
+The run confirms current operational health for the tested workflow on 0.2.0.
 
 Additionally, this revalidation surfaced and fixed stale harness assumptions from older versions:
 - old memory IDs (`mem_*`) were updated to `memory_*`
 - legacy update fields were aligned with current tool schema
-- test narrative references updated to Node 24 and v0.1.8 context
+- test narrative references updated to Node 24 and v0.2.0 context
 
 ## Evidence
 
@@ -78,4 +78,4 @@ Detailed pass report: `SMOKE_TEST_REPORT.md`
 
 ## Conclusion
 
-The experiment supports continued research-preview use on 0.1.8 and provides current, reproducible test evidence after recent release and registry milestones.
+The experiment supports continued research-preview use on 0.2.0 and provides current, reproducible test evidence after recent release and registry milestones.

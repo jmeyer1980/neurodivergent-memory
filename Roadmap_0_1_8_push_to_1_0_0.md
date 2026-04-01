@@ -6,7 +6,7 @@ This page tracks the milestones from the current research preview toward the 1.0
 
 ---
 
-## Current Position: v0.1.8 (Research Preview)
+## Current Position: v0.2.0 (Research Preview)
 
 The project is in active pre-1.0 development. All 0.x releases should be interpreted as:
 
@@ -21,6 +21,7 @@ This position is intentional and consistent with semantic versioning conventions
 
 | Version | Date | Summary |
 | ---- | ---- | ---- |
+| v0.2.0 | 2026-04-01 | Trust & Telemetry milestone delivered (persistence hardening, concurrency safety, error taxonomy, loop telemetry, baseline benchmarks) |
 | v0.1.8 | 2026-03-28 | Docker Hub README auto-refresh via CI; Node 24 upgrade |
 | v0.1.7 | 2026-03-28 | Fixed GIF/link rendering on Docker Hub and GHCR using absolute URLs |
 | v0.1.6 | 2026-03-28 | Disabled immutable `latest` tag to fix Docker Hub publish failures |
@@ -129,6 +130,14 @@ For full details see [[Release Notes]].
 - `memory_stats` extended with per-district breakdown including custom districts
 - Document the migration path for users adding project-specific districts
 
+-**Import & Storage Diagnostics UX**
+
+- Add explicit storage diagnostics surface so operators can see resolved snapshot path, WAL path, and effective environment source in one response
+- Extend `import_memories` with file-based mode (`file_path`) so clients can import server snapshots without expanding large payloads over MCP
+- Add `dry_run` import preflight that validates records and returns deterministic counts for `would_import`, `would_skip`, and `would_fail`
+- Add dedupe policies for import (`none | content_hash | content_plus_tags`) and return dedupe reason codes for skipped rows
+- Define migration semantics for snapshot import (`preserve_ids` and `merge_connections` policy flags) with explicit safety constraints and rejection behavior
+
 ---
 
 ### v0.4.0 — Council & Multi-Agent Orchestration
@@ -146,6 +155,12 @@ For full details see [[Release Notes]].
 - Optimistic conflict detection: if two agents write to the same memory node concurrently, surface a merge conflict rather than silently overwriting
 - Merge resolution policy interface: last-write-wins as default, custom resolver as option
 - Publish a reference implementation: two-agent council workflow (one `logical_analysis` agent + one `creative_synthesis` agent) coordinating through shared distilled memory
+
+-**Cross-Process Write Coordination**
+
+- Add optional filesystem lock coordination mode for shared snapshot directories when multiple server processes are active
+- Emit lock contention telemetry and deterministic retry/backoff guidance in tool errors
+- Provide explicit single-writer and multi-writer runbook profiles with recommended deployment defaults
 
 -**Kanban-Style CLI Agent Support**
 
@@ -202,6 +217,29 @@ For full details see [[Release Notes]].
 - Runbook: upgrading from 0.x to 1.0 including data migration steps
 - Documented compatibility matrix: supported MCP client versions
 
+-**Client Interoperability & Capability Clarity**
+
+- Add a stable capability/introspection tool or resource so prompts and clients can distinguish tools, prompts, and enabled optional features at runtime
+- Publish canonical client configuration profiles (`npx`, Docker, hosted) with equivalent persistence behavior and verification checks
+
 ---
+
+## Pain-Point Release Mapping Addendum (2026-04-01)
+
+The following unresolved pain points are now mapped to execution targets in the approved plan:
+
+- **v0.3.0**
+	- Storage diagnostics visibility (`resolve_storage_paths` + env precedence)
+	- File-based import (`file_path`) with backward-compatible `entries` mode
+	- Import `dry_run` preflight with deterministic summary counts
+	- Import dedupe policy support and stable skip reason codes
+	- Snapshot migration flags (`preserve_ids`, `merge_connections`) with safety guards
+	- Primary tracking: **Issue #49** (`import_memories` file-path support)
+
+- **v0.4.0**
+	- Cross-process write coordination mode and contention guidance (shared directory safety)
+
+- **v1.0.0**
+	- Runtime capability/introspection contract + canonical client profile parity docs
 
 > See also: [[Architecture]] · [[Release Notes]] · [[Getting Started]] · [[White Paper]]

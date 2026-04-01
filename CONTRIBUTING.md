@@ -26,6 +26,18 @@ Thanks for your interest in contributing.
 - Include validation steps and results.
 - Link related issues when applicable.
 
+## Post-Release Documentation Sync Checklist
+
+After each tagged release, verify these docs are updated to the released version:
+
+- `Roadmap_0_1_8_push_to_1_0_0.md`: Current Position header and Release History row
+- `SMOKE_TEST_REPORT.md`: Server Version and report date
+- `EXPERIMENT_REPORT.md`: Version under test and report date
+- `README.md`: any release-specific labels or migration notes
+- `CHANGELOG.md`: release entry date and summary (sanity check)
+
+If any item is out of sync, open and link a docs issue before the next release candidate cut.
+
 ## Communication
 
 For questions or proposal discussion, use GitHub issues or pull request comments.

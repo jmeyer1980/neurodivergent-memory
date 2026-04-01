@@ -1,7 +1,7 @@
 # Neurodivergent Memory MCP Server - Smoke Test Report
 
-Date: 2026-03-29
-Server Version: 0.1.8
+Date: 2026-04-01
+Server Version: 0.2.0
 Status: PASS
 
 ## Scope
@@ -79,11 +79,11 @@ Resolved before final pass:
 
 - Memory IDs updated from `mem_*` to `memory_*`
 - `update_memory` argument keys aligned to current API (`content`, `intensity`)
-- Scenario strings updated to current context (v0.1.8, Node 24)
+- Scenario strings updated to current context (v0.2.0, Node 24)
 
 ## Conclusion
 
-The server and core tooling are operating correctly for the tested workflow on 0.1.8.
+The server and core tooling are operating correctly for the tested workflow on 0.2.0.
 This confirms testability and functional integrity after recent release infrastructure changes.
 
 For raw evidence, see `test-results-full.jsonl`.
