@@ -1766,8 +1766,10 @@ const memorySystem = new NeurodivergentMemory();
 const SYNTHESIS_PROMPT_INCLUDE_ALL_THRESHOLD = 60;
 const SYNTHESIS_PROMPT_MAX_MEMORIES = 75;
 const SYNTHESIS_PROMPT_RECENT_FRACTION = 0.6;
-const SYNTHESIS_PACKET_MAX_SLICES = 8;
+const SYNTHESIS_PROMPT_OLDER_FRACTION = 0.2;
+const SYNTHESIS_PACKET_BASE_MAX_SLICES = 8;
 const SYNTHESIS_PACKET_TARGET_SLICE_SIZE = 12;
+const SYNTHESIS_PACKET_MAX_MEMORIES_PER_SLICE = 20;
 const SYNTHESIS_PACKET_SUMMARY_LENGTH = 240;
 
 const DEFAULT_WRITE_QUEUE_DEPTH = 50;
@@ -1805,9 +1807,17 @@ function selectSynthesisPromptMemories(allMemories: MemoryNPC[]): {
 
   const selected = new Map<string, MemoryNPC>();
   const recentQuota = Math.max(1, Math.ceil(SYNTHESIS_PROMPT_MAX_MEMORIES * SYNTHESIS_PROMPT_RECENT_FRACTION));
+  const olderQuota = Math.max(1, Math.ceil(SYNTHESIS_PROMPT_MAX_MEMORIES * SYNTHESIS_PROMPT_OLDER_FRACTION));
 
   for (const memory of sortedByCreated.slice(0, recentQuota)) {
     selected.set(memory.id, memory);
+  }
+
+  for (const memory of [...sortedByCreated].reverse()) {
+    if (selected.size >= recentQuota + olderQuota) break;
+    if (!selected.has(memory.id)) {
+      selected.set(memory.id, memory);
+    }
   }
 
   const remainingBySignal = [...sortedByCreated]
@@ -1859,16 +1869,51 @@ function collectTopTopics(memories: MemoryNPC[], limit = 8): string[] {
     .map(([tag]) => tag);
 }
 
-function buildSynthesisPacketResources(allMemories: MemoryNPC[]): Array<{ type: "resource"; resource: { uri: string; mimeType: string; text: string } }> {
+function buildSynthesisPacketResources(allMemories: MemoryNPC[]): {
+  manifest: {
+    packet_type: string;
+    total_memories: number;
+    slice_count: number;
+    resource_count: number;
+    coverage_mode: string;
+    id_range: { newest?: string; oldest?: string };
+    created_range: { newest?: string; oldest?: string };
+    districts: Array<{ district: string; count: number }>;
+    top_topics: string[];
+    slice_ids: string[];
+    max_memories_per_slice: number;
+  };
+  resources: Array<{ type: "resource"; resource: { uri: string; mimeType: string; text: string } }>;
+} {
   const sortedByCreated = [...allMemories].sort((a, b) => b.created.getTime() - a.created.getTime());
   if (sortedByCreated.length === 0) {
-    return [];
+    return {
+      manifest: {
+        packet_type: "coverage_manifest",
+        total_memories: 0,
+        slice_count: 0,
+        resource_count: 0,
+        coverage_mode: "full_graph_packetized",
+        id_range: {},
+        created_range: {},
+        districts: [],
+        top_topics: [],
+        slice_ids: [],
+        max_memories_per_slice: SYNTHESIS_PACKET_MAX_MEMORIES_PER_SLICE,
+      },
+      resources: [],
+    };
   }
 
-  const sliceCount = Math.min(
-    SYNTHESIS_PACKET_MAX_SLICES,
+  const preferredSliceCount = Math.min(
+    SYNTHESIS_PACKET_BASE_MAX_SLICES,
     Math.max(1, Math.ceil(sortedByCreated.length / SYNTHESIS_PACKET_TARGET_SLICE_SIZE)),
   );
+  const requiredSliceCount = Math.max(
+    1,
+    Math.ceil(sortedByCreated.length / SYNTHESIS_PACKET_MAX_MEMORIES_PER_SLICE),
+  );
+  const sliceCount = Math.max(preferredSliceCount, requiredSliceCount);
   const sliceSize = Math.ceil(sortedByCreated.length / sliceCount);
   const slices = Array.from({ length: sliceCount }, (_, index) =>
     sortedByCreated.slice(index * sliceSize, (index + 1) * sliceSize),
@@ -1898,6 +1943,7 @@ function buildSynthesisPacketResources(allMemories: MemoryNPC[]): Array<{ type: 
       .map(([district, count]) => ({ district, count })),
     top_topics: collectTopTopics(sortedByCreated),
     slice_ids: slices.map((_, index) => `slice_${index + 1}`),
+    max_memories_per_slice: SYNTHESIS_PACKET_MAX_MEMORIES_PER_SLICE,
   };
 
   const manifestResource = {
@@ -1952,7 +1998,10 @@ function buildSynthesisPacketResources(allMemories: MemoryNPC[]): Array<{ type: 
     },
   }));
 
-  return [manifestResource, ...sliceResources];
+  return {
+    manifest,
+    resources: [manifestResource, ...sliceResources],
+  };
 }
 
 function parseIntegerEnv(
@@ -3267,7 +3316,8 @@ server.setRequestHandler(GetPromptRequestSchema, async (request) => {
     }
 
     case "synthesize_memory_packets": {
-      const packetResources = buildSynthesisPacketResources(memorySystem.getAllMemories());
+      const packetPayload = buildSynthesisPacketResources(memorySystem.getAllMemories());
+      const packetResources = packetPayload.resources;
 
       if (packetResources.length === 0) {
         return {
@@ -3283,15 +3333,13 @@ server.setRequestHandler(GetPromptRequestSchema, async (request) => {
         };
       }
 
-      const manifestText = JSON.parse(packetResources[0].resource.text) as { total_memories: number; slice_count: number };
-
       return {
         messages: [
           {
             role: "user",
             content: {
               type: "text",
-              text: `Let's synthesize new insights from your stored memories using packetized coverage. The attached resources include 1 coverage manifest plus ${manifestText.slice_count} structured memory slices spanning all ${manifestText.total_memories} stored memories.`
+              text: `Let's synthesize new insights from your stored memories using packetized coverage. The attached resources include 1 coverage manifest plus ${packetPayload.manifest.slice_count} structured memory slices spanning all ${packetPayload.manifest.total_memories} stored memories.`
             }
           },
           ...packetResources.map(resource => ({

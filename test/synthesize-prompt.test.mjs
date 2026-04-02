@@ -102,6 +102,10 @@ function resourceJson(promptResponse) {
   return resourceMessages(promptResponse).map(message => JSON.parse(message.content.resource.text));
 }
 
+function resourceUris(promptResponse) {
+  return resourceMessages(promptResponse).map(message => message.content.resource.uri);
+}
+
 test("synthesize_memories prompt includes all memories when graph is modest", async () => {
   const server = startServer();
 
@@ -145,6 +149,28 @@ test("synthesize_memories prompt uses a broader mixed set when memory graph is l
     const prompt = await server.getPrompt(101, "synthesize_memories");
     assert.match(introText(prompt), /broad cross-section of 75 memories selected from 80 total memories/i);
     assert.equal(resourceMessages(prompt).length, 75);
+  } finally {
+    server.stop();
+  }
+});
+
+test("synthesize_memories prompt preserves explicit older coverage in mixed mode", async () => {
+  const server = startServer();
+
+  try {
+    for (let index = 0; index < 80; index += 1) {
+      await server.callTool(index + 1, "store_memory", {
+        content: `coverage memory ${index + 1}`,
+        district: "logical_analysis",
+        tags: ["topic:test", "scope:session", "kind:reference", "layer:research"],
+      });
+    }
+
+    const prompt = await server.getPrompt(150, "synthesize_memories");
+    const uris = new Set(resourceUris(prompt));
+    assert.equal(uris.size, 75);
+    assert.equal(uris.has("memory://memory/memory_1"), true);
+    assert.equal(uris.has("memory://memory/memory_80"), true);
   } finally {
     server.stop();
   }
@@ -208,12 +234,38 @@ test("synthesize_memory_packets prompt emits bounded slice packets covering the 
     assert.equal(manifest.total_memories, 80);
     assert.equal(manifest.slice_count, 7);
     assert.equal(packets.length, 8);
+    assert.equal(manifest.max_memories_per_slice, 20);
 
     const coveredIds = new Set(
       slices.flatMap(packet => packet.memories.map(memory => memory.id)),
     );
     assert.equal(coveredIds.size, 80);
     assert.equal(slices.every(packet => packet.packet_type === "memory_slice"), true);
+  } finally {
+    server.stop();
+  }
+});
+
+test("synthesize_memory_packets prompt grows slice count to keep packet sizes bounded", async () => {
+  const server = startServer();
+
+  try {
+    const entries = Array.from({ length: 250 }, (_, index) => ({
+      content: `very large packet memory ${index + 1}`,
+      district: index % 2 === 0 ? "logical_analysis" : "practical_execution",
+      tags: ["topic:test", "scope:session", "kind:reference", "layer:research"],
+    }));
+
+    await server.callTool(1, "import_memories", { entries });
+
+    const prompt = await server.getPrompt(202, "synthesize_memory_packets");
+    const packets = resourceJson(prompt);
+    const manifest = packets[0];
+    const slices = packets.slice(1);
+
+    assert.equal(manifest.total_memories, 250);
+    assert.equal(manifest.slice_count > 8, true);
+    assert.equal(slices.every(packet => packet.memories.length <= 20), true);
   } finally {
     server.stop();
   }
