@@ -99,6 +99,9 @@ Memories are organized by cognitive domain:
 
 - **`explore_memory_city`** — Guided exploration of districts and memory organization
 - **`synthesize_memories`** — Create new insights by connecting existing memories
+- **`synthesize_memory_packets`** — Packetized synthesis prompt for attachment-constrained clients; emits one coverage manifest plus bounded memory slices that summarize the broader graph
+
+Use `synthesize_memories` when the MCP client can comfortably consume many raw memory resources. Use `synthesize_memory_packets` when the caller path is attachment-constrained or when you need broader graph coverage in a small number of structured resources.
 
 ## Core Concepts
 
