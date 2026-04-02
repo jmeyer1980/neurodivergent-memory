@@ -1204,7 +1204,7 @@ class NeurodivergentMemory {
     const scored = candidates.map(memory => {
       const queryScore = queryScores.get(memory.id) ?? 0;
       const contextScore = contextScores.get(memory.id) ?? 0;
-      const semanticScore = hasContext
+      const semanticScore = hasContext && queryScore > 0
         ? (queryScore * 0.75) + (contextScore * 0.25)
         : queryScore;
       const recencyScore = recencyScores.get(memory.id) ?? 0;
