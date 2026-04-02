@@ -88,9 +88,9 @@ Memories are organized by cognitive domain:
 - **`update_memory`** — Modify content, tags, district, emotional_valence, intensity, or project attribution
 - **`delete_memory`** — Remove a memory and all its connections
 - **`connect_memories`** — Create bidirectional edges between memory nodes
-- **`search_memories`** — BM25-ranked semantic search with optional filters (district, project_id, tags, emotional valence, intensity, min_score)
+- **`search_memories`** — BM25-ranked semantic search with optional goal context, recency bias, and filters (district, project_id, tags, emotional valence, intensity, min_score)
 - **`traverse_from`** — Graph traversal up to N hops from a starting memory
-- **`related_to`** — Find memories by graph proximity + BM25 semantic blend
+- **`related_to`** — Find memories by graph proximity + BM25 semantic blend, with optional goal context boost
 - **`list_memories`** — Paginated listing with optional district/archetype/project_id filters
 - **`memory_stats`** — Aggregate statistics (totals, per-district/per-project counts, most-accessed, orphans) with optional project scope
 - **`import_memories`** — Bulk-seed memories from JSON array, including mixed entries with and without project attribution
@@ -129,6 +129,9 @@ Memories can optionally include a first-class `project_id` for attribution and s
 - `project_id` is optional on writes (`store_memory`, `update_memory`, `import_memories`).
 - `update_memory` accepts `project_id: null` to clear existing project attribution.
 - `search_memories`, `list_memories`, and `memory_stats` accept an optional `project_id` filter.
+- `search_memories` accepts optional `context` and `recency_weight` parameters. Context is blended into ranking as a lightweight BM25 boost; `recency_weight` must be between `0` and `1` and adds a recency boost without replacing semantic relevance.
+- `search_memories` accepts `min_intensity` / `max_intensity` as the preferred intensity filter names. The legacy `intensity_min` / `intensity_max` aliases remain supported for compatibility.
+- `related_to` accepts an optional `context` parameter to bias related-memory ranking toward the caller's current goal.
 - Stats now include a `perProject` breakdown.
 - Scoped `memory_stats` reports `totalConnections` only for edges where both endpoints are in scope.
 - `list_memories` includes a `project: ...` segment in each line (`unset` when no project attribution exists).
@@ -581,9 +584,9 @@ Multiple tags from different namespaces are expected on every memory.
 | `update_memory` | Modify content, tags, district, valence, or intensity |
 | `delete_memory` | Remove a memory and all its connections |
 | `connect_memories` | Add an edge between two memory nodes |
-| `search_memories` | BM25-ranked search with optional `min_score`, district, tag, valence, intensity filters |
+| `search_memories` | BM25-ranked search with optional `context`, `recency_weight`, `min_score`, district, tag, valence, and intensity filters |
 | `traverse_from` | BFS graph walk from a node up to N hops |
-| `related_to` | Hop-proximity + BM25 blend for a given memory ID |
+| `related_to` | Hop-proximity + BM25 blend for a given memory ID, with optional goal-context boost |
 | `list_memories` | Paginated enumeration of all stored memories |
 | `memory_stats` | Totals, per-district counts, most-accessed, orphans |
 | `import_memories` | Bulk seed from a JSON array |
