@@ -1333,9 +1333,9 @@ class NeurodivergentMemory {
         ? (queryScore * 0.75) + (contextScore * 0.25)
         : queryScore;
       // Proximity bonus is 1/hops so direct neighbours (hops=1) score 1.0 and
-      // two-hop neighbours score 0.5.  This is added to the raw BM25 score
-      // before the whole result set is normalised to 0-1, which naturally
-      // balances graph proximity against semantic relevance.
+      // two-hop neighbours score 0.5. This is added to the *normalized* semantic
+      // score (0–1) derived from BM25, and then the combined scores are
+      // normalised again to 0–1 to balance graph proximity against relevance.
       const proximityBonus = 1 / hops;
       scored.push({ memory, score: semanticScore + proximityBonus });
     }
