@@ -1,0 +1,11 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "type": "command",
+        "command": "node .github/hooks/scripts/protect-destructive-git.cjs",
+        "timeout": 10
+      }
+    ]
+  }
+}
