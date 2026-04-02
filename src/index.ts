@@ -65,7 +65,7 @@ interface StoreMemoryResult {
   ping_pong_detected?: boolean;
   ping_pong_count?: number;
   no_net_new_info_warning?: string;
-  cooldown_started_ms?: number;
+  cooldown_duration_ms?: number;
 }
 
 interface RetrieveMemoryResult {
@@ -78,7 +78,7 @@ interface UpdateMemoryResult {
   memory: MemoryNPC;
   ping_pong_detected?: boolean;
   ping_pong_count?: number;
-  cooldown_started_ms?: number;
+  cooldown_duration_ms?: number;
 }
 
 interface OperationActorContext {
@@ -1275,7 +1275,7 @@ class NeurodivergentMemory {
     detected: boolean;
     count: number;
     cooldownActivated: boolean;
-    cooldownRemainingMs: number;
+    cooldownDurationMs: number;
   } {
     const pingPong = this.loopTelemetry.recordWrite({
       memory_id: memory.id,
@@ -1296,7 +1296,7 @@ class NeurodivergentMemory {
           count: pingPong.pingPongCount,
           ping_pong_counter: memory.ping_pong_counter,
           cooldown_activated: pingPong.cooldownActivated,
-          cooldown_remaining_ms: pingPong.cooldownRemainingMs,
+          cooldown_duration_ms: pingPong.cooldownDurationMs,
         },
         "Ping-pong telemetry detected",
       );
@@ -1304,7 +1304,7 @@ class NeurodivergentMemory {
         detected: true,
         count: pingPong.pingPongCount,
         cooldownActivated: pingPong.cooldownActivated,
-        cooldownRemainingMs: pingPong.cooldownRemainingMs,
+        cooldownDurationMs: pingPong.cooldownDurationMs,
       };
     }
 
@@ -1312,7 +1312,7 @@ class NeurodivergentMemory {
       detected: false,
       count: pingPong.pingPongCount,
       cooldownActivated: pingPong.cooldownActivated,
-      cooldownRemainingMs: pingPong.cooldownRemainingMs,
+      cooldownDurationMs: pingPong.cooldownDurationMs,
     };
   }
 
@@ -1422,7 +1422,7 @@ class NeurodivergentMemory {
     let pingPongDetected = false;
     let pingPongCount: number | undefined;
     let noNetNewInfoWarning: string | undefined;
-    let cooldownStartedMs: number | undefined;
+    let cooldownDurationMs: number | undefined;
 
     if (repeatCandidate && repeatCandidate.similarityScore >= this.loopTelemetry.getRepeatThreshold()) {
       const matchedMemory = repeatCandidate.memory;
@@ -1447,7 +1447,7 @@ class NeurodivergentMemory {
       });
       pingPongDetected = pingPongResult.detected;
       pingPongCount = pingPongResult.count;
-      cooldownStartedMs = pingPongResult.cooldownActivated ? pingPongResult.cooldownRemainingMs : undefined;
+      cooldownDurationMs = pingPongResult.cooldownActivated ? pingPongResult.cooldownDurationMs : undefined;
 
       this.loopTelemetry.recordHighSimilarityWrite({
         memory_id: id,
@@ -1511,7 +1511,7 @@ class NeurodivergentMemory {
       ping_pong_detected: pingPongDetected,
       ping_pong_count: pingPongCount,
       no_net_new_info_warning: noNetNewInfoWarning,
-      cooldown_started_ms: cooldownStartedMs,
+      cooldown_duration_ms: cooldownDurationMs,
     };
   }
 
@@ -1574,7 +1574,7 @@ class NeurodivergentMemory {
       memory: this.memories[id],
       ping_pong_detected: pingPongResult.detected,
       ping_pong_count: pingPongResult.count,
-      cooldown_started_ms: pingPongResult.cooldownActivated ? pingPongResult.cooldownRemainingMs : undefined,
+      cooldown_duration_ms: pingPongResult.cooldownActivated ? pingPongResult.cooldownDurationMs : undefined,
     };
   }
 
@@ -3443,8 +3443,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         const memory = storeResult.memory;
         const warningLine = wipWarning ? `\n${wipWarning}` : "";
         const repeatWarningLine = storeResult.no_net_new_info_warning ? `\n${storeResult.no_net_new_info_warning}` : "";
-        const cooldownLine = storeResult.cooldown_started_ms
-          ? `\n${memorySystem.buildCrossDistrictCooldownWarning(storeResult.matched_memory_id ?? memory.id, storeResult.cooldown_started_ms)}`
+        const cooldownLine = storeResult.cooldown_duration_ms
+          ? `\n${memorySystem.buildCrossDistrictCooldownWarning(storeResult.matched_memory_id ?? memory.id, storeResult.cooldown_duration_ms)}`
           : "";
         const repeatLines = [
           `repeat_detected: ${storeResult.repeat_detected ? "true" : "false"}`,
@@ -3519,8 +3519,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           () => memorySystem.updateMemory(memory_id, updates, { district: actor_district, agent_id }),
         );
         const memory = updateResult.memory;
-        const cooldownLine = updateResult.cooldown_started_ms
-          ? `\n${memorySystem.buildCrossDistrictCooldownWarning(memory_id, updateResult.cooldown_started_ms)}`
+        const cooldownLine = updateResult.cooldown_duration_ms
+          ? `\n${memorySystem.buildCrossDistrictCooldownWarning(memory_id, updateResult.cooldown_duration_ms)}`
           : "";
         return {
           content: [{

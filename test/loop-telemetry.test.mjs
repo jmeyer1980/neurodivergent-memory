@@ -72,6 +72,37 @@ test("ping-pong detection only triggers on a new read-write transition", async (
   assert.equal(result.pingPongCount, 1);
 });
 
+test("expired cooldowns are pruned opportunistically during later operations", async () => {
+  const tracker = new LoopTelemetryTracker({
+    operationWindowSize: 20,
+    pingPongThreshold: 1,
+    repeatThreshold: 0.85,
+    distillSuggestionThreshold: 3,
+    crossDistrictCooldownMs: 1000,
+  });
+
+  const originalDateNow = Date.now;
+
+  try {
+    let now = 1_000;
+    Date.now = () => now;
+
+    const memory = createMemory({ id: "memory_cooldown", district: "logical_analysis", agent_id: "alpha" });
+    tracker.recordRead(memory);
+    const transitionWrite = { ...memory, district: "creative_synthesis", agent_id: "beta" };
+    const result = tracker.recordWrite(transitionWrite);
+    assert.equal(result.cooldownActivated, true);
+    assert.equal(result.cooldownDurationMs, 1000);
+    assert.equal(tracker.cooldowns.size, 1);
+
+    now = 2_500;
+    tracker.recordRead(createMemory({ id: "memory_other", district: "logical_analysis", agent_id: "gamma" }));
+    assert.equal(tracker.cooldowns.size, 0);
+  } finally {
+    Date.now = originalDateNow;
+  }
+});
+
 test("summarize returns top candidates and last five high-similarity writes", async () => {
   const tracker = new LoopTelemetryTracker({
     operationWindowSize: 20,

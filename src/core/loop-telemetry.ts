@@ -81,7 +81,7 @@ export class LoopTelemetryTracker {
     pingPongDetected: boolean;
     pingPongCount: number;
     cooldownActivated: boolean;
-    cooldownRemainingMs: number;
+    cooldownDurationMs: number;
   } {
     const identity = this.toOperationIdentity(input);
     this.appendOperation({
@@ -109,13 +109,13 @@ export class LoopTelemetryTracker {
     const pingPongDetected = currentTransition && pingPongCount >= this.pingPongThreshold;
 
     let cooldownActivated = false;
-    let cooldownRemainingMs = 0;
+    let cooldownDurationMs = 0;
     if (pingPongDetected && this.crossDistrictCooldownMs > 0) {
       cooldownActivated = true;
-      cooldownRemainingMs = this.activateCooldown(identity.memory_id);
+      cooldownDurationMs = this.activateCooldown(identity.memory_id);
     }
 
-    return { pingPongDetected, pingPongCount, cooldownActivated, cooldownRemainingMs };
+    return { pingPongDetected, pingPongCount, cooldownActivated, cooldownDurationMs };
   }
 
   getCooldownRemaining(memoryId: string): number {
@@ -165,6 +165,7 @@ export class LoopTelemetryTracker {
   }
 
   private appendOperation(event: OperationEvent): void {
+    this.pruneExpiredCooldowns();
     this.operations.push(event);
     if (this.operations.length > this.operationWindowSize) {
       this.operations.splice(0, this.operations.length - this.operationWindowSize);
@@ -200,9 +201,19 @@ export class LoopTelemetryTracker {
   }
 
   private activateCooldown(memoryId: string): number {
+    this.pruneExpiredCooldowns();
     const expiresAt = Date.now() + this.crossDistrictCooldownMs;
     this.cooldowns.set(memoryId, expiresAt);
     return this.crossDistrictCooldownMs;
+  }
+
+  private pruneExpiredCooldowns(): void {
+    const now = Date.now();
+    for (const [memoryId, expiresAt] of this.cooldowns.entries()) {
+      if (expiresAt <= now) {
+        this.cooldowns.delete(memoryId);
+      }
+    }
   }
 
   private pruneCooldown(memoryId: string): void {
