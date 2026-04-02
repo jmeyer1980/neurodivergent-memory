@@ -93,7 +93,8 @@ Memories are organized by cognitive domain:
 - **`related_to`** — Find memories by graph proximity + BM25 semantic blend, with optional goal context boost
 - **`list_memories`** — Paginated listing with optional district/archetype/project_id filters
 - **`memory_stats`** — Aggregate statistics (totals, per-district/per-project counts, most-accessed, orphans) with optional project scope
-- **`import_memories`** — Bulk-seed memories from JSON array, including mixed entries with and without project attribution
+- **`storage_diagnostics`** — Show the resolved snapshot path, WAL path, and effective persistence source in one response
+- **`import_memories`** — Bulk-import from inline JSON entries or a snapshot `file_path`, with `dry_run`, dedupe policies, and explicit snapshot migration flags
 
 ### Prompts
 
@@ -140,6 +141,28 @@ Memories can optionally include a first-class `project_id` for attribution and s
 - `list_memories` includes a `project: ...` segment in each line (`unset` when no project attribution exists).
 - Validation contract: `project_id` must match `^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$` (max length 64).
 - Invalid values return stable error code `NM_E020` with recovery guidance.
+
+### Import Diagnostics and Migration Semantics
+
+`storage_diagnostics` reports the resolved snapshot path, the WAL path, and which configuration source won the persistence-path precedence check.
+
+`import_memories` supports two source modes:
+
+- Inline `entries` for ordinary bulk seeding.
+- `file_path` for server snapshot imports, avoiding large MCP payloads.
+
+Import validation flags:
+
+- `dry_run: true` validates the request without writing data and returns deterministic `would_import`, `would_skip`, and `would_fail` counts.
+- `dedupe` accepts `none`, `content_hash`, or `content_plus_tags`.
+- Deduplicated rows are reported with stable reason codes: `DEDUPE_CONTENT_HASH` or `DEDUPE_CONTENT_PLUS_TAGS`.
+- Snapshot `file_path` imports accept `.json` files under the resolved persistence directory by default. Set `NEURODIVERGENT_MEMORY_IMPORT_ALLOW_EXTERNAL_FILE=true` only when importing external snapshot files intentionally.
+
+Snapshot migration flags:
+
+- `preserve_ids` is only valid with `file_path`; any ID collision with the live store is rejected deterministically.
+- `merge_connections` is only valid with `file_path`; every referenced connection target must exist either in the imported snapshot or the live store, or the row fails validation with `INVALID_CONNECTION_TARGET`.
+- If validation failures are present, the non-dry-run import is rejected as a whole. Run `dry_run: true` first to inspect the failure list before retrying.
 
 ### Knowledge Graph Persistence
 
@@ -592,7 +615,8 @@ Multiple tags from different namespaces are expected on every memory.
 | `related_to` | Hop-proximity + BM25 blend for a given memory ID, with optional goal-context boost |
 | `list_memories` | Paginated enumeration of all stored memories |
 | `memory_stats` | Totals, per-district counts, most-accessed, orphans |
-| `import_memories` | Bulk seed from a JSON array |
+| `storage_diagnostics` | Resolved snapshot path, WAL path, and effective persistence source |
+| `import_memories` | Bulk import from inline entries or a snapshot file with dry-run and migration controls |
 
 ---
 

@@ -21,7 +21,9 @@ import {
   ListPromptsRequestSchema,
   GetPromptRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
+import * as crypto from "crypto";
 import * as fs from "fs";
+import * as path from "path";
 import { logger } from "./core/logger.js";
 import { resolvePersistenceLocation } from "./core/persistence.js";
 import { AsyncMutex } from "./core/async-mutex.js";
@@ -239,6 +241,86 @@ interface ImportMemoryEntry {
   epistemic_status?: EpistemicStatus;
 }
 
+type ImportDedupePolicy = "none" | "content_hash" | "content_plus_tags";
+
+interface ImportMemorySnapshot {
+  nextMemoryId?: number;
+  memories?: Record<string, PersistedMemoryNPC>;
+}
+
+interface ImportCandidate {
+  content: string;
+  district: string;
+  tags?: string[];
+  emotional_valence?: number;
+  intensity?: number;
+  agent_id?: string;
+  project_id?: string;
+  epistemic_status?: EpistemicStatus;
+  source_memory_id?: string;
+  source_connections?: string[];
+  name?: string;
+  archetype?: MemoryArchetype;
+  traits?: string[];
+  concerns?: string[];
+  created?: Date;
+  last_accessed?: Date;
+  access_count?: number;
+}
+
+interface ImportPlanSkip {
+  index: number;
+  reason_code: string;
+  detail: string;
+  source_memory_id?: string;
+}
+
+interface ImportPlanFailure {
+  index: number;
+  reason_code: string;
+  detail: string;
+  source_memory_id?: string;
+}
+
+interface PlannedImportMemory {
+  index: number;
+  source_memory_id?: string;
+  source_connections: string[];
+  memory: MemoryNPC;
+}
+
+interface ImportPlan {
+  source: "entries" | "file_path";
+  requested: number;
+  memories: PlannedImportMemory[];
+  skipped: ImportPlanSkip[];
+  failures: ImportPlanFailure[];
+  nextMemoryId: number;
+}
+
+interface ImportExecutionOptions {
+  file_path?: string;
+  dry_run?: boolean;
+  dedupe?: ImportDedupePolicy;
+  preserve_ids?: boolean;
+  merge_connections?: boolean;
+}
+
+interface ImportExecutionResult {
+  source: "entries" | "file_path";
+  requested: number;
+  dry_run: boolean;
+  imported_ids: string[];
+  skipped: ImportPlanSkip[];
+  failures: ImportPlanFailure[];
+}
+
+interface StorageDiagnostics {
+  snapshot_path: string;
+  wal_path: string;
+  resolved_source: string;
+}
+
 /**
  * Neurodivergent memory system
  */
@@ -265,6 +347,10 @@ class NeurodivergentMemory {
     process.env.NEURODIVERGENT_MEMORY_PING_PONG_THRESHOLD,
     3,
     (value) => value > 0,
+  );
+  private readonly allowExternalImportFiles = parseBooleanEnv(
+    process.env.NEURODIVERGENT_MEMORY_IMPORT_ALLOW_EXTERNAL_FILE,
+    false,
   );
   private readonly loopTelemetry = new LoopTelemetryTracker({
     operationWindowSize: this.loopTelemetryWindowSize,
@@ -684,6 +770,391 @@ class NeurodivergentMemory {
     return new Map(
       candidates.map(memory => [memory.id, (memory.created.getTime() - oldest) / range]),
     );
+  }
+
+  storageDiagnostics(): StorageDiagnostics {
+    return {
+      snapshot_path: PERSISTENCE_FILE,
+      wal_path: this.walFile,
+      resolved_source: PERSISTENCE_LOCATION.source,
+    };
+  }
+
+  private resolveImportCandidates(
+    entries: ImportMemoryEntry[] | undefined,
+    filePath?: string,
+  ): { source: "entries" | "file_path"; candidates: ImportCandidate[] } {
+    if (Array.isArray(entries) && entries.length > 0 && filePath) {
+      throw createNMError(
+        NM_ERRORS.INPUT_VALIDATION_FAILED,
+        "Provide either entries or file_path to import_memories, not both.",
+        "Choose one source: inline entries for direct imports, or file_path for snapshot migration/import.",
+      );
+    }
+
+    if (filePath) {
+      return {
+        source: "file_path",
+        candidates: this.readImportSnapshotFile(filePath),
+      };
+    }
+
+    if (!Array.isArray(entries) || entries.length === 0) {
+      throw createNMError(
+        NM_ERRORS.INPUT_VALIDATION_FAILED,
+        "import_memories requires either a non-empty entries array or a file_path.",
+        "Provide entries for inline bulk import, or provide file_path for snapshot import.",
+      );
+    }
+
+    return {
+      source: "entries",
+      candidates: entries.map((entry) => ({ ...entry })),
+    };
+  }
+
+  private validateImportFilePath(filePath: string): string {
+    const resolvedPath = path.resolve(filePath);
+    const resolvedPersistenceDir = path.resolve(PERSISTENCE_DIR);
+    const hasJsonExtension = path.extname(resolvedPath).toLowerCase() === ".json";
+    if (!hasJsonExtension) {
+      throw createNMError(
+        NM_ERRORS.INPUT_VALIDATION_FAILED,
+        `Import file must use a .json extension: ${filePath}`,
+        "Provide a JSON snapshot file path ending in .json.",
+      );
+    }
+
+    const isWithinPersistenceDir =
+      resolvedPath === resolvedPersistenceDir ||
+      resolvedPath.startsWith(`${resolvedPersistenceDir}${path.sep}`);
+
+    if (!this.allowExternalImportFiles && !isWithinPersistenceDir) {
+      throw createNMError(
+        NM_ERRORS.INPUT_VALIDATION_FAILED,
+        `Import file path is outside the allowed persistence directory: ${filePath}`,
+        `Place the snapshot under ${resolvedPersistenceDir}, or set NEURODIVERGENT_MEMORY_IMPORT_ALLOW_EXTERNAL_FILE=true if external file imports are intentional.`,
+      );
+    }
+
+    return resolvedPath;
+  }
+
+  private readImportSnapshotFile(filePath: string): ImportCandidate[] {
+    const validatedPath = this.validateImportFilePath(filePath);
+    let raw = "";
+    try {
+      raw = fs.readFileSync(validatedPath, "utf-8");
+    } catch (error) {
+      throw createNMError(
+        NM_ERRORS.INPUT_VALIDATION_FAILED,
+        `Unable to read import file: ${filePath}`,
+        "Verify file_path points to a readable JSON snapshot on disk, then retry import_memories.",
+      );
+    }
+
+    let parsed: ImportMemorySnapshot;
+    try {
+      parsed = JSON.parse(raw) as ImportMemorySnapshot;
+    } catch {
+      throw createNMError(
+        NM_ERRORS.INPUT_VALIDATION_FAILED,
+        `Import file is not valid JSON: ${filePath}`,
+        "Provide a server snapshot JSON file with a top-level memories object.",
+      );
+    }
+
+    if (!parsed || typeof parsed !== "object" || !parsed.memories || typeof parsed.memories !== "object") {
+      throw createNMError(
+        NM_ERRORS.INPUT_VALIDATION_FAILED,
+        `Import file is not a server snapshot: ${filePath}`,
+        "Provide a JSON snapshot produced by the server, containing nextMemoryId and memories.",
+      );
+    }
+
+    const ordered = Object.entries(parsed.memories)
+      .sort(([leftId], [rightId]) => {
+        const leftNumeric = this.parseMemoryNumericId(leftId);
+        const rightNumeric = this.parseMemoryNumericId(rightId);
+        if (leftNumeric !== rightNumeric) {
+          return leftNumeric - rightNumeric;
+        }
+        return leftId.localeCompare(rightId);
+      });
+
+    return ordered.map(([sourceMemoryId, rawMemory]) => {
+      const deserialized = this.deserializeMemory(rawMemory);
+      if (deserialized.id !== sourceMemoryId) {
+        throw createNMError(
+          NM_ERRORS.INPUT_VALIDATION_FAILED,
+          `Snapshot memory id mismatch for ${sourceMemoryId}: embedded id is ${deserialized.id}.`,
+          "Ensure each snapshot memories key matches the embedded memory.id before retrying import_memories.",
+        );
+      }
+      return {
+        content: deserialized.content,
+        district: deserialized.district,
+        tags: [...deserialized.tags],
+        emotional_valence: deserialized.emotional_valence,
+        intensity: deserialized.intensity,
+        agent_id: deserialized.agent_id,
+        project_id: deserialized.project_id,
+        epistemic_status: deserialized.epistemic_status,
+        source_memory_id: sourceMemoryId,
+        source_connections: [...deserialized.connections],
+        name: deserialized.name,
+        archetype: deserialized.archetype,
+        traits: [...deserialized.traits],
+        concerns: [...deserialized.concerns],
+        created: deserialized.created,
+        last_accessed: deserialized.last_accessed,
+        access_count: deserialized.access_count,
+      };
+    });
+  }
+
+  private fingerprintForImportCandidate(candidate: Pick<ImportCandidate, "content" | "tags">, dedupe: ImportDedupePolicy): string | undefined {
+    switch (dedupe) {
+      case "none":
+        return undefined;
+      case "content_hash":
+        return crypto.createHash("sha256").update(candidate.content).digest("hex");
+      case "content_plus_tags": {
+        const stableTags = [...(candidate.tags ?? [])].sort().join("\u0000");
+        return crypto.createHash("sha256").update(`${candidate.content}\u0001${stableTags}`).digest("hex");
+      }
+    }
+  }
+
+  private dedupeReasonCode(dedupe: ImportDedupePolicy): string {
+    switch (dedupe) {
+      case "none":
+        return "NONE";
+      case "content_hash":
+        return "DEDUPE_CONTENT_HASH";
+      case "content_plus_tags":
+        return "DEDUPE_CONTENT_PLUS_TAGS";
+    }
+  }
+
+  private validateImportDedupePolicy(dedupe: string | undefined): ImportDedupePolicy {
+    if (dedupe === undefined || dedupe === "none" || dedupe === "content_hash" || dedupe === "content_plus_tags") {
+      return dedupe ?? "none";
+    }
+
+    throw createNMError(
+      NM_ERRORS.INPUT_VALIDATION_FAILED,
+      `Invalid dedupe policy: ${dedupe}`,
+      "Use one of: none, content_hash, or content_plus_tags.",
+    );
+  }
+
+  private projectIdFieldPathForImport(planSource: "entries" | "file_path", index: number, candidate: ImportCandidate): string {
+    if (planSource === "file_path") {
+      return candidate.source_memory_id
+        ? `snapshot[${candidate.source_memory_id}].project_id`
+        : `snapshot[${index}].project_id`;
+    }
+
+    return `entries[${index}].project_id`;
+  }
+
+  private buildImportPlan(
+    entries: ImportMemoryEntry[] | undefined,
+    default_agent_id: string | undefined,
+    options: ImportExecutionOptions = {},
+  ): ImportPlan {
+    const dedupe = this.validateImportDedupePolicy(options.dedupe);
+    const preserveIds = options.preserve_ids ?? false;
+    const mergeConnections = options.merge_connections ?? false;
+    const resolved = this.resolveImportCandidates(entries, options.file_path);
+
+    if (preserveIds && resolved.source !== "file_path") {
+      throw createNMError(
+        NM_ERRORS.INPUT_VALIDATION_FAILED,
+        "preserve_ids is only supported when importing from file_path snapshots.",
+        "Use file_path with a server snapshot, or omit preserve_ids for inline entry imports.",
+      );
+    }
+    if (mergeConnections && resolved.source !== "file_path") {
+      throw createNMError(
+        NM_ERRORS.INPUT_VALIDATION_FAILED,
+        "merge_connections is only supported when importing from file_path snapshots.",
+        "Use file_path with a server snapshot, or omit merge_connections for inline entry imports.",
+      );
+    }
+
+    const plan: ImportPlan = {
+      source: resolved.source,
+      requested: resolved.candidates.length,
+      memories: [],
+      skipped: [],
+      failures: [],
+      nextMemoryId: this.nextMemoryId,
+    };
+
+    const seenFingerprints = new Set<string>();
+    if (dedupe !== "none") {
+      for (const memory of Object.values(this.memories)) {
+        const existingFingerprint = this.fingerprintForImportCandidate(memory, dedupe);
+        if (existingFingerprint) {
+          seenFingerprints.add(existingFingerprint);
+        }
+      }
+    }
+
+    const idMap = new Map<string, string>();
+    const reservedIds = new Set<string>(Object.keys(this.memories));
+    let nextId = this.nextMemoryId;
+
+    for (const [index, candidate] of resolved.candidates.entries()) {
+      try {
+        if (!this.districts[candidate.district]) {
+          plan.failures.push({
+            index,
+            source_memory_id: candidate.source_memory_id,
+            reason_code: "UNKNOWN_DISTRICT",
+            detail: `Unknown district: ${candidate.district}`,
+          });
+          continue;
+        }
+
+        if (candidate.project_id !== undefined) {
+          validateProjectId(candidate.project_id, this.projectIdFieldPathForImport(plan.source, index, candidate));
+        }
+
+        const fingerprint = this.fingerprintForImportCandidate(candidate, dedupe);
+        if (fingerprint && seenFingerprints.has(fingerprint)) {
+          plan.skipped.push({
+            index,
+            source_memory_id: candidate.source_memory_id,
+            reason_code: this.dedupeReasonCode(dedupe),
+            detail: `Skipped by dedupe policy ${dedupe}.`,
+          });
+          continue;
+        }
+
+        let targetId: string;
+        if (preserveIds) {
+          const sourceMemoryId = candidate.source_memory_id;
+          if (!sourceMemoryId) {
+            plan.failures.push({
+              index,
+              source_memory_id: candidate.source_memory_id,
+              reason_code: "PRESERVE_IDS_REQUIRES_SNAPSHOT_IDS",
+              detail: "Snapshot import entry is missing a source memory id.",
+            });
+            continue;
+          }
+          if (reservedIds.has(sourceMemoryId)) {
+            plan.failures.push({
+              index,
+              source_memory_id: sourceMemoryId,
+              reason_code: "ID_CONFLICT",
+              detail: `Cannot preserve imported id ${sourceMemoryId}: it already exists in the current store.`,
+            });
+            continue;
+          }
+          targetId = sourceMemoryId;
+        } else {
+          targetId = `memory_${nextId++}`;
+        }
+
+        const districtArchetype = this.districts[candidate.district].archetype;
+        const created = candidate.created ?? new Date();
+        const lastAccessed = candidate.last_accessed ?? created;
+        const memory: MemoryNPC = {
+          id: targetId,
+          name: candidate.name ?? this.generateMemoryName(candidate.archetype ?? districtArchetype, candidate.content),
+          archetype: candidate.archetype ?? districtArchetype,
+          agent_id: candidate.agent_id ?? default_agent_id,
+          project_id: candidate.project_id,
+          district: candidate.district,
+          content: candidate.content,
+          traits: candidate.traits ? [...candidate.traits] : this.generateTraits(candidate.archetype ?? districtArchetype),
+          concerns: candidate.concerns ? [...candidate.concerns] : this.generateConcerns(candidate.archetype ?? districtArchetype),
+          connections: [],
+          tags: candidate.tags ?? [],
+          created,
+          last_accessed: lastAccessed,
+          access_count: candidate.access_count ?? 1,
+          emotional_valence: candidate.emotional_valence,
+          intensity: candidate.intensity ?? 0.5,
+          epistemic_status: candidate.epistemic_status,
+        };
+
+        plan.memories.push({
+          index,
+          source_memory_id: candidate.source_memory_id,
+          source_connections: candidate.source_connections ?? [],
+          memory,
+        });
+
+        reservedIds.add(targetId);
+        if (candidate.source_memory_id) {
+          idMap.set(candidate.source_memory_id, targetId);
+        }
+        if (fingerprint) {
+          seenFingerprints.add(fingerprint);
+        }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        plan.failures.push({
+          index,
+          source_memory_id: candidate.source_memory_id,
+          reason_code: "VALIDATION_FAILED",
+          detail: message,
+        });
+      }
+    }
+
+    if (mergeConnections) {
+      const importedIds = new Set(plan.memories.map(entry => entry.memory.id));
+      for (const entry of plan.memories) {
+        const remappedConnections: string[] = [];
+        const seenConnections = new Set<string>();
+        for (const sourceConnectionId of entry.source_connections) {
+          const targetId = idMap.get(sourceConnectionId) ?? sourceConnectionId;
+          const targetExists = importedIds.has(targetId) || Boolean(this.memories[targetId]);
+          if (!targetExists) {
+            plan.failures.push({
+              index: entry.index,
+              source_memory_id: entry.source_memory_id,
+              reason_code: "INVALID_CONNECTION_TARGET",
+              detail: `Connection target ${sourceConnectionId} does not exist in the snapshot import batch or the current store.`,
+            });
+            continue;
+          }
+          if (targetId === entry.memory.id || seenConnections.has(targetId)) {
+            continue;
+          }
+          seenConnections.add(targetId);
+          remappedConnections.push(targetId);
+        }
+        entry.memory.connections = remappedConnections;
+      }
+    }
+
+    plan.nextMemoryId = plan.memories.reduce(
+      (currentMax, entry) => Math.max(currentMax, this.parseMemoryNumericId(entry.memory.id) + 1),
+      nextId,
+    );
+
+    return plan;
+  }
+
+  private formatImportFailures(failures: ImportPlanFailure[]): string {
+    return failures
+      .slice(0, 5)
+      .map(failure => `entry ${failure.index}${failure.source_memory_id ? ` (${failure.source_memory_id})` : ""}: ${failure.reason_code} - ${failure.detail}`)
+      .join("; ");
+  }
+
+  private successfulImportIds(plan: ImportPlan): string[] {
+    const failedIndexes = new Set(plan.failures.map(failure => failure.index));
+    return plan.memories
+      .filter(entry => !failedIndexes.has(entry.index))
+      .map(entry => entry.memory.id);
   }
 
   private detectRepeatCandidate(content: string, agentId?: string): { memory: MemoryNPC; similarityScore: number } | undefined {
@@ -1698,18 +2169,57 @@ class NeurodivergentMemory {
    * Import multiple memories in a single WAL-backed operation.
    * Materializes entries first so the import record is appended before in-memory mutation.
    */
-  importMemories(entries: Array<{ content: string; district: string; tags?: string[]; emotional_valence?: number; intensity?: number; agent_id?: string; project_id?: string; epistemic_status?: EpistemicStatus }>, default_agent_id?: string): string[] {
-    const materialized = this.materializeImportMemories(entries, default_agent_id);
-    // Append WAL entry for the import before mutating in-memory state to preserve the
-    // "append before mutate" invariant used elsewhere in the system.
+  importMemories(
+    entries: Array<{ content: string; district: string; tags?: string[]; emotional_valence?: number; intensity?: number; agent_id?: string; project_id?: string; epistemic_status?: EpistemicStatus }> | undefined,
+    default_agent_id?: string,
+    options: ImportExecutionOptions = {},
+  ): ImportExecutionResult {
+    const plan = this.buildImportPlan(entries, default_agent_id, options);
+    if (options.dry_run) {
+      return {
+        source: plan.source,
+        requested: plan.requested,
+        dry_run: true,
+        imported_ids: this.successfulImportIds(plan),
+        skipped: plan.skipped,
+        failures: plan.failures,
+      };
+    }
+
+    if (plan.failures.length > 0) {
+      throw createNMError(
+        NM_ERRORS.INPUT_VALIDATION_FAILED,
+        `Import validation failed: ${this.formatImportFailures(plan.failures)}`,
+        "Run import_memories with dry_run=true to inspect the deterministic failure list, then fix the reported rows before retrying.",
+      );
+    }
+
+    const materialized = plan.memories.map(entry => entry.memory);
     this.appendWalEntry("import", { memories: materialized.map(mem => this.serializeMemory(mem)) });
     for (const memory of materialized) {
       this.ensureCapacityForInsert();
       this.insertMemory(memory);
     }
+    this.nextMemoryId = Math.max(this.nextMemoryId, plan.nextMemoryId);
     this.scheduleSave();
-    logger.info({ operation: "import", importedCount: materialized.length, agentId: default_agent_id ?? "unassigned" }, "Imported memories");
-    return materialized.map(mem => mem.id);
+    logger.info(
+      {
+        operation: "import",
+        importedCount: materialized.length,
+        skippedCount: plan.skipped.length,
+        source: plan.source,
+        agentId: default_agent_id ?? "unassigned",
+      },
+      "Imported memories",
+    );
+    return {
+      source: plan.source,
+      requested: plan.requested,
+      dry_run: false,
+      imported_ids: materialized.map(mem => mem.id),
+      skipped: plan.skipped,
+      failures: plan.failures,
+    };
   }
 
   private materializeImportMemories(
@@ -2019,6 +2529,22 @@ function parseIntegerEnv(
   }
 
   return parsed;
+}
+
+function parseBooleanEnv(rawValue: string | undefined, fallback: boolean): boolean {
+  if (!rawValue || !rawValue.trim()) {
+    return fallback;
+  }
+
+  const normalized = rawValue.trim().toLowerCase();
+  if (["1", "true", "yes", "on"].includes(normalized)) {
+    return true;
+  }
+  if (["0", "false", "no", "off"].includes(normalized)) {
+    return false;
+  }
+
+  return fallback;
 }
 
 function parseNumberEnv(
@@ -2680,8 +3206,16 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         }
       },
       {
+        name: "storage_diagnostics",
+        description: "Show the resolved snapshot path, WAL path, and the effective environment/config source used for persistence.",
+        inputSchema: {
+          type: "object",
+          properties: {}
+        }
+      },
+      {
         name: "import_memories",
-        description: "Bulk-import memories from a JSON array. Each entry requires content and district; tags, emotional_valence, intensity, and epistemic_status are optional.",
+        description: "Bulk-import memories from inline entries or from a snapshot file. Supports dry-run validation, dedupe policies, and explicit snapshot migration flags.",
         inputSchema: {
           type: "object",
           properties: {
@@ -2706,12 +3240,36 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
               },
               description: "Array of memory entries to import"
             },
+            file_path: {
+              type: "string",
+              description: "Optional path to a server snapshot JSON file to import instead of inline entries"
+            },
+            dry_run: {
+              type: "boolean",
+              description: "Validate the import and return would_import / would_skip / would_fail counts without writing any data"
+            },
+            dedupe: {
+              type: "string",
+              enum: ["none", "content_hash", "content_plus_tags"],
+              description: "Optional dedupe policy: none, content_hash, or content_plus_tags"
+            },
+            preserve_ids: {
+              type: "boolean",
+              description: "Snapshot-import only. Preserve source memory IDs; conflicting IDs are rejected deterministically"
+            },
+            merge_connections: {
+              type: "boolean",
+              description: "Snapshot-import only. Merge the imported connection graph after validating all referenced IDs"
+            },
             agent_id: {
               type: "string",
               description: "Optional default agent identifier applied to entries without agent_id"
             }
           },
-          required: ["entries"]
+          anyOf: [
+            { required: ["entries"] },
+            { required: ["file_path"] }
+          ]
         }
       },
       {
@@ -3130,14 +3688,56 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
     }
 
-    case "import_memories": {
-      const { entries, agent_id } = request.params.arguments as any;
+    case "storage_diagnostics": {
       try {
-        const ids = await runMutatingTool("import_memories", () => memorySystem.importMemories(entries, agent_id));
+        const diagnostics = memorySystem.storageDiagnostics();
         return {
           content: [{
             type: "text",
-            text: `📥 Imported ${ids.length} memories: ${ids.join(', ')}`
+            text: `📦 Storage Diagnostics\nSnapshot path: ${diagnostics.snapshot_path}\nWAL path: ${diagnostics.wal_path}\nResolved source: ${diagnostics.resolved_source}`,
+          }],
+        };
+      } catch (error) {
+        return toolErrorResult(
+          "storage_diagnostics",
+          "Storage diagnostics failed",
+          error,
+          formatMcpError(
+            NM_ERRORS.INPUT_VALIDATION_FAILED,
+            "Unable to resolve storage diagnostics.",
+            "Retry storage_diagnostics; if the problem persists, inspect server startup configuration.",
+          ),
+        );
+      }
+    }
+
+    case "import_memories": {
+      const { entries, file_path, dry_run = false, dedupe = "none", preserve_ids = false, merge_connections = false, agent_id } = request.params.arguments as any;
+      try {
+        const executeImport = () => memorySystem.importMemories(entries, agent_id, {
+          file_path,
+          dry_run,
+          dedupe,
+          preserve_ids,
+          merge_connections,
+        });
+        const result = dry_run
+          ? executeImport()
+          : await runMutatingTool("import_memories", executeImport);
+
+        const skipLines = result.skipped.length > 0
+          ? result.skipped.map(skip => `  entry ${skip.index}${skip.source_memory_id ? ` (${skip.source_memory_id})` : ""}: ${skip.reason_code} - ${skip.detail}`).join("\n")
+          : "  (none)";
+        const failureLines = result.failures.length > 0
+          ? result.failures.map(failure => `  entry ${failure.index}${failure.source_memory_id ? ` (${failure.source_memory_id})` : ""}: ${failure.reason_code} - ${failure.detail}`).join("\n")
+          : "  (none)";
+
+        return {
+          content: [{
+            type: "text",
+            text: dry_run
+              ? `📥 Import Dry Run\nSource: ${result.source}\nRequested rows: ${result.requested}\nWould import: ${result.imported_ids.length}\nWould skip: ${result.skipped.length}\nWould fail: ${result.failures.length}\n\nSkipped rows:\n${skipLines}\n\nFailed rows:\n${failureLines}`
+              : `📥 Imported ${result.imported_ids.length} memories from ${result.source}: ${result.imported_ids.join(', ') || '(none)'}\nRequested rows: ${result.requested}\nSkipped rows: ${result.skipped.length}\nFailed rows: ${result.failures.length}\n\nSkipped rows:\n${skipLines}`
           }]
         };
       } catch (error) {
