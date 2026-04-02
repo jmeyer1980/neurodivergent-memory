@@ -648,6 +648,44 @@ class NeurodivergentMemory {
     return [memory.content, memory.name, ...memory.tags].join(" ");
   }
 
+  private normalizedBm25Scores(candidates: MemoryNPC[], query: string): Map<string, number> {
+    const terms = this.bm25.queryTerms(query);
+    if (terms.length === 0 || candidates.length === 0) {
+      return new Map(candidates.map(memory => [memory.id, 0]));
+    }
+
+    const rawScores = candidates.map(memory => ({
+      id: memory.id,
+      score: this.bm25.score(memory.id, terms),
+    }));
+
+    const maxScore = rawScores.reduce((currentMax, candidate) => Math.max(currentMax, candidate.score), 0);
+    if (maxScore === 0) {
+      return new Map(rawScores.map(candidate => [candidate.id, 0]));
+    }
+
+    return new Map(rawScores.map(candidate => [candidate.id, candidate.score / maxScore]));
+  }
+
+  private normalizedRecencyScores(candidates: MemoryNPC[]): Map<string, number> {
+    if (candidates.length === 0) {
+      return new Map();
+    }
+
+    const createdTimes = candidates.map(memory => memory.created.getTime());
+    const oldest = Math.min(...createdTimes);
+    const newest = Math.max(...createdTimes);
+    const range = newest - oldest;
+
+    if (range <= 0) {
+      return new Map(candidates.map(memory => [memory.id, 1]));
+    }
+
+    return new Map(
+      candidates.map(memory => [memory.id, (memory.created.getTime() - oldest) / range]),
+    );
+  }
+
   private detectRepeatCandidate(content: string, agentId?: string): { memory: MemoryNPC; similarityScore: number } | undefined {
     // Select the 10 most recently created memories for this agent (or globally) in O(N log k) with k=10,
     // instead of sorting all memories (O(N log N)).
@@ -1105,8 +1143,18 @@ class NeurodivergentMemory {
     emotional_valence_min?: number,
     emotional_valence_max?: number,
     intensity_min?: number,
-    intensity_max?: number
+    intensity_max?: number,
+    context?: string,
+    recency_weight = 0,
   ): ScoredMemory[] {
+    if (recency_weight < 0 || recency_weight > 1) {
+      throw createNMError(
+        NM_ERRORS.INPUT_VALIDATION_FAILED,
+        `Invalid recency_weight: ${recency_weight}. Expected a value between 0 and 1.`,
+        "Provide recency_weight as a number in the inclusive range 0..1.",
+      );
+    }
+
     let candidates = Object.values(this.memories);
 
     if (district) {
@@ -1144,25 +1192,47 @@ class NeurodivergentMemory {
       candidates = candidates.filter(m => (m.intensity ?? 0.5) <= intensity_max!);
     }
 
-    const queryTerms = this.bm25.queryTerms(query);
+    const hasContext = typeof context === "string" && context.trim().length > 0;
+    const queryScores = this.normalizedBm25Scores(candidates, query);
+    const contextScores = hasContext
+      ? this.normalizedBm25Scores(candidates, context)
+      : new Map(candidates.map(memory => [memory.id, 0]));
+    const recencyScores = recency_weight > 0
+      ? this.normalizedRecencyScores(candidates)
+      : new Map(candidates.map(memory => [memory.id, 0]));
 
-    const scored: ScoredMemory[] = candidates.map(m => ({
-      memory: m,
-      score: this.bm25.score(m.id, queryTerms),
-    }));
+    const scored = candidates.map(memory => {
+      const queryScore = queryScores.get(memory.id) ?? 0;
+      const contextScore = contextScores.get(memory.id) ?? 0;
+      const semanticScore = hasContext
+        ? (queryScore * 0.75) + (contextScore * 0.25)
+        : queryScore;
+      const recencyScore = recencyScores.get(memory.id) ?? 0;
 
-    // Normalise scores to 0-1 range; return empty if no terms matched
-    const maxScore = scored.reduce((mx, s) => Math.max(mx, s.score), 0);
+      return {
+        memory,
+        score: semanticScore + (recencyScore * recency_weight),
+        semanticScore,
+      };
+    });
+
+    if (scored.reduce((mx, candidate) => Math.max(mx, candidate.semanticScore), 0) === 0) {
+      return [];
+    }
+
+    const maxScore = scored.reduce((mx, candidate) => Math.max(mx, candidate.score), 0);
     if (maxScore === 0) {
       return [];
     }
-    for (const s of scored) {
-      s.score = s.score / maxScore;
-    }
+
+    const normalized: ScoredMemory[] = scored.map(candidate => ({
+      memory: candidate.memory,
+      score: candidate.score / maxScore,
+    }));
 
     // Apply min_score filter after normalisation (score >= 0 naturally passes a 0 threshold)
     const threshold = min_score ?? 0;
-    const filtered = scored.filter(s => s.score >= threshold);
+    const filtered = normalized.filter(s => s.score >= threshold);
 
     // Sort descending by score
     filtered.sort((a, b) => b.score - a.score);
@@ -1213,7 +1283,7 @@ class NeurodivergentMemory {
     return results;
   }
 
-  relatedTo(memoryId: string, query?: string): ScoredMemory[] {
+  relatedTo(memoryId: string, query?: string, context?: string): ScoredMemory[] {
     const root = this.memories[memoryId];
     if (!root) {
       throw createNMError(
@@ -1244,19 +1314,30 @@ class NeurodivergentMemory {
 
     if (hopMap.size === 0) return [];
 
-    const queryTerms = query ? this.bm25.queryTerms(query) : this.bm25.queryTerms(root.content);
+    const candidates = Array.from(hopMap.entries())
+      .map(([id, hops]) => ({ memory: this.memories[id], hops }))
+      .filter((entry): entry is { memory: MemoryNPC; hops: number } => Boolean(entry.memory));
+
+    const semanticQuery = query && query.trim().length > 0 ? query : root.content;
+    const hasContext = typeof context === "string" && context.trim().length > 0;
+    const queryScores = this.normalizedBm25Scores(candidates.map(entry => entry.memory), semanticQuery);
+    const contextScores = hasContext
+      ? this.normalizedBm25Scores(candidates.map(entry => entry.memory), context)
+      : new Map(candidates.map(entry => [entry.memory.id, 0]));
 
     const scored: ScoredMemory[] = [];
-    for (const [id, hops] of hopMap.entries()) {
-      const mem = this.memories[id];
-      if (!mem) continue;
-      const semanticScore = this.bm25.score(id, queryTerms);
+    for (const { memory, hops } of candidates) {
+      const queryScore = queryScores.get(memory.id) ?? 0;
+      const contextScore = contextScores.get(memory.id) ?? 0;
+      const semanticScore = hasContext
+        ? (queryScore * 0.75) + (contextScore * 0.25)
+        : queryScore;
       // Proximity bonus is 1/hops so direct neighbours (hops=1) score 1.0 and
       // two-hop neighbours score 0.5.  This is added to the raw BM25 score
       // before the whole result set is normalised to 0-1, which naturally
       // balances graph proximity against semantic relevance.
       const proximityBonus = 1 / hops;
-      scored.push({ memory: mem, score: semanticScore + proximityBonus });
+      scored.push({ memory, score: semanticScore + proximityBonus });
     }
 
     // Normalise
@@ -2197,7 +2278,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: "search_memories",
-        description: "Search memories using BM25 semantic ranking. Returns results sorted by relevance score (0-1).",
+        description: "Search memories using BM25 semantic ranking with optional goal-context blending, recency bias, and filters. Returns results sorted by relevance score (0-1).",
         inputSchema: {
           type: "object",
           properties: {
@@ -2230,6 +2311,16 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
               maximum: 1,
               description: "Minimum relevance score (0-1). Only return results at or above this threshold."
             },
+            context: {
+              type: "string",
+              description: "Optional short goal/context string blended into ranking as a lightweight BM25 boost."
+            },
+            recency_weight: {
+              type: "number",
+              minimum: 0,
+              maximum: 1,
+              description: "Optional recency boost strength from 0 (off) to 1 (strongest). Recent memories receive more weight without replacing semantic relevance."
+            },
             emotional_valence_min: {
               type: "number",
               minimum: -1,
@@ -2246,13 +2337,25 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
               type: "number",
               minimum: 0,
               maximum: 1,
-              description: "Minimum intensity filter (0-1)"
+              description: "Minimum intensity filter (0-1). Deprecated alias for min_intensity."
             },
             intensity_max: {
               type: "number",
               minimum: 0,
               maximum: 1,
-              description: "Maximum intensity filter (0-1)"
+              description: "Maximum intensity filter (0-1). Deprecated alias for max_intensity."
+            },
+            min_intensity: {
+              type: "number",
+              minimum: 0,
+              maximum: 1,
+              description: "Minimum intensity filter (0-1). Preferred name for new callers."
+            },
+            max_intensity: {
+              type: "number",
+              minimum: 0,
+              maximum: 1,
+              description: "Maximum intensity filter (0-1). Preferred name for new callers."
             }
           },
           required: ["query"]
@@ -2285,7 +2388,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: "related_to",
-        description: "Find memories related to a given memory ID, ranked by graph proximity + BM25 semantic score",
+        description: "Find memories related to a given memory ID, ranked by graph proximity + BM25 semantic score with optional goal-context blending.",
         inputSchema: {
           type: "object",
           properties: {
@@ -2296,6 +2399,10 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             query: {
               type: "string",
               description: "Optional extra query to bias semantic ranking. If omitted, the source memory content is used."
+            },
+            context: {
+              type: "string",
+              description: "Optional short goal/context string blended into ranking as a lightweight BM25 boost."
             }
           },
           required: ["memory_id"]
@@ -2601,19 +2708,25 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       const {
         query, district, project_id, tags, epistemic_statuses,
         min_score,
+        context, recency_weight,
         emotional_valence_min, emotional_valence_max,
-        intensity_min, intensity_max
+        intensity_min, intensity_max,
+        min_intensity, max_intensity,
       } = request.params.arguments as any;
       try {
         if (project_id !== undefined) {
           validateProjectId(project_id);
         }
 
+        const resolvedIntensityMin = min_intensity ?? intensity_min;
+        const resolvedIntensityMax = max_intensity ?? intensity_max;
+
         const results = memorySystem.searchMemories(
           query, district, project_id, tags, epistemic_statuses,
           min_score,
           emotional_valence_min, emotional_valence_max,
-          intensity_min, intensity_max
+          resolvedIntensityMin, resolvedIntensityMax,
+          context, recency_weight,
         );
 
         if (results.length === 0) {
@@ -2675,9 +2788,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     }
 
     case "related_to": {
-      const { memory_id, query } = request.params.arguments as any;
+      const { memory_id, query, context } = request.params.arguments as any;
       try {
-        const results = memorySystem.relatedTo(memory_id, query);
+        const results = memorySystem.relatedTo(memory_id, query, context);
         if (results.length === 0) {
           return { content: [{ type: "text", text: `🔗 No related memories found for ${memory_id}` }] };
         }

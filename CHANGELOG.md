@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+### Added
+
+- Goal-aware retrieval tuning for `search_memories` and `related_to` via optional `context` scoring, plus `recency_weight` support on `search_memories`
+- Preferred `min_intensity` / `max_intensity` filter names for `search_memories` while preserving backward-compatible `intensity_min` / `intensity_max` aliases
+
 ## [0.2.0] - 2026-04-01
 
 ### Added
