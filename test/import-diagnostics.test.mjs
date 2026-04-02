@@ -354,3 +354,197 @@ test("snapshot import rejects preserve_ids conflicts with clear error", async ()
     server.stop();
   }
 });
+
+test("dedupe skips do not consume memory ids on real import", async () => {
+  const server = startServer();
+
+  try {
+    await server.callTool(60, "store_memory", {
+      content: "existing duplicate seed",
+      district: "logical_analysis",
+      tags: ["topic:test", "scope:session", "kind:reference", "layer:research"],
+    });
+
+    const imported = await server.callTool(61, "import_memories", {
+      entries: [
+        {
+          content: "existing duplicate seed",
+          district: "logical_analysis",
+          tags: ["topic:test", "scope:session", "kind:reference", "layer:research"],
+        },
+        {
+          content: "only imported row",
+          district: "practical_execution",
+          tags: ["topic:test", "scope:session", "kind:task", "layer:implementation"],
+        },
+      ],
+      dedupe: "content_hash",
+    });
+    assert.equal(isToolError(imported), false, resultText(imported));
+    assert.match(resultText(imported), /Imported 1 memories/);
+    assert.match(resultText(imported), /memory_2/);
+
+    const stored = await server.callTool(62, "store_memory", {
+      content: "next id after skipped dedupe",
+      district: "logical_analysis",
+      tags: ["topic:test", "scope:session", "kind:reference", "layer:research"],
+    });
+    assert.match(resultText(stored), /ID: memory_3/);
+  } finally {
+    server.stop();
+  }
+});
+
+test("invalid dedupe policy is rejected with validation error", async () => {
+  const server = startServer();
+
+  try {
+    const response = await server.callTool(70, "import_memories", {
+      entries: [
+        {
+          content: "bad dedupe policy",
+          district: "logical_analysis",
+        },
+      ],
+      dedupe: "bogus_policy",
+    });
+
+    assert.equal(isToolError(response), true, resultText(response));
+    assert.match(resultText(response), /Invalid dedupe policy/);
+    assert.match(resultText(response), /Code: NM_E020/);
+  } finally {
+    server.stop();
+  }
+});
+
+test("snapshot import rejects key and embedded id mismatches", async () => {
+  const server = startServer();
+
+  try {
+    const snapshotPath = writeSnapshotFile(server.tempDir, "mismatch-snapshot.json", {
+      nextMemoryId: 2,
+      memories: {
+        memory_1: {
+          id: "memory_999",
+          name: "Mismatched Snapshot",
+          archetype: "scholar",
+          district: "logical_analysis",
+          content: "mismatch",
+          traits: ["analytical"],
+          concerns: ["accuracy"],
+          connections: [],
+          tags: ["topic:test", "scope:project", "kind:reference", "layer:architecture"],
+          created: "2026-04-01T00:00:00.000Z",
+          last_accessed: "2026-04-01T00:00:00.000Z",
+          access_count: 1,
+          intensity: 0.5,
+        },
+      },
+    });
+
+    const response = await server.callTool(71, "import_memories", {
+      file_path: snapshotPath,
+      dry_run: true,
+    });
+
+    assert.equal(isToolError(response), true, resultText(response));
+    assert.match(resultText(response), /Snapshot memory id mismatch/);
+  } finally {
+    server.stop();
+  }
+});
+
+test("snapshot import validates project_id field paths with snapshot context", async () => {
+  const server = startServer();
+
+  try {
+    const snapshotPath = writeSnapshotFile(server.tempDir, "invalid-project-snapshot.json", {
+      nextMemoryId: 2,
+      memories: {
+        memory_1: {
+          id: "memory_1",
+          name: "Bad Project Snapshot",
+          archetype: "scholar",
+          district: "logical_analysis",
+          content: "invalid project id",
+          traits: ["analytical"],
+          concerns: ["accuracy"],
+          connections: [],
+          tags: ["topic:test", "scope:project", "kind:reference", "layer:architecture"],
+          created: "2026-04-01T00:00:00.000Z",
+          last_accessed: "2026-04-01T00:00:00.000Z",
+          access_count: 1,
+          intensity: 0.5,
+          project_id: "bad!",
+        },
+      },
+    });
+
+    const response = await server.callTool(72, "import_memories", {
+      file_path: snapshotPath,
+      dry_run: true,
+    });
+
+    assert.equal(isToolError(response), false, resultText(response));
+    assert.match(resultText(response), /snapshot\[memory_1\]\.project_id/);
+  } finally {
+    server.stop();
+  }
+});
+
+test("snapshot import rejects external file paths unless explicitly enabled", async () => {
+  const externalDir = fs.mkdtempSync(path.join(os.tmpdir(), "ndm-external-import-"));
+  const externalSnapshotPath = writeSnapshotFile(externalDir, "external-snapshot.json", {
+    nextMemoryId: 2,
+    memories: {
+      memory_1: {
+        id: "memory_1",
+        name: "External Snapshot",
+        archetype: "scholar",
+        district: "logical_analysis",
+        content: "external file path import",
+        traits: ["analytical"],
+        concerns: ["accuracy"],
+        connections: [],
+        tags: ["topic:test", "scope:project", "kind:reference", "layer:architecture"],
+        created: "2026-04-01T00:00:00.000Z",
+        last_accessed: "2026-04-01T00:00:00.000Z",
+        access_count: 1,
+        intensity: 0.5,
+      },
+    },
+  });
+
+  const server = startServer();
+
+  try {
+    const blocked = await server.callTool(73, "import_memories", {
+      file_path: externalSnapshotPath,
+      dry_run: true,
+    });
+
+    assert.equal(isToolError(blocked), true, resultText(blocked));
+    assert.match(resultText(blocked), /outside the allowed persistence directory/);
+  } finally {
+    server.stop();
+  }
+
+  const allowedServer = startServer({
+    env: {
+      NEURODIVERGENT_MEMORY_IMPORT_ALLOW_EXTERNAL_FILE: "true",
+    },
+  });
+
+  try {
+    const allowed = await allowedServer.callTool(74, "import_memories", {
+      file_path: externalSnapshotPath,
+      dry_run: true,
+    });
+
+    assert.equal(isToolError(allowed), false, resultText(allowed));
+    assert.match(resultText(allowed), /Would import: 1/);
+  } finally {
+    allowedServer.stop();
+    fs.rmSync(externalDir, { recursive: true, force: true });
+  }
+});

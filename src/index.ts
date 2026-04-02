@@ -23,6 +23,7 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 import * as crypto from "crypto";
 import * as fs from "fs";
+import * as path from "path";
 import { logger } from "./core/logger.js";
 import { resolvePersistenceLocation } from "./core/persistence.js";
 import { AsyncMutex } from "./core/async-mutex.js";
@@ -346,6 +347,10 @@ class NeurodivergentMemory {
     process.env.NEURODIVERGENT_MEMORY_PING_PONG_THRESHOLD,
     3,
     (value) => value > 0,
+  );
+  private readonly allowExternalImportFiles = parseBooleanEnv(
+    process.env.NEURODIVERGENT_MEMORY_IMPORT_ALLOW_EXTERNAL_FILE,
+    false,
   );
   private readonly loopTelemetry = new LoopTelemetryTracker({
     operationWindowSize: this.loopTelemetryWindowSize,
@@ -808,10 +813,38 @@ class NeurodivergentMemory {
     };
   }
 
+  private validateImportFilePath(filePath: string): string {
+    const resolvedPath = path.resolve(filePath);
+    const resolvedPersistenceDir = path.resolve(PERSISTENCE_DIR);
+    const hasJsonExtension = path.extname(resolvedPath).toLowerCase() === ".json";
+    if (!hasJsonExtension) {
+      throw createNMError(
+        NM_ERRORS.INPUT_VALIDATION_FAILED,
+        `Import file must use a .json extension: ${filePath}`,
+        "Provide a JSON snapshot file path ending in .json.",
+      );
+    }
+
+    const isWithinPersistenceDir =
+      resolvedPath === resolvedPersistenceDir ||
+      resolvedPath.startsWith(`${resolvedPersistenceDir}${path.sep}`);
+
+    if (!this.allowExternalImportFiles && !isWithinPersistenceDir) {
+      throw createNMError(
+        NM_ERRORS.INPUT_VALIDATION_FAILED,
+        `Import file path is outside the allowed persistence directory: ${filePath}`,
+        `Place the snapshot under ${resolvedPersistenceDir}, or set NEURODIVERGENT_MEMORY_IMPORT_ALLOW_EXTERNAL_FILE=true if external file imports are intentional.`,
+      );
+    }
+
+    return resolvedPath;
+  }
+
   private readImportSnapshotFile(filePath: string): ImportCandidate[] {
+    const validatedPath = this.validateImportFilePath(filePath);
     let raw = "";
     try {
-      raw = fs.readFileSync(filePath, "utf-8");
+      raw = fs.readFileSync(validatedPath, "utf-8");
     } catch (error) {
       throw createNMError(
         NM_ERRORS.INPUT_VALIDATION_FAILED,
@@ -851,6 +884,13 @@ class NeurodivergentMemory {
 
     return ordered.map(([sourceMemoryId, rawMemory]) => {
       const deserialized = this.deserializeMemory(rawMemory);
+      if (deserialized.id !== sourceMemoryId) {
+        throw createNMError(
+          NM_ERRORS.INPUT_VALIDATION_FAILED,
+          `Snapshot memory id mismatch for ${sourceMemoryId}: embedded id is ${deserialized.id}.`,
+          "Ensure each snapshot memories key matches the embedded memory.id before retrying import_memories.",
+        );
+      }
       return {
         content: deserialized.content,
         district: deserialized.district,
@@ -874,27 +914,49 @@ class NeurodivergentMemory {
   }
 
   private fingerprintForImportCandidate(candidate: Pick<ImportCandidate, "content" | "tags">, dedupe: ImportDedupePolicy): string | undefined {
-    if (dedupe === "none") {
-      return undefined;
+    switch (dedupe) {
+      case "none":
+        return undefined;
+      case "content_hash":
+        return crypto.createHash("sha256").update(candidate.content).digest("hex");
+      case "content_plus_tags": {
+        const stableTags = [...(candidate.tags ?? [])].sort().join("\u0000");
+        return crypto.createHash("sha256").update(`${candidate.content}\u0001${stableTags}`).digest("hex");
+      }
     }
-
-    if (dedupe === "content_hash") {
-      return crypto.createHash("sha256").update(candidate.content).digest("hex");
-    }
-
-    const stableTags = [...(candidate.tags ?? [])].sort().join("\u0000");
-    return crypto.createHash("sha256").update(`${candidate.content}\u0001${stableTags}`).digest("hex");
   }
 
   private dedupeReasonCode(dedupe: ImportDedupePolicy): string {
     switch (dedupe) {
+      case "none":
+        return "NONE";
       case "content_hash":
         return "DEDUPE_CONTENT_HASH";
       case "content_plus_tags":
         return "DEDUPE_CONTENT_PLUS_TAGS";
-      default:
-        return "NONE";
     }
+  }
+
+  private validateImportDedupePolicy(dedupe: string | undefined): ImportDedupePolicy {
+    if (dedupe === undefined || dedupe === "none" || dedupe === "content_hash" || dedupe === "content_plus_tags") {
+      return dedupe ?? "none";
+    }
+
+    throw createNMError(
+      NM_ERRORS.INPUT_VALIDATION_FAILED,
+      `Invalid dedupe policy: ${dedupe}`,
+      "Use one of: none, content_hash, or content_plus_tags.",
+    );
+  }
+
+  private projectIdFieldPathForImport(planSource: "entries" | "file_path", index: number, candidate: ImportCandidate): string {
+    if (planSource === "file_path") {
+      return candidate.source_memory_id
+        ? `snapshot[${candidate.source_memory_id}].project_id`
+        : `snapshot[${index}].project_id`;
+    }
+
+    return `entries[${index}].project_id`;
   }
 
   private buildImportPlan(
@@ -902,7 +964,7 @@ class NeurodivergentMemory {
     default_agent_id: string | undefined,
     options: ImportExecutionOptions = {},
   ): ImportPlan {
-    const dedupe = options.dedupe ?? "none";
+    const dedupe = this.validateImportDedupePolicy(options.dedupe);
     const preserveIds = options.preserve_ids ?? false;
     const mergeConnections = options.merge_connections ?? false;
     const resolved = this.resolveImportCandidates(entries, options.file_path);
@@ -958,7 +1020,18 @@ class NeurodivergentMemory {
         }
 
         if (candidate.project_id !== undefined) {
-          validateProjectId(candidate.project_id, `entries[${index}].project_id`);
+          validateProjectId(candidate.project_id, this.projectIdFieldPathForImport(plan.source, index, candidate));
+        }
+
+        const fingerprint = this.fingerprintForImportCandidate(candidate, dedupe);
+        if (fingerprint && seenFingerprints.has(fingerprint)) {
+          plan.skipped.push({
+            index,
+            source_memory_id: candidate.source_memory_id,
+            reason_code: this.dedupeReasonCode(dedupe),
+            detail: `Skipped by dedupe policy ${dedupe}.`,
+          });
+          continue;
         }
 
         let targetId: string;
@@ -985,17 +1058,6 @@ class NeurodivergentMemory {
           targetId = sourceMemoryId;
         } else {
           targetId = `memory_${nextId++}`;
-        }
-
-        const fingerprint = this.fingerprintForImportCandidate(candidate, dedupe);
-        if (fingerprint && seenFingerprints.has(fingerprint)) {
-          plan.skipped.push({
-            index,
-            source_memory_id: candidate.source_memory_id,
-            reason_code: this.dedupeReasonCode(dedupe),
-            detail: `Skipped by dedupe policy ${dedupe}.`,
-          });
-          continue;
         }
 
         const districtArchetype = this.districts[candidate.district].archetype;
@@ -2467,6 +2529,22 @@ function parseIntegerEnv(
   }
 
   return parsed;
+}
+
+function parseBooleanEnv(rawValue: string | undefined, fallback: boolean): boolean {
+  if (!rawValue || !rawValue.trim()) {
+    return fallback;
+  }
+
+  const normalized = rawValue.trim().toLowerCase();
+  if (["1", "true", "yes", "on"].includes(normalized)) {
+    return true;
+  }
+  if (["0", "false", "no", "off"].includes(normalized)) {
+    return false;
+  }
+
+  return fallback;
 }
 
 function parseNumberEnv(

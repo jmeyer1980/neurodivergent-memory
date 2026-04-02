@@ -156,6 +156,7 @@ Import validation flags:
 - `dry_run: true` validates the request without writing data and returns deterministic `would_import`, `would_skip`, and `would_fail` counts.
 - `dedupe` accepts `none`, `content_hash`, or `content_plus_tags`.
 - Deduplicated rows are reported with stable reason codes: `DEDUPE_CONTENT_HASH` or `DEDUPE_CONTENT_PLUS_TAGS`.
+- Snapshot `file_path` imports accept `.json` files under the resolved persistence directory by default. Set `NEURODIVERGENT_MEMORY_IMPORT_ALLOW_EXTERNAL_FILE=true` only when importing external snapshot files intentionally.
 
 Snapshot migration flags:
 
