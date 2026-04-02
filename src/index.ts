@@ -64,6 +64,21 @@ interface StoreMemoryResult {
   similarity_score?: number;
   ping_pong_detected?: boolean;
   ping_pong_count?: number;
+  no_net_new_info_warning?: string;
+  cooldown_started_ms?: number;
+}
+
+interface RetrieveMemoryResult {
+  memory: MemoryNPC;
+  distill_suggestion?: string;
+  logical_emotional_read_count?: number;
+}
+
+interface UpdateMemoryResult {
+  memory: MemoryNPC;
+  ping_pong_detected?: boolean;
+  ping_pong_count?: number;
+  cooldown_started_ms?: number;
 }
 
 interface OperationActorContext {
@@ -348,6 +363,16 @@ class NeurodivergentMemory {
     3,
     (value) => value > 0,
   );
+  private readonly distillSuggestionThreshold = parseIntegerEnv(
+    process.env.NEURODIVERGENT_MEMORY_DISTILL_SUGGEST_THRESHOLD,
+    3,
+    (value) => value > 0,
+  );
+  private readonly crossDistrictCooldownMs = parseIntegerEnv(
+    process.env.NEURODIVERGENT_MEMORY_CROSS_DISTRICT_COOLDOWN_MS,
+    0,
+    (value) => value >= 0,
+  );
   private readonly allowExternalImportFiles = parseBooleanEnv(
     process.env.NEURODIVERGENT_MEMORY_IMPORT_ALLOW_EXTERNAL_FILE,
     false,
@@ -356,6 +381,8 @@ class NeurodivergentMemory {
     operationWindowSize: this.loopTelemetryWindowSize,
     pingPongThreshold: this.pingPongThreshold,
     repeatThreshold: this.repeatThreshold,
+    distillSuggestionThreshold: this.distillSuggestionThreshold,
+    crossDistrictCooldownMs: this.crossDistrictCooldownMs,
   });
   private saveTimer: ReturnType<typeof setTimeout> | null = null;
   // Promise chain that ensures saves never run concurrently
@@ -1244,11 +1271,17 @@ class NeurodivergentMemory {
     };
   }
 
-  private applyPingPongTelemetry(memory: MemoryNPC, actor?: OperationActorContext): { detected: boolean; count: number } {
+  private applyPingPongTelemetry(memory: MemoryNPC, actor?: OperationActorContext): {
+    detected: boolean;
+    count: number;
+    cooldownActivated: boolean;
+    cooldownRemainingMs: number;
+  } {
     const pingPong = this.loopTelemetry.recordWrite({
       memory_id: memory.id,
       district: actor?.district ?? memory.district,
       agent_id: actor?.agent_id ?? memory.agent_id,
+      target_district: memory.district,
     });
     if (pingPong.pingPongDetected) {
       memory.ping_pong_counter = (memory.ping_pong_counter ?? 0) + 1;
@@ -1262,13 +1295,54 @@ class NeurodivergentMemory {
           memory_id: memory.id,
           count: pingPong.pingPongCount,
           ping_pong_counter: memory.ping_pong_counter,
+          cooldown_activated: pingPong.cooldownActivated,
+          cooldown_remaining_ms: pingPong.cooldownRemainingMs,
         },
         "Ping-pong telemetry detected",
       );
-      return { detected: true, count: pingPong.pingPongCount };
+      return {
+        detected: true,
+        count: pingPong.pingPongCount,
+        cooldownActivated: pingPong.cooldownActivated,
+        cooldownRemainingMs: pingPong.cooldownRemainingMs,
+      };
     }
 
-    return { detected: false, count: pingPong.pingPongCount };
+    return {
+      detected: false,
+      count: pingPong.pingPongCount,
+      cooldownActivated: pingPong.cooldownActivated,
+      cooldownRemainingMs: pingPong.cooldownRemainingMs,
+    };
+  }
+
+  private buildNoNetNewInfoWarning(matchedMemoryId: string, similarityScore: number): string {
+    return `⚠️ No net-new info: incoming content closely repeats ${matchedMemoryId} (similarity=${similarityScore.toFixed(3)}). Consider updating the existing memory instead of creating another duplicate.`;
+  }
+
+  private buildDistillSuggestion(memoryId: string, logicalEmotionalReadCount: number): string {
+    return `⚠️ Distillation suggested: logical_analysis has accessed emotional_processing memory ${memoryId} ${logicalEmotionalReadCount} times in the current loop window. Consider calling distill_memory to translate the signal before continuing analysis.`;
+  }
+
+  buildCrossDistrictCooldownWarning(memoryId: string, cooldownMs: number): string {
+    return `⚠️ Cross-district cooldown started for ${memoryId}: repetitive cross-district churn was detected. Additional cross-district writes will be blocked for ${cooldownMs}ms.`;
+  }
+
+  private enforceCrossDistrictCooldown(memory: MemoryNPC, actor?: OperationActorContext): void {
+    if (!actor?.district || actor.district === memory.district) {
+      return;
+    }
+
+    const cooldownRemainingMs = this.loopTelemetry.getCooldownRemaining(memory.id);
+    if (cooldownRemainingMs <= 0) {
+      return;
+    }
+
+    throw createNMError(
+      NM_ERRORS.CROSS_DISTRICT_COOLDOWN_ACTIVE,
+      `Cross-district cooldown active for ${memory.id}; retry in ${cooldownRemainingMs}ms.`,
+      "Wait for the cooldown window to expire, reduce repetitive cross-district churn, or set NEURODIVERGENT_MEMORY_CROSS_DISTRICT_COOLDOWN_MS=0 to disable the cooldown.",
+    );
   }
 
   // ── Districts ──────────────────────────────────────────────────────────────
@@ -1347,9 +1421,12 @@ class NeurodivergentMemory {
     let similarityScore: number | undefined;
     let pingPongDetected = false;
     let pingPongCount: number | undefined;
+    let noNetNewInfoWarning: string | undefined;
+    let cooldownStartedMs: number | undefined;
 
     if (repeatCandidate && repeatCandidate.similarityScore >= this.loopTelemetry.getRepeatThreshold()) {
       const matchedMemory = repeatCandidate.memory;
+      this.enforceCrossDistrictCooldown(matchedMemory, { district, agent_id });
       const nextRepeatCount = (matchedMemory.repeat_write_count ?? matchedMemory.repeat_count ?? 0) + 1;
       matchedMemory.repeat_write_count = nextRepeatCount;
       matchedMemory.repeat_count = nextRepeatCount;
@@ -1370,6 +1447,7 @@ class NeurodivergentMemory {
       });
       pingPongDetected = pingPongResult.detected;
       pingPongCount = pingPongResult.count;
+      cooldownStartedMs = pingPongResult.cooldownActivated ? pingPongResult.cooldownRemainingMs : undefined;
 
       this.loopTelemetry.recordHighSimilarityWrite({
         memory_id: id,
@@ -1383,6 +1461,7 @@ class NeurodivergentMemory {
       repeatDetected = true;
       matchedMemoryId = matchedMemory.id;
       similarityScore = repeatCandidate.similarityScore;
+      noNetNewInfoWarning = this.buildNoNetNewInfoWarning(matchedMemory.id, repeatCandidate.similarityScore);
     }
 
     const memory: MemoryNPC = {
@@ -1431,29 +1510,38 @@ class NeurodivergentMemory {
       similarity_score: similarityScore,
       ping_pong_detected: pingPongDetected,
       ping_pong_count: pingPongCount,
+      no_net_new_info_warning: noNetNewInfoWarning,
+      cooldown_started_ms: cooldownStartedMs,
     };
   }
 
-  retrieveMemory(id: string, actor?: OperationActorContext): MemoryNPC | null {
+  retrieveMemory(id: string, actor?: OperationActorContext): RetrieveMemoryResult | null {
     const memory = this.memories[id];
     if (!memory) {
       return null;
     }
 
-    this.loopTelemetry.recordRead({
+    const readSignal = this.loopTelemetry.recordRead({
       memory_id: id,
       district: actor?.district ?? memory.district,
       agent_id: actor?.agent_id ?? memory.agent_id,
+      target_district: memory.district,
     });
 
-    return memory;
+    return {
+      memory,
+      distill_suggestion: readSignal.distillSuggested
+        ? this.buildDistillSuggestion(id, readSignal.logicalEmotionalReadCount)
+        : undefined,
+      logical_emotional_read_count: readSignal.logicalEmotionalReadCount,
+    };
   }
 
   updateMemory(
     id: string,
     updates: MemoryUpdatePayload,
     actor?: OperationActorContext,
-  ): MemoryNPC {
+  ): UpdateMemoryResult {
     const memory = this.memories[id];
     if (!memory) {
       throw createNMError(
@@ -1474,13 +1562,20 @@ class NeurodivergentMemory {
       validateProjectId(updates.project_id);
     }
 
+    this.enforceCrossDistrictCooldown(memory, actor);
+
     this.appendWalEntry("update", { memory_id: id, updates });
     this.applyMemoryUpdates(id, updates);
-    this.applyPingPongTelemetry(this.memories[id], actor);
+    const pingPongResult = this.applyPingPongTelemetry(this.memories[id], actor);
     this.scheduleSave();
     logger.info({ operation: "update", memoryId: id, changedFields: Object.keys(updates).sort() }, "Updated memory");
 
-    return this.memories[id];
+    return {
+      memory: this.memories[id],
+      ping_pong_detected: pingPongResult.detected,
+      ping_pong_count: pingPongResult.count,
+      cooldown_started_ms: pingPongResult.cooldownActivated ? pingPongResult.cooldownRemainingMs : undefined,
+    };
   }
 
   deleteMemory(id: string): void {
@@ -2812,7 +2907,8 @@ server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
 
   if (url.protocol === 'memory:' && url.pathname.startsWith('/memory/')) {
     const memoryId = url.pathname.replace('/memory/', '');
-    const memory = memorySystem.retrieveMemory(memoryId);
+    const retrieval = memorySystem.retrieveMemory(memoryId);
+    const memory = retrieval?.memory;
 
     if (!memory) {
       throw createNMError(
@@ -3346,6 +3442,10 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         );
         const memory = storeResult.memory;
         const warningLine = wipWarning ? `\n${wipWarning}` : "";
+        const repeatWarningLine = storeResult.no_net_new_info_warning ? `\n${storeResult.no_net_new_info_warning}` : "";
+        const cooldownLine = storeResult.cooldown_started_ms
+          ? `\n${memorySystem.buildCrossDistrictCooldownWarning(storeResult.matched_memory_id ?? memory.id, storeResult.cooldown_started_ms)}`
+          : "";
         const repeatLines = [
           `repeat_detected: ${storeResult.repeat_detected ? "true" : "false"}`,
           storeResult.matched_memory_id ? `matched_memory_id: ${storeResult.matched_memory_id}` : undefined,
@@ -3355,7 +3455,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         return {
           content: [{
             type: "text",
-            text: `🧠 Stored memory "${memory.name}" in ${memorySystem.getAllDistricts().find(d => d.name.toLowerCase().replace(/\s+/g, '_') === district)?.name || district}\nID: ${memory.id}\nArchetype: ${memory.archetype}\nAgent: ${memory.agent_id ?? "unassigned"}\nProject: ${memory.project_id ?? "unset"}\nEpistemic status: ${memory.epistemic_status ?? "unset"}\n${repeatLines}${warningLine}`
+            text: `🧠 Stored memory "${memory.name}" in ${memorySystem.getAllDistricts().find(d => d.name.toLowerCase().replace(/\s+/g, '_') === district)?.name || district}\nID: ${memory.id}\nArchetype: ${memory.archetype}\nAgent: ${memory.agent_id ?? "unassigned"}\nProject: ${memory.project_id ?? "unset"}\nEpistemic status: ${memory.epistemic_status ?? "unset"}\n${repeatLines}${warningLine}${repeatWarningLine}${cooldownLine}`
           }]
         };
       } catch (error) {
@@ -3374,7 +3474,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
     case "retrieve_memory": {
       const { memory_id, district, agent_id } = request.params.arguments as any;
-      const memory = memorySystem.retrieveMemory(memory_id, { district, agent_id });
+      const retrieval = memorySystem.retrieveMemory(memory_id, { district, agent_id });
+      const memory = retrieval?.memory;
 
       if (!memory) {
         return toolErrorResult(
@@ -3396,7 +3497,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       return {
         content: [{
           type: "text",
-          text: `🧠 Retrieved memory "${memory.name}"\nDistrict: ${memory.district}\nAgent: ${memory.agent_id ?? 'unassigned'}\nProject: ${memory.project_id ?? 'unset'}\nEpistemic status: ${memory.epistemic_status ?? 'unset'}\nContent: ${memory.content}\nTags: ${memory.tags.join(', ')}\nEmotional valence: ${memory.emotional_valence ?? 'unset'}\nIntensity: ${memory.intensity ?? 'unset'}\nAccess count: ${memory.access_count}`
+          text: `🧠 Retrieved memory "${memory.name}"\nDistrict: ${memory.district}\nAgent: ${memory.agent_id ?? 'unassigned'}\nProject: ${memory.project_id ?? 'unset'}\nEpistemic status: ${memory.epistemic_status ?? 'unset'}\nContent: ${memory.content}\nTags: ${memory.tags.join(', ')}\nEmotional valence: ${memory.emotional_valence ?? 'unset'}\nIntensity: ${memory.intensity ?? 'unset'}\nAccess count: ${memory.access_count}${retrieval?.distill_suggestion ? `\n${retrieval.distill_suggestion}` : ''}`
         }]
       };
     }
@@ -3413,14 +3514,18 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         if (epistemic_status !== undefined) updates.epistemic_status = epistemic_status;
         if (project_id !== undefined) updates.project_id = project_id;
 
-        const memory = await runMutatingTool(
+        const updateResult = await runMutatingTool(
           "update_memory",
           () => memorySystem.updateMemory(memory_id, updates, { district: actor_district, agent_id }),
         );
+        const memory = updateResult.memory;
+        const cooldownLine = updateResult.cooldown_started_ms
+          ? `\n${memorySystem.buildCrossDistrictCooldownWarning(memory_id, updateResult.cooldown_started_ms)}`
+          : "";
         return {
           content: [{
             type: "text",
-            text: `✏️ Updated memory "${memory.name}" (${memory_id})\nDistrict: ${memory.district}\nProject: ${memory.project_id ?? 'unset'}\nEpistemic status: ${memory.epistemic_status ?? 'unset'}\nTags: ${memory.tags.join(', ')}`
+            text: `✏️ Updated memory "${memory.name}" (${memory_id})\nDistrict: ${memory.district}\nProject: ${memory.project_id ?? 'unset'}\nEpistemic status: ${memory.epistemic_status ?? 'unset'}\nTags: ${memory.tags.join(', ')}${cooldownLine}`
           }]
         };
       } catch (error) {
