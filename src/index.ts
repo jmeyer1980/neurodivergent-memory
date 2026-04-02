@@ -1613,6 +1613,10 @@ class NeurodivergentMemory {
     };
   }
 
+  /**
+   * Import multiple memories in a single WAL-backed operation.
+   * Materializes entries first so the import record is appended before in-memory mutation.
+   */
   importMemories(entries: Array<{ content: string; district: string; tags?: string[]; emotional_valence?: number; intensity?: number; agent_id?: string; project_id?: string; epistemic_status?: EpistemicStatus }>, default_agent_id?: string): string[] {
     const materialized = this.materializeImportMemories(entries, default_agent_id);
     // Append WAL entry for the import before mutating in-memory state to preserve the

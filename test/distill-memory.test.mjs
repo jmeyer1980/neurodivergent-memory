@@ -38,7 +38,11 @@ function callTool(name, args) {
 async function setup() {
   const persistDir = mkdtempSync(join(realpathSync(tmpdir()), 'ndm-distill-'));
   child = spawn('node', [MCP_SERVER], {
-    env: { ...process.env, HOME: persistDir },
+    env: {
+      ...process.env,
+      HOME: persistDir,
+      NEURODIVERGENT_MEMORY_DIR: persistDir,
+    },
     stdio: ['pipe', 'pipe', 'inherit'],
   });
 
