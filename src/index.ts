@@ -1763,6 +1763,13 @@ class NeurodivergentMemory {
 // Global memory system instance
 const memorySystem = new NeurodivergentMemory();
 
+const SYNTHESIS_PROMPT_INCLUDE_ALL_THRESHOLD = 60;
+const SYNTHESIS_PROMPT_MAX_MEMORIES = 75;
+const SYNTHESIS_PROMPT_RECENT_FRACTION = 0.6;
+const SYNTHESIS_PACKET_MAX_SLICES = 8;
+const SYNTHESIS_PACKET_TARGET_SLICE_SIZE = 12;
+const SYNTHESIS_PACKET_SUMMARY_LENGTH = 240;
+
 const DEFAULT_WRITE_QUEUE_DEPTH = 50;
 const DEFAULT_WIP_LIMIT = 1;
 const writeMutex = new AsyncMutex();
@@ -1779,6 +1786,174 @@ const configuredWipLimit = parseIntegerEnv(
 
 let pendingWriteQueueDepth = 0;
 let queueBackpressureActive = false;
+
+function selectSynthesisPromptMemories(allMemories: MemoryNPC[]): {
+  memories: MemoryNPC[];
+  totalAvailable: number;
+  selectionMode: "all" | "mixed";
+} {
+  const sortedByCreated = [...allMemories].sort((a, b) => b.created.getTime() - a.created.getTime());
+  const totalAvailable = sortedByCreated.length;
+
+  if (totalAvailable <= SYNTHESIS_PROMPT_INCLUDE_ALL_THRESHOLD) {
+    return {
+      memories: sortedByCreated,
+      totalAvailable,
+      selectionMode: "all",
+    };
+  }
+
+  const selected = new Map<string, MemoryNPC>();
+  const recentQuota = Math.max(1, Math.ceil(SYNTHESIS_PROMPT_MAX_MEMORIES * SYNTHESIS_PROMPT_RECENT_FRACTION));
+
+  for (const memory of sortedByCreated.slice(0, recentQuota)) {
+    selected.set(memory.id, memory);
+  }
+
+  const remainingBySignal = [...sortedByCreated]
+    .filter(memory => !selected.has(memory.id))
+    .sort((a, b) => {
+      const accessDelta = b.access_count - a.access_count;
+      if (accessDelta !== 0) return accessDelta;
+
+      const connectionDelta = b.connections.length - a.connections.length;
+      if (connectionDelta !== 0) return connectionDelta;
+
+      return b.created.getTime() - a.created.getTime();
+    });
+
+  for (const memory of remainingBySignal) {
+    if (selected.size >= SYNTHESIS_PROMPT_MAX_MEMORIES) break;
+    selected.set(memory.id, memory);
+  }
+
+  return {
+    memories: [...selected.values()].sort((a, b) => b.created.getTime() - a.created.getTime()),
+    totalAvailable,
+    selectionMode: "mixed",
+  };
+}
+
+function summarizeMemoryForPacket(memory: MemoryNPC): string {
+  const normalized = memory.content.replace(/\s+/g, " ").trim();
+  if (normalized.length <= SYNTHESIS_PACKET_SUMMARY_LENGTH) {
+    return normalized;
+  }
+
+  return `${normalized.slice(0, SYNTHESIS_PACKET_SUMMARY_LENGTH - 1).trimEnd()}…`;
+}
+
+function collectTopTopics(memories: MemoryNPC[], limit = 8): string[] {
+  const counts = new Map<string, number>();
+
+  for (const memory of memories) {
+    for (const tag of memory.tags) {
+      if (!tag.startsWith("topic:")) continue;
+      counts.set(tag, (counts.get(tag) ?? 0) + 1);
+    }
+  }
+
+  return [...counts.entries()]
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+    .slice(0, limit)
+    .map(([tag]) => tag);
+}
+
+function buildSynthesisPacketResources(allMemories: MemoryNPC[]): Array<{ type: "resource"; resource: { uri: string; mimeType: string; text: string } }> {
+  const sortedByCreated = [...allMemories].sort((a, b) => b.created.getTime() - a.created.getTime());
+  if (sortedByCreated.length === 0) {
+    return [];
+  }
+
+  const sliceCount = Math.min(
+    SYNTHESIS_PACKET_MAX_SLICES,
+    Math.max(1, Math.ceil(sortedByCreated.length / SYNTHESIS_PACKET_TARGET_SLICE_SIZE)),
+  );
+  const sliceSize = Math.ceil(sortedByCreated.length / sliceCount);
+  const slices = Array.from({ length: sliceCount }, (_, index) =>
+    sortedByCreated.slice(index * sliceSize, (index + 1) * sliceSize),
+  ).filter(slice => slice.length > 0);
+
+  const manifest = {
+    packet_type: "coverage_manifest",
+    total_memories: sortedByCreated.length,
+    slice_count: slices.length,
+    resource_count: slices.length + 1,
+    coverage_mode: "full_graph_packetized",
+    id_range: {
+      newest: sortedByCreated[0]?.id,
+      oldest: sortedByCreated[sortedByCreated.length - 1]?.id,
+    },
+    created_range: {
+      newest: sortedByCreated[0]?.created.toISOString(),
+      oldest: sortedByCreated[sortedByCreated.length - 1]?.created.toISOString(),
+    },
+    districts: Object.entries(
+      sortedByCreated.reduce<Record<string, number>>((acc, memory) => {
+        acc[memory.district] = (acc[memory.district] ?? 0) + 1;
+        return acc;
+      }, {}),
+    )
+      .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+      .map(([district, count]) => ({ district, count })),
+    top_topics: collectTopTopics(sortedByCreated),
+    slice_ids: slices.map((_, index) => `slice_${index + 1}`),
+  };
+
+  const manifestResource = {
+    type: "resource" as const,
+    resource: {
+      uri: "memory://packet/manifest",
+      mimeType: "application/json",
+      text: JSON.stringify(manifest, null, 2),
+    },
+  };
+
+  const sliceResources = slices.map((slice, index) => ({
+    type: "resource" as const,
+    resource: {
+      uri: `memory://packet/slice_${index + 1}`,
+      mimeType: "application/json",
+      text: JSON.stringify({
+        packet_type: "memory_slice",
+        slice_id: `slice_${index + 1}`,
+        title: `Memory slice ${index + 1}`,
+        memory_count: slice.length,
+        id_range: {
+          newest: slice[0]?.id,
+          oldest: slice[slice.length - 1]?.id,
+        },
+        created_range: {
+          newest: slice[0]?.created.toISOString(),
+          oldest: slice[slice.length - 1]?.created.toISOString(),
+        },
+        districts: Object.entries(
+          slice.reduce<Record<string, number>>((acc, memory) => {
+            acc[memory.district] = (acc[memory.district] ?? 0) + 1;
+            return acc;
+          }, {}),
+        )
+          .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+          .map(([district, count]) => ({ district, count })),
+        top_topics: collectTopTopics(slice, 6),
+        memories: slice.map(memory => ({
+          id: memory.id,
+          name: memory.name,
+          district: memory.district,
+          archetype: memory.archetype,
+          tags: memory.tags,
+          project_id: memory.project_id ?? null,
+          access_count: memory.access_count,
+          connection_count: memory.connections.length,
+          created: memory.created.toISOString(),
+          summary: summarizeMemoryForPacket(memory),
+        })),
+      }, null, 2),
+    },
+  }));
+
+  return [manifestResource, ...sliceResources];
+}
 
 function parseIntegerEnv(
   rawValue: string | undefined,
@@ -2999,6 +3174,10 @@ server.setRequestHandler(ListPromptsRequestSchema, async () => {
       {
         name: "synthesize_memories",
         description: "Create new insights by connecting existing memories",
+      },
+      {
+        name: "synthesize_memory_packets",
+        description: "Create new insights from packetized memory slices for attachment-constrained clients",
       }
     ]
   };
@@ -3045,8 +3224,8 @@ server.setRequestHandler(GetPromptRequestSchema, async (request) => {
     }
 
     case "synthesize_memories": {
-      const memories = memorySystem.getAllMemories().slice(0, 10); // Limit to recent memories
-      const memoryResources = memories.map(memory => ({
+      const synthesisSelection = selectSynthesisPromptMemories(memorySystem.getAllMemories());
+      const memoryResources = synthesisSelection.memories.map(memory => ({
         type: "resource" as const,
         resource: {
           uri: `memory://memory/${memory.id}`,
@@ -3067,7 +3246,9 @@ server.setRequestHandler(GetPromptRequestSchema, async (request) => {
             role: "user",
             content: {
               type: "text",
-              text: "Let's synthesize new insights from your stored memories. Here are some recent thoughts:"
+              text: synthesisSelection.selectionMode === "all"
+                ? `Let's synthesize new insights from your stored memories. Here are all ${synthesisSelection.totalAvailable} currently stored memories, ordered by recency:`
+                : `Let's synthesize new insights from your stored memories. Here is a broad cross-section of ${memoryResources.length} memories selected from ${synthesisSelection.totalAvailable} total memories, combining recent entries with older high-signal memories:`
             }
           },
           ...memoryResources.map(memory => ({
@@ -3079,6 +3260,49 @@ server.setRequestHandler(GetPromptRequestSchema, async (request) => {
             content: {
               type: "text",
               text: "Looking at these memories, what new connections or insights emerge? How do they relate to each other?"
+            }
+          }
+        ]
+      };
+    }
+
+    case "synthesize_memory_packets": {
+      const packetResources = buildSynthesisPacketResources(memorySystem.getAllMemories());
+
+      if (packetResources.length === 0) {
+        return {
+          messages: [
+            {
+              role: "user",
+              content: {
+                type: "text",
+                text: "No memories are currently stored, so there are no synthesis packets to review yet."
+              }
+            }
+          ]
+        };
+      }
+
+      const manifestText = JSON.parse(packetResources[0].resource.text) as { total_memories: number; slice_count: number };
+
+      return {
+        messages: [
+          {
+            role: "user",
+            content: {
+              type: "text",
+              text: `Let's synthesize new insights from your stored memories using packetized coverage. The attached resources include 1 coverage manifest plus ${manifestText.slice_count} structured memory slices spanning all ${manifestText.total_memories} stored memories.`
+            }
+          },
+          ...packetResources.map(resource => ({
+            role: "user" as const,
+            content: resource,
+          })),
+          {
+            role: "user",
+            content: {
+              type: "text",
+              text: "Use the coverage manifest to understand graph scope, then synthesize patterns across the slice packets. Prefer broad graph-level insights, but cite concrete memory ids when a specific claim depends on a particular packet entry."
             }
           }
         ]

@@ -6,6 +6,7 @@
 
 - Goal-aware retrieval tuning for `search_memories` and `related_to` via optional `context` scoring, plus `recency_weight` support on `search_memories`
 - Preferred `min_intensity` / `max_intensity` filter names for `search_memories` while preserving backward-compatible `intensity_min` / `intensity_max` aliases
+- `synthesize_memory_packets` prompt for attachment-constrained clients, emitting one coverage manifest plus bounded structured memory slices that summarize the full graph while preserving memory-id traceability
 
 ## [0.2.0] - 2026-04-01
 
