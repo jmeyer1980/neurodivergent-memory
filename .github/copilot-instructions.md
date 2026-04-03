@@ -26,10 +26,16 @@ Multiple tags from different namespaces are expected on every memory.
 | `scope:X` | Breadth of the memory | `scope:concept`, `scope:project`, `scope:session`, `scope:global` |
 | `kind:X` | Type of knowledge | `kind:insight`, `kind:decision`, `kind:pattern`, `kind:reference`, `kind:task` |
 | `layer:X` | Abstraction level | `layer:architecture`, `layer:implementation`, `layer:debugging`, `layer:research` |
+| `persistence:X` | Sync tier eligibility | `persistence:durable` (promote to user/org), `persistence:ephemeral` (project-only) |
 
 **Example tag set for a Unity ECS memory:**
 ```
 ["topic:unity-ecs", "topic:dots", "scope:project", "kind:pattern", "layer:architecture"]
+```
+
+**Example tag set for a cross-project durable memory:**
+```
+["topic:typescript", "scope:global", "kind:pattern", "layer:architecture", "persistence:durable"]
 ```
 
 ---
