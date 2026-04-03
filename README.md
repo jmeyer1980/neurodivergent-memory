@@ -219,6 +219,62 @@ No `NEURODIVERGENT_MEMORY_DIR` override is needed for option B — the server fi
 
 For agents: if memories appear missing after upgrading the container, use `import_memories` to reload from a backup export, or ask your AI assistant to re-run `memory_stats` after the volume is remounted correctly to confirm restoration.
 
+### Multi-Tier Memory Persistence
+
+The server supports a three-tier memory architecture for agents that work across multiple projects. Each tier
+lives in its own directory and can be synced independently.
+
+| Tier | Purpose | Typical path | Env var |
+|---|---|---|---|
+| **project** | Repo-scoped memories — ephemeral, CI-friendly | `.github/agent-kit/memories` | `NEURODIVERGENT_MEMORY_PROJECT_DIR` |
+| **user** | Cross-project personal knowledge — durable, per-developer | `~/.neurodivergent-memory` | `NEURODIVERGENT_MEMORY_USER_DIR` |
+| **org** | Shared organisational knowledge — optional, team-wide | any shared mount | `NEURODIVERGENT_MEMORY_ORG_DIR` |
+
+The primary server still reads its active snapshot from `NEURODIVERGENT_MEMORY_DIR` (or the auto-discovered
+default). Tier variables are used exclusively by the `sync-memories` helper.
+
+#### Tagging memories for sync
+
+Add a `persistence:durable` tag to any memory that should be promoted to the user or org tier. Memories
+without this tag are treated as ephemeral and stay in the project tier.
+
+```json
+["topic:typescript", "scope:global", "kind:pattern", "layer:architecture", "persistence:durable"]
+```
+
+Use `persistence:ephemeral` as an explicit opt-out for memories you never want promoted.
+
+#### Syncing memories between tiers
+
+After a build, milestone, or session — promote durable memories from the project tier to the user tier:
+
+```bash
+NEURODIVERGENT_MEMORY_PROJECT_DIR=.github/agent-kit/memories \
+NEURODIVERGENT_MEMORY_USER_DIR=~/.neurodivergent-memory \
+  npm run sync-memories -- --from project --to user
+```
+
+Or use explicit paths:
+
+```bash
+node build/scripts/sync-memories.js \
+  --from .github/agent-kit/memories \
+  --to ~/.neurodivergent-memory
+```
+
+Full option reference:
+
+```text
+--from <path|tier>      Source snapshot directory, or tier name: project | user | org
+--to   <path|tier>      Target snapshot directory, or tier name: project | user | org
+--tags <tag1,tag2,...>  Promote only memories matching ALL listed tags (default: persistence:durable)
+--any-tag               Match memories that have ANY of the listed tags (OR logic)
+--dry-run               Report counts without writing any data
+```
+
+**Safety note:** stop the MCP server for the target tier before running sync — the script writes directly to
+the snapshot file and will warn if it detects an open WAL for the target directory.
+
 ## Release Security
 
 - GitHub Actions runs on **Node.js 24 LTS** for CI and release automation
