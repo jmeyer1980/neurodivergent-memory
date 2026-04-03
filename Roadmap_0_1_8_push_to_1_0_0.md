@@ -6,7 +6,7 @@ This page tracks the milestones from the current research preview toward the 1.0
 
 ---
 
-## Current Position: v0.2.0 (Research Preview)
+## Current Position: v0.2.0 Published, v0.3.0 in Release Readiness
 
 The project is in active pre-1.0 development. All 0.x releases should be interpreted as:
 
@@ -14,6 +14,12 @@ The project is in active pre-1.0 development. All 0.x releases should be interpr
 - **Not ready for** production-scale, multi-tenant, or high-criticality deployments.
 
 This position is intentional and consistent with semantic versioning conventions for 0.x software.
+
+Release-readiness snapshot for the `development` branch as of 2026-04-03:
+
+- Latest published package version remains `0.2.0`.
+- Core planned v0.3.0 feature issues #54 through #59 are implemented and merged.
+- Remaining release-readiness work is primarily tracker/documentation reconciliation plus follow-up Issue #74 for the residual epistemic-status gap.
 
 ---
 
@@ -39,6 +45,7 @@ For full details see [[Release Notes]].
 ### v0.2.0 — Trust & Telemetry
 
 > *Theme: Make the foundation trustworthy before building on it. Observe before acting.*
+
 - **Progress Snapshot (2026-03-31)**
 
 - ✅ Persistence hardening delivered (WAL replay/compaction, startup telemetry, configurable storage path and eviction policy)
@@ -93,6 +100,22 @@ For full details see [[Release Notes]].
 
 > *Theme: Make the server aware of who is asking, why they are asking, and how to translate signal without losing it.*
 
+#### Status Snapshot (2026-04-03)
+
+| Feature | Issue | Status |
+|---|---|---|
+| Distillation Layer | #54 | ✅ Merged (PR #61) |
+| Loop Behavior Guardrails | #55 | ✅ Merged (PR #66) |
+| Agent Identity | #56 | ✅ Merged (PR #70) |
+| Goal-Aware & Contextual Retrieval | #57 | ✅ Merged (PR #72; verification-only PR because implementation was already present) |
+| LUCA-Addressed Custom Districts | #58 | ✅ Merged (PR #69) |
+| Import & Storage Diagnostics UX | #59 | ✅ Merged (PR #65) |
+
+Additional post-roadmap progress:
+
+- PR #73 merged multi-tier memory sync (`project` / `user` / `org`) plus `persistence:durable` / `persistence:ephemeral` guidance.
+- Follow-up Issue #74 now tracks the remaining epistemic-status defaulting and retrieval-consistency gap that was previously called out as an untracked item.
+
 - **Distillation Layer (Emotional → Logical Translation)**
 
 - Add a first-class `distill_memory` tool that translates a `emotional_processing` memory into a structured logical artifact
@@ -108,21 +131,21 @@ For full details see [[Release Notes]].
 - Auto-suggest distillation step when `emotional_processing` content is being repeatedly accessed by `logical_analysis` agents
 - Optional cooldown on repetitive cross-district writes
 
-- **Agent Identity**
+- **Agent Identity** ✅
 
 - Add optional `agent_id` field to `store_memory`, `connect_memories`, and `import_memories`
 - Each memory records which agent created it
 - `memory_stats` extended to report per-agent contribution breakdown
 - Enables future per-agent scoping, quota enforcement, and attribution
 
-- **Goal-Aware & Contextual Retrieval**
+- **Goal-Aware & Contextual Retrieval** ✅
 
 - Add optional `context` parameter to `search_memories` and `related_to` — a short string describing the agent's current goal
 - Context string is BM25-scored against memory content and blended into ranking — higher relevance to declared goal boosts score
 - Add `recency_weight` parameter to `search_memories` — bias retrieval toward recent vs. well-established memories
 - Add `min_intensity` / `max_intensity` filter to `search_memories` (emotional intensity filtering)
 
-- **LUCA-Addressed Custom Districts**
+- **LUCA-Addressed Custom Districts** ✅
 
 - Allow district names beyond the five canonical districts
 - Custom districts must declare a **LUCA-derived address** — a valid ancestry path back to one of the five canonical districts
@@ -130,13 +153,15 @@ For full details see [[Release Notes]].
 - `memory_stats` extended with per-district breakdown including custom districts
 - Document the migration path for users adding project-specific districts
 
-- **Import & Storage Diagnostics UX**
+- **Import & Storage Diagnostics UX** ✅
 
 - Add explicit storage diagnostics surface so operators can see resolved snapshot path, WAL path, and effective environment source in one response
 - Extend `import_memories` with file-based mode (`file_path`) so clients can import server snapshots without expanding large payloads over MCP
 - Add `dry_run` import preflight that validates records and returns deterministic counts for `would_import`, `would_skip`, and `would_fail`
 - Add dedupe policies for import (`none | content_hash | content_plus_tags`) and return dedupe reason codes for skipped rows
 - Define migration semantics for snapshot import (`preserve_ids` and `merge_connections` policy flags) with explicit safety constraints and rejection behavior
+
+Delivered in Issue #59 / PR #65.
 
 ---
 
