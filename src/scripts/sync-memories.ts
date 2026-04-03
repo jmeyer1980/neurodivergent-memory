@@ -298,8 +298,26 @@ function run(): void {
     merged.memories![newId] = { ...memory, id: newId };
   }
 
-  fs.writeFileSync(targetPath, JSON.stringify(merged, null, 2), "utf-8");
+  const serialized = JSON.stringify(merged, null, 2);
+  const tempPath = path.join(
+    targetDir,
+    `.${path.basename(targetPath)}.${process.pid}.${crypto.randomBytes(6).toString("hex")}.tmp`,
+  );
 
+  try {
+    fs.writeFileSync(tempPath, serialized, "utf-8");
+    fs.renameSync(tempPath, targetPath);
+  } catch {
+    try {
+      if (fs.existsSync(tempPath)) {
+        fs.unlinkSync(tempPath);
+      }
+    } catch {
+      // Ignore cleanup failures and report the original write problem.
+    }
+
+    die(`Target directory is not writable: ${targetDir}`, 3);
+  }
   process.stdout.write(
     `sync-memories:\n` +
     `  source:   ${sourcePath}\n` +
