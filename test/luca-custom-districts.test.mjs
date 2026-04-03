@@ -6,6 +6,7 @@ import path from "node:path";
 import { spawn } from "node:child_process";
 
 function startServer(options = {}) {
+  const ownsDir = !options.tempDir;
   const tempDir = options.tempDir ?? fs.mkdtempSync(path.join(os.tmpdir(), "ndm-luca-test-"));
 
   fs.mkdirSync(tempDir, { recursive: true });
@@ -84,7 +85,9 @@ function startServer(options = {}) {
 
   function stop() {
     child.kill();
-    fs.rmSync(tempDir, { recursive: true, force: true });
+    if (ownsDir) {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
   }
 
   return { callTool, stop, tempDir };
@@ -298,35 +301,33 @@ test("custom districts persist across snapshot load", async () => {
 
   // Verify snapshot file exists and contains custom district
   const snapshotPath = path.join(tempDir, "memories.json");
-  if (fs.existsSync(snapshotPath)) {
-    const snapshotRaw = fs.readFileSync(snapshotPath, "utf-8");
-    const snapshot = JSON.parse(snapshotRaw);
-    assert.ok(snapshot.customDistricts, "Snapshot should contain customDistricts");
-    assert.ok(snapshot.customDistricts.research_notes, "Snapshot should contain research_notes district");
-    assert.equal(snapshot.customDistricts.research_notes.luca_parent, "logical_analysis", "Custom district should have luca_parent");
+  assert.ok(fs.existsSync(snapshotPath), `Snapshot file should exist at ${snapshotPath}`);
+  const snapshotRaw = fs.readFileSync(snapshotPath, "utf-8");
+  const snapshot = JSON.parse(snapshotRaw);
+  assert.ok(snapshot.customDistricts, "Snapshot should contain customDistricts");
+  assert.ok(snapshot.customDistricts.research_notes, "Snapshot should contain research_notes district");
+  assert.equal(snapshot.customDistricts.research_notes.luca_parent, "logical_analysis", "Custom district should have luca_parent");
 
-    // Second session: verify custom district and memory survived restart
-    const server2 = startServer({ tempDir });
+  // Second session: verify custom district and memory survived restart
+  const server2 = startServer({ tempDir });
 
-    try {
-      // List memories to verify the custom district memory loaded
-      const listResponse = await server2.callTool(4, "list_memories", {
-        district: "research_notes",
-      });
+  try {
+    // List memories to verify the custom district memory loaded
+    const listResponse = await server2.callTool(4, "list_memories", {
+      district: "research_notes",
+    });
 
-      const text = resultText(listResponse);
-      assert.ok(text.includes("research_notes"), "Should list memories in custom district");
-      assert.ok(text.includes("Research methodology"), "Should show the stored memory");
+    const text = resultText(listResponse);
+    assert.ok(text.includes("research_notes"), "Should list memories in custom district");
+    assert.ok(text.includes("Research methodology"), "Should show the stored memory");
 
-      // Verify memory stats includes custom district
-      const statsResponse = await server2.callTool(5, "memory_stats", {});
-      const statsText = resultText(statsResponse);
-      assert.ok(statsText.includes("research_notes"), "Stats should include custom district");
-    } finally {
-      server2.stop();
-    }
+    // Verify memory stats includes custom district
+    const statsResponse = await server2.callTool(5, "memory_stats", {});
+    const statsText = resultText(statsResponse);
+    assert.ok(statsText.includes("research_notes"), "Stats should include custom district");
+  } finally {
+    server2.stop();
   }
-  // If snapshot doesn't exist, the test already verified in-session behavior above
 
   fs.rmSync(tempDir, { recursive: true, force: true });
 });

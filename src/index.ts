@@ -242,7 +242,7 @@ interface MemorySnapshot {
   customDistricts?: { [key: string]: Omit<MemoryDistrict, "memories"> };
 }
 
-type WalOperation = "store" | "update" | "delete" | "connect" | "import";
+type WalOperation = "store" | "update" | "delete" | "connect" | "import" | "register_district";
 
 const PROJECT_ID_MAX_LENGTH = 64;
 const PROJECT_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$/;
@@ -596,6 +596,32 @@ class NeurodivergentMemory {
           }
         }
         return mutated;
+      }
+      case "register_district": {
+        const key = String(entry.payload.key ?? "");
+        // Skip if already registered (idempotent replay)
+        if (this.districts[key]) return false;
+        if ((CANONICAL_DISTRICTS as readonly string[]).includes(key)) return false;
+        const lucaParent = String(entry.payload.luca_parent ?? "");
+        if (!this.districts[lucaParent]) return false;
+        try {
+          const ancestor = this.resolveLucaAncestor(lucaParent);
+          const inheritedArchetype = this.districts[ancestor].archetype;
+          const activities = Array.isArray(entry.payload.activities)
+            ? (entry.payload.activities as string[])
+            : this.districts[lucaParent].activities.slice();
+          this.districts[key] = {
+            name: String(entry.payload.name ?? key),
+            description: String(entry.payload.description ?? ""),
+            archetype: inheritedArchetype,
+            activities,
+            memories: [],
+            luca_parent: lucaParent,
+          };
+          return true;
+        } catch {
+          return false;
+        }
       }
       default:
         return false;
@@ -1427,28 +1453,42 @@ class NeurodivergentMemory {
    * Returns the canonical district key if the chain is valid, or throws if it is broken.
    */
   private resolveLucaAncestor(districtKey: string): string {
-    const district = this.districts[districtKey];
-    if (!district) {
-      throw createNMError(
-        NM_ERRORS.UNKNOWN_DISTRICT,
-        `Unknown district in LUCA chain: ${districtKey}`,
-        "Ensure every district in the ancestry chain is registered before the child district.",
-      );
-    }
+    const visited = new Set<string>();
+    let currentDistrictKey = districtKey;
 
-    if ((CANONICAL_DISTRICTS as readonly string[]).includes(districtKey)) {
-      return districtKey;
-    }
+    while (true) {
+      if (visited.has(currentDistrictKey)) {
+        throw createNMError(
+          NM_ERRORS.INPUT_VALIDATION_FAILED,
+          `Cycle detected in LUCA chain while resolving district "${districtKey}": "${currentDistrictKey}" was visited more than once.`,
+          "Ensure every custom district's luca_parent chain is acyclic and ultimately traces back to one of the 5 canonical districts.",
+        );
+      }
+      visited.add(currentDistrictKey);
 
-    if (!district.luca_parent) {
-      throw createNMError(
-        NM_ERRORS.INPUT_VALIDATION_FAILED,
-        `Custom district "${districtKey}" has no luca_parent and is not a canonical district.`,
-        "Every custom district must declare a luca_parent that traces back to one of the 5 canonical districts.",
-      );
-    }
+      const district = this.districts[currentDistrictKey];
+      if (!district) {
+        throw createNMError(
+          NM_ERRORS.UNKNOWN_DISTRICT,
+          `Unknown district in LUCA chain: ${currentDistrictKey}`,
+          "Ensure every district in the ancestry chain is registered before the child district.",
+        );
+      }
 
-    return this.resolveLucaAncestor(district.luca_parent);
+      if ((CANONICAL_DISTRICTS as readonly string[]).includes(currentDistrictKey)) {
+        return currentDistrictKey;
+      }
+
+      if (!district.luca_parent) {
+        throw createNMError(
+          NM_ERRORS.INPUT_VALIDATION_FAILED,
+          `Custom district "${currentDistrictKey}" has no luca_parent and is not a canonical district.`,
+          "Every custom district must declare a luca_parent that traces back to one of the 5 canonical districts.",
+        );
+      }
+
+      currentDistrictKey = district.luca_parent;
+    }
   }
 
   /**
@@ -1511,6 +1551,13 @@ class NeurodivergentMemory {
       luca_parent: lucaParent,
     };
 
+    this.appendWalEntry("register_district", {
+      key,
+      name: district.name,
+      description: district.description,
+      luca_parent: lucaParent,
+      activities: district.activities,
+    });
     this.districts[key] = district;
     this.scheduleSave();
 
@@ -1520,6 +1567,24 @@ class NeurodivergentMemory {
     );
 
     return district;
+  }
+
+  /**
+   * Return the ancestry chain for a district key as an ordered array,
+   * starting from the given key and walking up via luca_parent until
+   * reaching a canonical district (which has no luca_parent).
+   *
+   * The caller is responsible for ensuring startKey is a registered district;
+   * if it is not, the returned array will contain only the unknown key.
+   */
+  getDistrictAncestryChain(startKey: string): string[] {
+    const chain: string[] = [];
+    let current: string | undefined = startKey;
+    while (current) {
+      chain.push(current);
+      current = this.districts[current]?.luca_parent;
+    }
+    return chain;
   }
 
   // ── Core CRUD ──────────────────────────────────────────────────────────────
@@ -4255,13 +4320,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           luca_parent,
           activities ?? [],
         );
-        const ancestorChain: string[] = [];
-        let current: string | undefined = luca_parent;
-        while (current) {
-          ancestorChain.push(current);
-          const parentDistrict = (memorySystem as any).districts?.[current];
-          current = parentDistrict?.luca_parent;
-        }
+        const ancestorChain = memorySystem.getDistrictAncestryChain(luca_parent);
 
         return {
           content: [{
