@@ -28,7 +28,7 @@ If neurodivergent-memory MCP is not installed or not connected:
    - `prompt-first`
    - `auto-setup`
 2. If unspecified, default to `prompt-first`.
-3. If approved to install, run `npm install -g @neurodivergent-memory/server`.
+3. If approved to install, run `npm install -g neurodivergent-memory`.
 4. Confirm with a simple memory operation before continuing.
 
 ## End-of-session requirement

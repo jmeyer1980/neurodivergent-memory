@@ -67,7 +67,7 @@ When storing execution-heavy memories, include the reasoning behind the action a
 | `related_to` | Hop-proximity + BM25 blend for a given memory ID |
 | `list_memories` | Paginated enumeration of all stored memories |
 | `memory_stats` | Totals, per-district counts, most-accessed, orphans |
-| `import_memories` | Bulk seed from a JSON array |
+| `import_memories` | Bulk import from a JSON array or from a snapshot file via `file_path` |
 
 ---
 
