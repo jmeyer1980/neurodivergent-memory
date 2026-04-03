@@ -88,10 +88,10 @@ Memories are organized by cognitive domain:
 - **`update_memory`** — Modify content, tags, district, emotional_valence, intensity, or project attribution
 - **`delete_memory`** — Remove a memory and all its connections
 - **`connect_memories`** — Create bidirectional edges between memory nodes
-- **`search_memories`** — BM25-ranked semantic search with optional goal context, recency bias, and filters (district, project_id, tags, emotional valence, intensity, min_score)
+- **`search_memories`** — BM25-ranked semantic search with optional goal context, recency bias, and filters (district, project_id, tags, epistemic status, emotional valence, intensity, min_score)
 - **`traverse_from`** — Graph traversal up to N hops from a starting memory
-- **`related_to`** — Find memories by graph proximity + BM25 semantic blend, with optional goal context boost
-- **`list_memories`** — Paginated listing with optional district/archetype/project_id filters
+- **`related_to`** — Find memories by graph proximity + BM25 semantic blend, with optional goal context and epistemic-status filters
+- **`list_memories`** — Paginated listing with optional district/archetype/project_id/epistemic-status filters
 - **`memory_stats`** — Aggregate statistics (totals, per-district/per-project counts, most-accessed, orphans) with optional project scope
 - **`storage_diagnostics`** — Show the resolved snapshot path, WAL path, and effective persistence source in one response
 - **`import_memories`** — Bulk-import from inline JSON entries or a snapshot `file_path`, with `dry_run`, dedupe policies, and explicit snapshot migration flags
@@ -136,6 +136,16 @@ Each memory can optionally carry:
 - **emotional_valence** (-1 to 1) — Emotional charge or affective tone
 - **intensity** (0–1) — Mental energy or importance weight
 
+### Epistemic Status
+
+Memories can optionally carry `epistemic_status` to distinguish tentative planning from validated knowledge.
+
+- `draft` — provisional or planning-oriented
+- `validated` — confirmed and safe to treat as established
+- `outdated` — superseded but retained for history
+
+When `store_memory` or `import_memories` creates a new `practical_execution` memory without an explicit `epistemic_status`, the server defaults it to `draft` if the memory has a task tag. The canonical task tag is `kind:task`, and the server also accepts the compatibility synonyms `type:task` and bare `task`. This keeps planning notes from silently presenting as settled fact.
+
 ### Project Attribution and Scoped Retrieval
 
 Memories can optionally include a first-class `project_id` for attribution and scoped retrieval across multi-project graphs.
@@ -143,6 +153,7 @@ Memories can optionally include a first-class `project_id` for attribution and s
 - `project_id` is optional on writes (`store_memory`, `update_memory`, `import_memories`).
 - `update_memory` accepts `project_id: null` to clear existing project attribution.
 - `search_memories`, `list_memories`, and `memory_stats` accept an optional `project_id` filter.
+- `search_memories`, `list_memories`, and `related_to` accept optional `epistemic_statuses` filters so callers can avoid stale planning memories when appropriate.
 - `search_memories` accepts optional `context` and `recency_weight` parameters. Context is blended into ranking as a lightweight BM25 boost; `recency_weight` must be between `0` and `1` and adds a recency boost without replacing semantic relevance.
 - `search_memories` accepts `min_intensity` / `max_intensity` as the preferred intensity filter names. The legacy `intensity_min` / `intensity_max` aliases remain supported for compatibility.
 - `related_to` accepts an optional `context` parameter to bias related-memory ranking toward the caller's current goal.

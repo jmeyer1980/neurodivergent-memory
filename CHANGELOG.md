@@ -6,6 +6,7 @@
 
 - Goal-aware retrieval tuning for `search_memories` and `related_to` via optional `context` scoring, plus `recency_weight` support on `search_memories`
 - Preferred `min_intensity` / `max_intensity` filter names for `search_memories` while preserving backward-compatible `intensity_min` / `intensity_max` aliases
+- Epistemic-status consistency improvements: new `practical_execution` task memories default to `draft` when no explicit status is supplied, and `related_to` / `list_memories` now accept optional `epistemic_statuses` filters alongside `search_memories`
 - `synthesize_memory_packets` prompt for attachment-constrained clients, emitting one coverage manifest plus bounded structured memory slices that summarize the full graph while preserving memory-id traceability
 - Active loop guardrails on top of existing telemetry: `No net-new info` warnings for repeated stores, `distill_memory` suggestions after repeated logical reads of emotional memories, and optional cross-district cooldown enforcement via `NEURODIVERGENT_MEMORY_DISTILL_SUGGEST_THRESHOLD` and `NEURODIVERGENT_MEMORY_CROSS_DISTRICT_COOLDOWN_MS` (`NM_E012`)
 - Tool mirrors for prompt-derived context (`prepare_memory_city_context`, `prepare_synthesis_context`, and `prepare_packetized_synthesis_context`) so prompt content remains accessible in MCP clients that support tools but not prompts
