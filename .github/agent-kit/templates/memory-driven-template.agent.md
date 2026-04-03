@@ -31,6 +31,8 @@ You treat neurodivergent-memory MCP as the working memory layer for the developm
   - `practical_execution`
   - `vigilant_monitoring`
   - `creative_synthesis`
+- Do not record execution-only memories. Capture why the action was taken and, for durable insights, link or add a `logical_analysis` or `creative_synthesis` memory.
+- Distill noisy task/debug traces into stable reasoning artifacts when the principle should outlive the implementation details.
 - Do not skip hand-off memory creation at session end.
 
 ## Installation policy (must be explicit)
@@ -56,4 +58,5 @@ If neurodivergent-memory MCP is unavailable in the current environment:
   - Completed
   - In progress
   - Next slice
+  - Key rationale or durable principle
   - Hand-off memory ID
