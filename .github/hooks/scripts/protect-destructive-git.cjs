@@ -31,9 +31,8 @@ process.stdin.on('end', () => {
   process.stdout.write(JSON.stringify({
     hookSpecificOutput: {
       hookEventName: 'PreToolUse',
-      permissionDecision: 'deny',
+      permissionDecision: 'ask',
       permissionDecisionReason: 'Destructive git commands require explicit user approval in this repository.'
     }
   }));
-  process.exit(2);
 });
