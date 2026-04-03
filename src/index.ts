@@ -38,6 +38,26 @@ import {
 } from "./core/error-codes.js";
 import type { DistilledArtifact, EpistemicStatus, EpistemicStatusFilter, MemoryArchetype, MemoryNPC } from "./core/types.js";
 
+function resolveServerPackageInfo(): { name: string; version: string } {
+  try {
+    const packageJsonPath = new URL("../package.json", import.meta.url);
+    const raw = fs.readFileSync(packageJsonPath, "utf-8");
+    const parsed = JSON.parse(raw) as { name?: string; version?: string };
+    return {
+      name: parsed.name ?? "neurodivergent-memory",
+      version: parsed.version ?? "unknown",
+    };
+  } catch {
+    return {
+      name: "neurodivergent-memory",
+      version: "unknown",
+    };
+  }
+}
+
+const SERVER_PACKAGE_INFO = resolveServerPackageInfo();
+const SERVER_START_TIME_ISO = new Date().toISOString();
+
 /**
  * Canonical district definitions.
  * Keep canonical district identifiers in one place so validation and
@@ -3208,8 +3228,8 @@ function toolErrorResult(toolName: string, summary: string, error: unknown, fall
  */
 const server = new Server(
   {
-    name: "neurodivergent-memory",
-    version: "0.1.0",
+    name: SERVER_PACKAGE_INFO.name,
+    version: SERVER_PACKAGE_INFO.version,
   },
   {
     capabilities: {
@@ -3711,6 +3731,14 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       {
         name: "storage_diagnostics",
         description: "Show the resolved snapshot path, WAL path, and the effective environment/config source used for persistence.",
+        inputSchema: {
+          type: "object",
+          properties: {}
+        }
+      },
+      {
+        name: "server_handshake",
+        description: "Return runtime server identity and version details so clients can confirm the active build.",
         inputSchema: {
           type: "object",
           properties: {}
@@ -4276,6 +4304,23 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           ),
         );
       }
+    }
+
+    case "server_handshake": {
+      return {
+        content: [{
+          type: "text",
+          text: [
+            "🤝 Server Handshake",
+            `Name: ${SERVER_PACKAGE_INFO.name}`,
+            `Version: ${SERVER_PACKAGE_INFO.version}`,
+            `Started: ${SERVER_START_TIME_ISO}`,
+            `PID: ${process.pid}`,
+            `Node.js: ${process.version}`,
+            "Transport: stdio",
+          ].join("\n"),
+        }],
+      };
     }
 
     case "import_memories": {

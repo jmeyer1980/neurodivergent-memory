@@ -93,6 +93,7 @@ Memories are organized by cognitive domain:
 - **`related_to`** — Find memories by graph proximity + BM25 semantic blend, with optional goal context and epistemic-status filters
 - **`list_memories`** — Paginated listing with optional district/archetype/project_id/epistemic-status filters
 - **`memory_stats`** — Aggregate statistics (totals, per-district/per-project counts, most-accessed, orphans) with optional project scope
+- **`server_handshake`** — Return runtime server identity/version details for explicit client-side version confirmation
 - **`storage_diagnostics`** — Show the resolved snapshot path, WAL path, and effective persistence source in one response
 - **`import_memories`** — Bulk-import from inline JSON entries or a snapshot `file_path`, with `dry_run`, dedupe policies, and explicit snapshot migration flags
 - **`prepare_memory_city_context`** — Tool mirror of `explore_memory_city` for clients that support tools but do not invoke MCP prompts
