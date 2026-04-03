@@ -1,6 +1,6 @@
 {
   "name": "neurodivergent-memory",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "mcpName": "io.github.jmeyer1980/neurodivergent-memory",
   "description": "A Model Context Protocol server for knowledge graphs designed around neurodivergent thinking patterns",
   "license": "MIT",
