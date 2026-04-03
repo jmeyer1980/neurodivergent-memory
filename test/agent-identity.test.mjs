@@ -296,7 +296,7 @@ test("connect_memories accepts agent_id without error and confirms connection", 
   }
 });
 
-test("agent_id does not affect search ranking — searches return same ordering without agent filter", async () => {
+test("agent_id does not affect unfiltered search inclusion", async () => {
   const server = startServer();
 
   try {
