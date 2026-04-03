@@ -457,7 +457,7 @@ For Docker:
         "NEURODIVERGENT_MEMORY_DIR=/data",
         "-v",
         "neurodivergent-memory-data:/data",
-        "docker.io/twgbellok/neurodivergent-memory:latest"
+        "docker.io/twgbellok/neurodivergent-memory:0.2.0"
       ]
     }
   }
@@ -481,7 +481,13 @@ Fully auto-approved tools:
         "related_to",
         "list_memories",
         "memory_stats",
-        "import_memories"
+        "storage_diagnostics",
+        "import_memories",
+        "distill_memory",
+        "prepare_memory_city_context",
+        "prepare_synthesis_context",
+        "prepare_packetized_synthesis_context",
+        "register_district"
       ],
       "disabled": false,
       "timeout": 120,
@@ -495,7 +501,7 @@ Fully auto-approved tools:
         "NEURODIVERGENT_MEMORY_DIR=/data",
         "-v",
         "neurodivergent-memory-data:/data",
-        "docker.io/twgbellok/neurodivergent-memory:latest"
+        "docker.io/twgbellok/neurodivergent-memory:0.2.0"
       ],
       "env": {}
     }
@@ -525,6 +531,12 @@ If you want to use the mcp server in Github Copilot Agent Workflows (github spin
         "traverse_from",
         "related_to",
         "import_memories",
+        "storage_diagnostics",
+        "distill_memory",
+        "prepare_memory_city_context",
+        "prepare_synthesis_context",
+        "prepare_packetized_synthesis_context",
+        "register_district",
         "list_memories",
         "store_memory",
         "search_memories",
@@ -553,7 +565,7 @@ If you want per-project isolation instead of a shared global memory file, mount 
         "NEURODIVERGENT_MEMORY_DIR=/data",
         "-v",
         "${workspaceFolder}/.neurodivergent-memory:/data",
-        "docker.io/twgbellok/neurodivergent-memory:latest"
+        "docker.io/twgbellok/neurodivergent-memory:0.2.0"
       ]
     }
   }
@@ -564,10 +576,12 @@ If you want per-project isolation instead of a shared global memory file, mount 
 
 ### Docker Runtime
 
+Use an explicit version tag. The published Docker images intentionally do not maintain a floating `latest` tag.
+
 You can also run the packaged server image directly:
 
 ```bash
-docker run --rm -i twgbellok/neurodivergent-memory:latest
+docker run --rm -i twgbellok/neurodivergent-memory:0.2.0
 ```
 
 ### Debugging
@@ -641,7 +655,7 @@ Search uses **BM25 semantic ranking** — no embedding model or cloud LLM requir
 
 ## Canonical Tag Schema
 
-Always apply tags from the four namespaces below when calling `store_memory`.
+Always apply tags from the five namespaces below when calling `store_memory`.
 Multiple tags from different namespaces are expected on every memory.
 When storing execution-heavy memories, include the reasoning behind the action and, when possible, connect the entry to a durable principle in `logical_analysis` or `creative_synthesis` so retrieval preserves understanding and not just activity.
 
@@ -651,10 +665,18 @@ When storing execution-heavy memories, include the reasoning behind the action a
 | `scope:X` | Breadth of the memory | `scope:concept`, `scope:project`, `scope:session`, `scope:global` |
 | `kind:X` | Type of knowledge | `kind:insight`, `kind:decision`, `kind:pattern`, `kind:reference`, `kind:task` |
 | `layer:X` | Abstraction level | `layer:architecture`, `layer:implementation`, `layer:debugging`, `layer:research` |
+| `persistence:X` | Sync-tier eligibility | `persistence:durable`, `persistence:ephemeral` |
 
 **Example tag set for a Unity ECS memory:**
+
 ```json
 ["topic:unity-ecs", "topic:dots", "scope:project", "kind:pattern", "layer:architecture"]
+```
+
+**Example tag set for a durable cross-project memory:**
+
+```json
+["topic:typescript", "scope:global", "kind:pattern", "layer:architecture", "persistence:durable"]
 ```
 
 ---
@@ -684,9 +706,14 @@ When storing execution-heavy memories, include the reasoning behind the action a
 | `traverse_from` | BFS graph walk from a node up to N hops |
 | `related_to` | Hop-proximity + BM25 blend for a given memory ID, with optional goal-context boost |
 | `list_memories` | Paginated enumeration of all stored memories |
-| `memory_stats` | Totals, per-district counts, most-accessed, orphans |
+| `memory_stats` | Totals, per-district/per-project counts, most-accessed, and orphans |
 | `storage_diagnostics` | Resolved snapshot path, WAL path, and effective persistence source |
 | `import_memories` | Bulk import from inline entries or a snapshot file with dry-run and migration controls |
+| `distill_memory` | Translate an `emotional_processing` memory into a structured logical artifact |
+| `prepare_memory_city_context` | Tool mirror of `explore_memory_city` for prompt-limited clients |
+| `prepare_synthesis_context` | Tool mirror of `synthesize_memories` for prompt-limited clients |
+| `prepare_packetized_synthesis_context` | Tool mirror of `synthesize_memory_packets` for attachment-constrained clients |
+| `register_district` | Register a custom district with LUCA ancestry validation |
 
 ---
 

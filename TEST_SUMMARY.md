@@ -1,7 +1,7 @@
 # Test Summary
 
-Date: 2026-03-29
-Server: neurodivergent-memory v0.1.8
+Date: 2026-04-01
+Server: neurodivergent-memory v0.2.0
 Build: PASS
 Smoke test: PASS
 
@@ -42,7 +42,7 @@ To keep this test valid for current server behavior:
 
 - Updated memory IDs from `mem_*` to `memory_*`
 - Updated `update_memory` payload fields to current schema
-- Updated scenario references from v0.1.1/Node 20 to v0.1.8/Node 24
+- Updated scenario references from v0.1.1/Node 20 to v0.2.0/Node 24
 
 ## Artifacts
 

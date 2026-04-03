@@ -17,7 +17,7 @@ Search uses **BM25 semantic ranking** — no embedding model or cloud LLM requir
 
 ## Canonical Tag Schema
 
-Always apply tags from the four namespaces below when calling `store_memory`.
+Always apply tags from the five namespaces below when calling `store_memory`.
 Multiple tags from different namespaces are expected on every memory.
 When storing execution-heavy memories, include the reasoning behind the action and, when possible, connect the entry to a durable principle in `logical_analysis` or `creative_synthesis` so future retrieval preserves understanding and not just activity.
 
@@ -27,10 +27,16 @@ When storing execution-heavy memories, include the reasoning behind the action a
 | `scope:X` | Breadth of the memory | `scope:concept`, `scope:project`, `scope:session`, `scope:global` |
 | `kind:X` | Type of knowledge | `kind:insight`, `kind:decision`, `kind:pattern`, `kind:reference`, `kind:task` |
 | `layer:X` | Abstraction level | `layer:architecture`, `layer:implementation`, `layer:debugging`, `layer:research` |
+| `persistence:X` | Sync tier eligibility | `persistence:durable` (promote to user/org), `persistence:ephemeral` (project-only) |
 
 **Example tag set for a Unity ECS memory:**
 ```
 ["topic:unity-ecs", "topic:dots", "scope:project", "kind:pattern", "layer:architecture"]
+```
+
+**Example tag set for a cross-project durable memory:**
+```
+["topic:typescript", "scope:global", "kind:pattern", "layer:architecture", "persistence:durable"]
 ```
 
 ---
