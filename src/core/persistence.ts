@@ -141,6 +141,10 @@ export function resolvePersistenceLocation(
   };
 }
 
+export function walPathForSnapshot(snapshotFile: string): string {
+  return `${snapshotFile}.wal.jsonl`;
+}
+
 export function resolveMemoryTiers(
   options: ResolvePersistenceLocationOptions = {},
 ): MemoryTiers {

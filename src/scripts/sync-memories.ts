@@ -34,7 +34,7 @@ import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
 import * as crypto from "crypto";
-import { resolveMemoryTiers } from "../core/persistence.js";
+import { resolveMemoryTiers, walPathForSnapshot } from "../core/persistence.js";
 
 // ── Types (minimal, mirroring the server's persisted shape) ─────────────────
 
@@ -164,7 +164,7 @@ function readSnapshot(snapshotPath: string): MemorySnapshot {
     die(`Source snapshot is not valid JSON: ${snapshotPath}`, 2);
   }
 
-  if (!parsed || typeof parsed !== "object" || typeof parsed.memories !== "object" || !parsed.memories) {
+  if (!parsed || typeof parsed !== "object" || !parsed.memories || typeof parsed.memories !== "object") {
     die(
       `Source snapshot at ${snapshotPath} does not contain a 'memories' object.`,
       2,
@@ -231,7 +231,7 @@ function run(): void {
   const targetPath = snapshotPathForDir(targetDir);
 
   // Check for a running WAL on the target tier — writes may be unsafe
-  const targetWal = `${targetPath}.wal.jsonl`;
+  const targetWal = walPathForSnapshot(targetPath);
   if (!args.dryRun && fs.existsSync(targetWal)) {
     process.stderr.write(
       `sync-memories: WARNING — target WAL exists at ${targetWal}.\n` +
@@ -295,7 +295,7 @@ function run(): void {
 
   for (const memory of toImport) {
     const newId = `memory_${merged.nextMemoryId}`;
-    merged.nextMemoryId = (merged.nextMemoryId ?? 1) + 1;
+    merged.nextMemoryId = (merged.nextMemoryId as number) + 1;
     merged.memories![newId] = { ...memory, id: newId };
   }
 
