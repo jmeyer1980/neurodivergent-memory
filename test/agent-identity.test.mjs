@@ -196,6 +196,27 @@ test("import_memories stores agent_id from per-entry field", async () => {
   }
 });
 
+test("import_memories remains backward-compatible without agent_id", async () => {
+  const server = startServer();
+
+  try {
+    await server.callTool(1, "import_memories", {
+      entries: [
+        {
+          content: "imported memory without agent attribution",
+          district: "logical_analysis",
+          tags: ["topic:test", "scope:session", "kind:reference", "layer:research"],
+        },
+      ],
+    });
+
+    const retrieved = await server.callTool(2, "retrieve_memory", { memory_id: "memory_1" });
+    assert.match(resultText(retrieved), /Agent: unassigned/);
+  } finally {
+    server.stop();
+  }
+});
+
 test("import_memories applies default agent_id to entries without one", async () => {
   const server = startServer();
 
@@ -213,6 +234,34 @@ test("import_memories applies default agent_id to entries without one", async ()
 
     const retrieved = await server.callTool(2, "retrieve_memory", { memory_id: "memory_1" });
     assert.match(resultText(retrieved), /Agent: default-import-agent/);
+  } finally {
+    server.stop();
+  }
+});
+
+test("connect_memories remains backward-compatible without agent_id", async () => {
+  const server = startServer();
+
+  try {
+    await server.callTool(1, "store_memory", {
+      content: "first node",
+      district: "logical_analysis",
+      tags: ["topic:test", "scope:session", "kind:reference", "layer:research"],
+    });
+
+    await server.callTool(2, "store_memory", {
+      content: "second node",
+      district: "practical_execution",
+      tags: ["topic:test", "scope:session", "kind:task", "layer:implementation"],
+    });
+
+    const connected = await server.callTool(3, "connect_memories", {
+      memory_id_1: "memory_1",
+      memory_id_2: "memory_2",
+    });
+
+    assert.match(resultText(connected), /Connected memories memory_1 and memory_2/);
+    assert.match(resultText(connected), /Agent: unassigned/);
   } finally {
     server.stop();
   }
