@@ -252,12 +252,12 @@ function run(): void {
   const sourceDir = resolveDir(args.from);
   const targetDir = resolveDir(args.to);
 
-  if (path.resolve(sourceDir) === path.resolve(targetDir)) {
-    die("--from and --to must refer to different directories.", 1);
-  }
-
   const sourcePath = snapshotPathForDir(sourceDir);
   const targetPath = snapshotPathForDir(targetDir);
+
+  if (path.resolve(sourcePath) === path.resolve(targetPath)) {
+    die("--from and --to must refer to different snapshots.", 1);
+  }
 
   // Check for a running WAL on the target tier — writes may be unsafe
   const targetWal = walPathForSnapshot(targetPath);
@@ -309,28 +309,39 @@ function run(): void {
   }
 
   // Ensure target directory exists
+  const targetDirPath = path.dirname(targetPath);
   try {
-    fs.mkdirSync(targetDir, { recursive: true });
-    fs.accessSync(targetDir, fs.constants.W_OK);
+    fs.mkdirSync(targetDirPath, { recursive: true });
+    fs.accessSync(targetDirPath, fs.constants.W_OK);
   } catch {
-    die(`Target directory is not writable: ${targetDir}`, 3);
+    die(`Target directory is not writable: ${targetDirPath}`, 3);
   }
 
-  // Merge into target snapshot
+  // Merge into target snapshot, preserving existing top-level fields (e.g. customDistricts)
   const merged: MemorySnapshot = {
+    ...targetSnapshot,
     nextMemoryId: nextNumericId(targetSnapshot),
     memories: { ...(targetSnapshot.memories ?? {}) },
   };
 
+  // Fields that reference other memory IDs — cross-tier references would be dangling
+  const ID_REFERENCE_FIELDS = ["connections", "abstracted_from", "source_memory_id"] as const;
+
   for (const memory of toImport) {
     const newId = `memory_${merged.nextMemoryId}`;
     merged.nextMemoryId = (merged.nextMemoryId as number) + 1;
-    merged.memories![newId] = { ...memory, id: newId };
+
+    // Strip ID reference fields and assign new ID
+    const cleanMemory: Record<string, unknown> = { ...memory, id: newId };
+    for (const field of ID_REFERENCE_FIELDS) {
+      delete cleanMemory[field];
+    }
+    merged.memories![newId] = cleanMemory as PersistedMemory;
   }
 
   const serialized = JSON.stringify(merged, null, 2);
   const tempPath = path.join(
-    targetDir,
+    targetDirPath,
     `.${path.basename(targetPath)}.${process.pid}.${crypto.randomBytes(6).toString("hex")}.tmp`,
   );
 
@@ -346,7 +357,7 @@ function run(): void {
       // Ignore cleanup failures and report the original write problem.
     }
 
-    die(`Target directory is not writable: ${targetDir}`, 3);
+    die(`Target directory is not writable: ${targetDirPath}`, 3);
   }
   process.stdout.write(
     `sync-memories:\n` +
