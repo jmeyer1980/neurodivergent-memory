@@ -643,6 +643,7 @@ Search uses **BM25 semantic ranking** — no embedding model or cloud LLM requir
 
 Always apply tags from the four namespaces below when calling `store_memory`.
 Multiple tags from different namespaces are expected on every memory.
+When storing execution-heavy memories, include the reasoning behind the action and, when possible, connect the entry to a durable principle in `logical_analysis` or `creative_synthesis` so retrieval preserves understanding and not just activity.
 
 | Namespace | Purpose | Examples |
 |---|---|---|
@@ -696,13 +697,24 @@ The graph is restored on server startup — no data is lost between restarts.
 
 ---
 
+## Memory Quality Guardrails
+
+- Do not stop at "what happened". Important memories should capture why the action was taken, what tradeoff or principle drove it, and whether the insight is reusable.
+- Treat `practical_execution` as the action log, then pair it with `logical_analysis` or `creative_synthesis` when the deeper rationale should survive longer than the implementation details.
+- When a debug trail, handoff, or emotional/raw memory is noisy, use `distill_memory` or an explicit follow-up memory to preserve the signal while stripping incidental detail.
+- Prefer connective synthesis over isolated task logs: link implementation memories back to durable principles such as explicit state over implicit state, bounded growth, or environment-aware validation.
+
+---
+
 ## Bootstrap checklist for new agent sessions
 
 1. Call `memory_stats` to see how many memories exist.
 2. Use `search_memories` with a broad query to locate relevant prior context.
-3. Apply the canonical tag schema when calling `store_memory`.
-4. Connect new memories to related existing ones with `connect_memories`.
-5. Use `traverse_from` or `related_to` for associative retrieval rather than repeated searches.
-6. **No Quick Task exemption**: any file edit, decision, or finding in this repo is memory-worthy — write the memory before moving on. If you catch yourself thinking "this is too small" — that is the trigger, not a bypass.
+3. Check whether recent memories already explain the rationale or durable principle behind the task, not just the last execution step.
+4. Apply the canonical tag schema when calling `store_memory`.
+5. Connect new memories to related existing ones with `connect_memories`.
+6. Use `traverse_from` or `related_to` for associative retrieval rather than repeated searches.
+7. **No Quick Task exemption**: any file edit, decision, or finding in this repo is memory-worthy — write the memory before moving on. If you catch yourself thinking "this is too small" — that is the trigger, not a bypass.
+8. **No execution-only memory exemption**: if a memory says what changed, it should also say why it changed or link to a memory that does.
 
 ---
