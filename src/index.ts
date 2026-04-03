@@ -2609,6 +2609,144 @@ function buildSynthesisPacketResources(allMemories: MemoryNPC[]): {
   };
 }
 
+function buildExploreMemoryCityMessages() {
+  const districtSummaries = memorySystem.getAllDistricts().map(d => ({
+    type: "resource" as const,
+    resource: {
+      uri: `memory://district/${d.name.toLowerCase().replace(/\s+/g, '_')}`,
+      mimeType: "application/json",
+      text: JSON.stringify(d, null, 2)
+    }
+  }));
+
+  return [
+    {
+      role: "user" as const,
+      content: {
+        type: "text" as const,
+        text: "Welcome to your neurodivergent memory city! Here are the districts where your thoughts reside:"
+      }
+    },
+    ...districtSummaries.map(district => ({
+      role: "user" as const,
+      content: district
+    })),
+    {
+      role: "user" as const,
+      content: {
+        type: "text" as const,
+        text: "Explore these districts and understand how your mind organizes different types of thoughts. What patterns do you notice?"
+      }
+    }
+  ];
+}
+
+function buildSynthesizeMemoriesMessages() {
+  const synthesisSelection = selectSynthesisPromptMemories(memorySystem.getAllMemories());
+  const memoryResources = synthesisSelection.memories.map(memory => ({
+    type: "resource" as const,
+    resource: {
+      uri: `memory://memory/${memory.id}`,
+      mimeType: "application/json",
+      text: JSON.stringify({
+        name: memory.name,
+        content: memory.content,
+        archetype: memory.archetype,
+        district: memory.district,
+        tags: memory.tags
+      }, null, 2)
+    }
+  }));
+
+  return [
+    {
+      role: "user" as const,
+      content: {
+        type: "text" as const,
+        text: synthesisSelection.selectionMode === "all"
+          ? `Let's synthesize new insights from your stored memories. Here are all ${synthesisSelection.totalAvailable} currently stored memories, ordered by recency:`
+          : `Let's synthesize new insights from your stored memories. Here is a broad cross-section of ${memoryResources.length} memories selected from ${synthesisSelection.totalAvailable} total memories, combining recent entries with older high-signal memories:`
+      }
+    },
+    ...memoryResources.map(memory => ({
+      role: "user" as const,
+      content: memory
+    })),
+    {
+      role: "user" as const,
+      content: {
+        type: "text" as const,
+        text: "Looking at these memories, what new connections or insights emerge? How do they relate to each other?"
+      }
+    }
+  ];
+}
+
+function buildSynthesizeMemoryPacketsMessages() {
+  const packetPayload = buildSynthesisPacketResources(memorySystem.getAllMemories());
+  const packetResources = packetPayload.resources;
+
+  if (packetResources.length === 0) {
+    return [
+      {
+        role: "user" as const,
+        content: {
+          type: "text" as const,
+          text: "No memories are currently stored, so there are no synthesis packets to review yet."
+        }
+      }
+    ];
+  }
+
+  return [
+    {
+      role: "user" as const,
+      content: {
+        type: "text" as const,
+        text: `Let's synthesize new insights from your stored memories using packetized coverage. The attached resources include 1 coverage manifest plus ${packetPayload.manifest.slice_count} structured memory slices spanning all ${packetPayload.manifest.total_memories} stored memories.`
+      }
+    },
+    ...packetResources.map(resource => ({
+      role: "user" as const,
+      content: resource,
+    })),
+    {
+      role: "user" as const,
+      content: {
+        type: "text" as const,
+        text: "Use the coverage manifest to understand graph scope, then synthesize patterns across the slice packets. Prefer broad graph-level insights, but cite concrete memory ids when a specific claim depends on a particular packet entry."
+      }
+    }
+  ];
+}
+
+function promptMessagesToToolContent(messages: Array<{ content: unknown }>) {
+  return messages.map(message => message.content);
+}
+
+function listPromptDescriptors() {
+  return [
+    {
+      name: "explore_memory_city",
+      title: "Explore Memory City",
+      description: "Explore the neurodivergent memory city and its districts",
+      arguments: []
+    },
+    {
+      name: "synthesize_memories",
+      title: "Synthesize Memories",
+      description: "Create new insights by connecting existing memories",
+      arguments: []
+    },
+    {
+      name: "synthesize_memory_packets",
+      title: "Synthesize Memory Packets",
+      description: "Create new insights from packetized memory slices for attachment-constrained clients",
+      arguments: []
+    }
+  ];
+}
+
 function parseIntegerEnv(
   rawValue: string | undefined,
   fallback: number,
@@ -3385,6 +3523,30 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           },
           required: ["memory_id"]
         }
+      },
+      {
+        name: "prepare_memory_city_context",
+        description: "Return the same exploration context exposed by the explore_memory_city prompt, packaged as a tool result for clients that support tools but not MCP prompts.",
+        inputSchema: {
+          type: "object",
+          properties: {}
+        }
+      },
+      {
+        name: "prepare_synthesis_context",
+        description: "Return the same context exposed by the synthesize_memories prompt, packaged as a tool result for prompt-limited clients.",
+        inputSchema: {
+          type: "object",
+          properties: {}
+        }
+      },
+      {
+        name: "prepare_packetized_synthesis_context",
+        description: "Return the same context exposed by the synthesize_memory_packets prompt, packaged as a tool result for prompt-limited or attachment-constrained clients.",
+        inputSchema: {
+          type: "object",
+          properties: {}
+        }
       }
     ]
   };
@@ -3896,6 +4058,27 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
     }
 
+    case "prepare_memory_city_context": {
+      const messages = buildExploreMemoryCityMessages();
+      return {
+        content: promptMessagesToToolContent(messages)
+      };
+    }
+
+    case "prepare_synthesis_context": {
+      const messages = buildSynthesizeMemoriesMessages();
+      return {
+        content: promptMessagesToToolContent(messages)
+      };
+    }
+
+    case "prepare_packetized_synthesis_context": {
+      const messages = buildSynthesizeMemoryPacketsMessages();
+      return {
+        content: promptMessagesToToolContent(messages)
+      };
+    }
+
     default:
       return toolErrorResult(
         String(request.params.name),
@@ -3920,20 +4103,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
  */
 server.setRequestHandler(ListPromptsRequestSchema, async () => {
   return {
-    prompts: [
-      {
-        name: "explore_memory_city",
-        description: "Explore the neurodivergent memory city and its districts",
-      },
-      {
-        name: "synthesize_memories",
-        description: "Create new insights by connecting existing memories",
-      },
-      {
-        name: "synthesize_memory_packets",
-        description: "Create new insights from packetized memory slices for attachment-constrained clients",
-      }
-    ]
+    prompts: listPromptDescriptors()
   };
 });
 
@@ -3943,122 +4113,26 @@ server.setRequestHandler(ListPromptsRequestSchema, async () => {
 server.setRequestHandler(GetPromptRequestSchema, async (request) => {
   switch (request.params.name) {
     case "explore_memory_city": {
-      const districts = memorySystem.getAllDistricts();
-      const districtSummaries = districts.map(d => ({
-        type: "resource" as const,
-        resource: {
-          uri: `memory://district/${d.name.toLowerCase().replace(/\s+/g, '_')}`,
-          mimeType: "application/json",
-          text: JSON.stringify(d, null, 2)
-        }
-      }));
-
       return {
-        messages: [
-          {
-            role: "user",
-            content: {
-              type: "text",
-              text: "Welcome to your neurodivergent memory city! Here are the districts where your thoughts reside:"
-            }
-          },
-          ...districtSummaries.map(district => ({
-            role: "user" as const,
-            content: district
-          })),
-          {
-            role: "user",
-            content: {
-              type: "text",
-              text: "Explore these districts and understand how your mind organizes different types of thoughts. What patterns do you notice?"
-            }
-          }
-        ]
+        title: "Explore Memory City",
+        description: "Explore the neurodivergent memory city and its districts",
+        messages: buildExploreMemoryCityMessages()
       };
     }
 
     case "synthesize_memories": {
-      const synthesisSelection = selectSynthesisPromptMemories(memorySystem.getAllMemories());
-      const memoryResources = synthesisSelection.memories.map(memory => ({
-        type: "resource" as const,
-        resource: {
-          uri: `memory://memory/${memory.id}`,
-          mimeType: "application/json",
-          text: JSON.stringify({
-            name: memory.name,
-            content: memory.content,
-            archetype: memory.archetype,
-            district: memory.district,
-            tags: memory.tags
-          }, null, 2)
-        }
-      }));
-
       return {
-        messages: [
-          {
-            role: "user",
-            content: {
-              type: "text",
-              text: synthesisSelection.selectionMode === "all"
-                ? `Let's synthesize new insights from your stored memories. Here are all ${synthesisSelection.totalAvailable} currently stored memories, ordered by recency:`
-                : `Let's synthesize new insights from your stored memories. Here is a broad cross-section of ${memoryResources.length} memories selected from ${synthesisSelection.totalAvailable} total memories, combining recent entries with older high-signal memories:`
-            }
-          },
-          ...memoryResources.map(memory => ({
-            role: "user" as const,
-            content: memory
-          })),
-          {
-            role: "user",
-            content: {
-              type: "text",
-              text: "Looking at these memories, what new connections or insights emerge? How do they relate to each other?"
-            }
-          }
-        ]
+        title: "Synthesize Memories",
+        description: "Create new insights by connecting existing memories",
+        messages: buildSynthesizeMemoriesMessages()
       };
     }
 
     case "synthesize_memory_packets": {
-      const packetPayload = buildSynthesisPacketResources(memorySystem.getAllMemories());
-      const packetResources = packetPayload.resources;
-
-      if (packetResources.length === 0) {
-        return {
-          messages: [
-            {
-              role: "user",
-              content: {
-                type: "text",
-                text: "No memories are currently stored, so there are no synthesis packets to review yet."
-              }
-            }
-          ]
-        };
-      }
-
       return {
-        messages: [
-          {
-            role: "user",
-            content: {
-              type: "text",
-              text: `Let's synthesize new insights from your stored memories using packetized coverage. The attached resources include 1 coverage manifest plus ${packetPayload.manifest.slice_count} structured memory slices spanning all ${packetPayload.manifest.total_memories} stored memories.`
-            }
-          },
-          ...packetResources.map(resource => ({
-            role: "user" as const,
-            content: resource,
-          })),
-          {
-            role: "user",
-            content: {
-              type: "text",
-              text: "Use the coverage manifest to understand graph scope, then synthesize patterns across the slice packets. Prefer broad graph-level insights, but cite concrete memory ids when a specific claim depends on a particular packet entry."
-            }
-          }
-        ]
+        title: "Synthesize Memory Packets",
+        description: "Create new insights from packetized memory slices for attachment-constrained clients",
+        messages: buildSynthesizeMemoryPacketsMessages()
       };
     }
 

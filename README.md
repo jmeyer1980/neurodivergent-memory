@@ -81,7 +81,7 @@ Memories are organized by cognitive domain:
 - Each memory includes content, tags, emotional metadata, and connection information
 - Access memories as JSON resources with full metadata
 
-### Tools (11 memory management operations)
+### Tools
 
 - **`store_memory`** — Create new memory nodes with optional emotional valence and intensity
 - **`retrieve_memory`** — Fetch a specific memory by ID
@@ -95,6 +95,9 @@ Memories are organized by cognitive domain:
 - **`memory_stats`** — Aggregate statistics (totals, per-district/per-project counts, most-accessed, orphans) with optional project scope
 - **`storage_diagnostics`** — Show the resolved snapshot path, WAL path, and effective persistence source in one response
 - **`import_memories`** — Bulk-import from inline JSON entries or a snapshot `file_path`, with `dry_run`, dedupe policies, and explicit snapshot migration flags
+- **`prepare_memory_city_context`** — Tool mirror of `explore_memory_city` for clients that support tools but do not invoke MCP prompts
+- **`prepare_synthesis_context`** — Tool mirror of `synthesize_memories` for prompt-limited clients
+- **`prepare_packetized_synthesis_context`** — Tool mirror of `synthesize_memory_packets` for prompt-limited or attachment-constrained clients
 
 ### Prompts
 
@@ -103,6 +106,13 @@ Memories are organized by cognitive domain:
 - **`synthesize_memory_packets`** — Packetized synthesis prompt for attachment-constrained clients; emits one coverage manifest plus bounded memory slices that summarize the broader graph
 
 Use `synthesize_memories` when the MCP client can comfortably consume many raw memory resources. Use `synthesize_memory_packets` when the caller path is attachment-constrained or when you need broader graph coverage in a small number of structured resources.
+
+For maximum interoperability across MCP clients, the server exposes the same synthesis/exploration context in two forms:
+
+- **Prompts** via `prompts/list` + `prompts/get` for clients that implement MCP prompt invocation.
+- **Tools** via the `prepare_*_context` tools for clients that support MCP tools but ignore or under-support prompts.
+
+Some clients, such as Cline, expose MCP prompts as namespaced slash commands in the form `/mcp:<server-name>:<prompt-name>` rather than `/<prompt-name>`.
 
 ## Core Concepts
 

@@ -78,6 +78,10 @@ function startServer(options = {}) {
     });
   }
 
+  function listPrompts(id) {
+    return request(id, "prompts/list", {});
+  }
+
   function getPrompt(id, name) {
     return request(id, "prompts/get", { name, arguments: {} });
   }
@@ -87,11 +91,19 @@ function startServer(options = {}) {
     fs.rmSync(tempDir, { recursive: true, force: true });
   }
 
-  return { callTool, getPrompt, stop };
+  return { callTool, getPrompt, listPrompts, stop };
 }
 
 function resourceMessages(promptResponse) {
   return (promptResponse.result?.messages ?? []).filter(message => message.content?.type === "resource");
+}
+
+function toolResourceContentBlocks(toolResponse) {
+  return (toolResponse.result?.content ?? []).filter(content => content.type === "resource");
+}
+
+function toolTextContent(toolResponse) {
+  return (toolResponse.result?.content ?? []).filter(content => content.type === "text").map(content => content.text ?? "");
 }
 
 function introText(promptResponse) {
@@ -105,6 +117,40 @@ function resourceJson(promptResponse) {
 function resourceUris(promptResponse) {
   return resourceMessages(promptResponse).map(message => message.content.resource.uri);
 }
+
+test("prompts/list exposes explicit prompt metadata for compatibility-sensitive clients", async () => {
+  const server = startServer();
+
+  try {
+    const prompts = await server.listPrompts(50);
+    assert.deepEqual(
+      prompts.result?.prompts?.map(prompt => ({
+        name: prompt.name,
+        description: prompt.description,
+        arguments: prompt.arguments,
+      })),
+      [
+        {
+          name: "explore_memory_city",
+          description: "Explore the neurodivergent memory city and its districts",
+          arguments: [],
+        },
+        {
+          name: "synthesize_memories",
+          description: "Create new insights by connecting existing memories",
+          arguments: [],
+        },
+        {
+          name: "synthesize_memory_packets",
+          description: "Create new insights from packetized memory slices for attachment-constrained clients",
+          arguments: [],
+        },
+      ],
+    );
+  } finally {
+    server.stop();
+  }
+});
 
 test("synthesize_memories prompt includes all memories when graph is modest", async () => {
   const server = startServer();
@@ -266,6 +312,72 @@ test("synthesize_memory_packets prompt grows slice count to keep packet sizes bo
     assert.equal(manifest.total_memories, 250);
     assert.equal(manifest.slice_count > 8, true);
     assert.equal(slices.every(packet => packet.memories.length <= 20), true);
+  } finally {
+    server.stop();
+  }
+});
+
+test("prepare_synthesis_context tool mirrors the synthesize_memories prompt payload", async () => {
+  const server = startServer();
+
+  try {
+    for (let index = 0; index < 12; index += 1) {
+      await server.callTool(index + 1, "store_memory", {
+        content: `mirror memory ${index + 1}`,
+        district: index % 2 === 0 ? "logical_analysis" : "practical_execution",
+        tags: ["topic:test", "scope:session", "kind:reference", "layer:research"],
+      });
+    }
+
+    const prompt = await server.getPrompt(300, "synthesize_memories");
+    const tool = await server.callTool(301, "prepare_synthesis_context", {});
+
+    assert.deepEqual(
+      toolTextContent(tool),
+      (prompt.result?.messages ?? [])
+        .filter(message => message.content?.type === "text")
+        .map(message => message.content.text ?? ""),
+    );
+    assert.deepEqual(
+      toolResourceContentBlocks(tool).map(content => content.resource.uri),
+      resourceUris(prompt),
+    );
+  } finally {
+    server.stop();
+  }
+});
+
+test("prepare_packetized_synthesis_context tool mirrors packet prompt resources", async () => {
+  const server = startServer();
+
+  try {
+    for (let index = 0; index < 24; index += 1) {
+      await server.callTool(index + 1, "store_memory", {
+        content: `packet mirror memory ${index + 1}`,
+        district: [
+          "logical_analysis",
+          "emotional_processing",
+          "practical_execution",
+          "vigilant_monitoring",
+          "creative_synthesis",
+        ][index % 5],
+        tags: ["topic:test", "scope:session", "kind:reference", "layer:research"],
+      });
+    }
+
+    const prompt = await server.getPrompt(400, "synthesize_memory_packets");
+    const tool = await server.callTool(401, "prepare_packetized_synthesis_context", {});
+
+    assert.deepEqual(
+      toolResourceContentBlocks(tool).map(content => content.resource.uri),
+      resourceUris(prompt),
+    );
+    assert.deepEqual(
+      toolTextContent(tool),
+      (prompt.result?.messages ?? [])
+        .filter(message => message.content?.type === "text")
+        .map(message => message.content.text ?? ""),
+    );
   } finally {
     server.stop();
   }
