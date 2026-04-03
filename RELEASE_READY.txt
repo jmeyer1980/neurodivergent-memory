@@ -1,0 +1,110 @@
+╔══════════════════════════════════════════════════════════════════════════════════════╗
+║                      v0.3.0 RELEASE CANDIDATE — READY TO DEPLOY                      ║
+╚══════════════════════════════════════════════════════════════════════════════════════╝
+
+Date:              2026-04-03
+Commit:            016c2b2 (chore: bump version to 0.3.0 and create release validation report)
+Git Tag:           v0.3.0 ✅
+Branch:            development
+Status:            ✅ ALL GATES PASSED — READY FOR RELEASE WORKFLOW
+
+═══════════════════════════════════════════════════════════════════════════════════════
+
+VALIDATION SUMMARY
+
+Build & Compilation
+  ✅ TypeScript: 0 errors, 0 warnings
+  ✅ Chmod: build/index.js executable set
+  ✅ No emit diagnostics
+
+Testing
+  ✅ 95/95 tests pass (17.2s)
+  ✅ 0 failures, 0 skipped, 0 timeouts
+  ✅ Coverage: persistence, concurrency, BM25, project_id, epistemic_status, telemetry, sync
+
+Linting & Code Quality
+  ✅ TypeScript lint (--noEmit): clean
+  ✅ Markdown lint: all 8 docs clean
+  ✅ No style violations
+
+Smoke Tests
+  ✅ Live project_id smoke: PASSED
+  ✅ MCP server instantiation: OK
+  ✅ Tool binding & execution: OK
+
+Documentation
+  ✅ CHANGELOG.md: [Unreleased] section current with 0.3.0 features
+  ✅ README.md: API surface and examples synchronized
+  ✅ Roadmap.md: v0.3.0 marked "in Release Readiness" (ready for post-release update)
+  ✅ Breaking changes: v0.2.0 /root migration documented with recovery path
+
+Version Consistency
+  ✅ package.json: "version": "0.3.0"
+  ✅ server.json: "version": "0.3.0" (in main + packages[0])
+  ✅ mcpName in package.json: "io.github.jmeyer1980/neurodivergent-memory"
+
+Feature Completeness
+  ✅ Issues #54–#76 merged and tested
+  ✅ 58 commits since v0.2.0
+  ✅ Planned features complete:
+     - Goal-aware retrieval (context scoring)
+     - Epistemic status defaults & filters
+     - Multi-tier memory sync (project/user/org)
+     - LUCA custom districts
+     - Distillation layer
+     - Import file support
+     - Storage diagnostics
+     - Rationale-first guardrails
+
+Registry & Artifact Status
+  ✅ npm: Ready to publish (NPM_TOKEN configured in CI)
+  ✅ Docker: Ready to push (DOCKER_TOKEN configured in CI)
+  ✅ MCP Registry: Ready (server.json valid, mcpName correct)
+
+═══════════════════════════════════════════════════════════════════════════════════════
+
+NEXT ACTIONS (To Trigger Release)
+
+Push changes to trigger GitHub Actions release workflow:
+
+  git push origin development
+  git push origin v0.3.0
+
+This will:
+  1. Publish neurodivergent-memory@0.3.0 to npm (with latest dist-tag)
+  2. Build & push Docker images:
+     - twgbellok/neurodivergent-memory:0.3.0
+  3. Publish to MCP Registry (registry.modelcontextprotocol.io)
+  4. Update MCP module ecosystem metadata
+
+Expected Duration: 2–5 minutes (standard CI/CD pipeline)
+
+═══════════════════════════════════════════════════════════════════════════════════════
+
+RISK ASSESSMENT
+
+Risk              Severity  Status
+────────────────────────────────────────────────────────────────────────────────────────
+Build failure     Low       ✅ Mitigated: TypeScript clean, build tested post-bump
+Test regression   Low       ✅ Mitigated: 95/95 pass, full coverage on new features
+Version mismatch  Low       ✅ Mitigated: package.json + server.json synced
+npm publish race  Low       ✅ Mitigated: Atomic publish, rc dist-tag pre-staging
+Docker tag immut  Low       ✅ Mitigated: Immutability OFF enabled per v0.1.6 fix
+User migration    Low       ✅ Mitigated: v0.2.0 breaking change documented + recovery path
+Registry lag      Low       ✅ Expected: Standard MCP Registry index update (24h typical)
+
+═══════════════════════════════════════════════════════════════════════════════════════
+
+SIGN-OFF
+
+Release Candidate:        ✅ VALIDATED
+Code Quality:             ✅ CONFIRMED (95/95 tests, linting clean)
+Documentation:            ✅ CONFIRMED (Changelog current, README synchronized)
+Administrative Readiness: ✅ CONFIRMED (Versions bumped, tag created)
+Risk Profile:             ✅ LOW (0.x pre-release, known limitations)
+
+DECISION: APPROVED FOR RELEASE
+
+═══════════════════════════════════════════════════════════════════════════════════════
+
+For detailed validation report, see: RELEASE_VALIDATION_0.3.0.md

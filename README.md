@@ -81,24 +81,39 @@ Memories are organized by cognitive domain:
 - Each memory includes content, tags, emotional metadata, and connection information
 - Access memories as JSON resources with full metadata
 
-### Tools (11 memory management operations)
+### Tools
 
 - **`store_memory`** — Create new memory nodes with optional emotional valence and intensity
 - **`retrieve_memory`** — Fetch a specific memory by ID
 - **`update_memory`** — Modify content, tags, district, emotional_valence, intensity, or project attribution
 - **`delete_memory`** — Remove a memory and all its connections
 - **`connect_memories`** — Create bidirectional edges between memory nodes
-- **`search_memories`** — BM25-ranked semantic search with optional filters (district, project_id, tags, emotional valence, intensity, min_score)
+- **`search_memories`** — BM25-ranked semantic search with optional goal context, recency bias, and filters (district, project_id, tags, epistemic status, emotional valence, intensity, min_score)
 - **`traverse_from`** — Graph traversal up to N hops from a starting memory
-- **`related_to`** — Find memories by graph proximity + BM25 semantic blend
-- **`list_memories`** — Paginated listing with optional district/archetype/project_id filters
+- **`related_to`** — Find memories by graph proximity + BM25 semantic blend, with optional goal context and epistemic-status filters
+- **`list_memories`** — Paginated listing with optional district/archetype/project_id/epistemic-status filters
 - **`memory_stats`** — Aggregate statistics (totals, per-district/per-project counts, most-accessed, orphans) with optional project scope
-- **`import_memories`** — Bulk-seed memories from JSON array, including mixed entries with and without project attribution
+- **`server_handshake`** — Return runtime server identity/version details for explicit client-side version confirmation
+- **`storage_diagnostics`** — Show the resolved snapshot path, WAL path, and effective persistence source in one response
+- **`import_memories`** — Bulk-import from inline JSON entries or a snapshot `file_path`, with `dry_run`, dedupe policies, and explicit snapshot migration flags
+- **`prepare_memory_city_context`** — Tool mirror of `explore_memory_city` for clients that support tools but do not invoke MCP prompts
+- **`prepare_synthesis_context`** — Tool mirror of `synthesize_memories` for prompt-limited clients
+- **`prepare_packetized_synthesis_context`** — Tool mirror of `synthesize_memory_packets` for prompt-limited or attachment-constrained clients
 
 ### Prompts
 
 - **`explore_memory_city`** — Guided exploration of districts and memory organization
 - **`synthesize_memories`** — Create new insights by connecting existing memories
+- **`synthesize_memory_packets`** — Packetized synthesis prompt for attachment-constrained clients; emits one coverage manifest plus bounded memory slices that summarize the broader graph
+
+Use `synthesize_memories` when the MCP client can comfortably consume many raw memory resources. Use `synthesize_memory_packets` when the caller path is attachment-constrained or when you need broader graph coverage in a small number of structured resources.
+
+For maximum interoperability across MCP clients, the server exposes the same synthesis/exploration context in two forms:
+
+- **Prompts** via `prompts/list` + `prompts/get` for clients that implement MCP prompt invocation.
+- **Tools** via the `prepare_*_context` tools for clients that support MCP tools but ignore or under-support prompts.
+
+Some clients, such as Cline, expose MCP prompts as namespaced slash commands in the form `/mcp:<server-name>:<prompt-name>` rather than `/<prompt-name>`.
 
 ## Core Concepts
 
@@ -122,6 +137,16 @@ Each memory can optionally carry:
 - **emotional_valence** (-1 to 1) — Emotional charge or affective tone
 - **intensity** (0–1) — Mental energy or importance weight
 
+### Epistemic Status
+
+Memories can optionally carry `epistemic_status` to distinguish tentative planning from validated knowledge.
+
+- `draft` — provisional or planning-oriented
+- `validated` — confirmed and safe to treat as established
+- `outdated` — superseded but retained for history
+
+When `store_memory` or `import_memories` creates a new `practical_execution` memory without an explicit `epistemic_status`, the server defaults it to `draft` if the memory has a task tag. The canonical task tag is `kind:task`, and the server also accepts the compatibility synonyms `type:task` and bare `task`. This keeps planning notes from silently presenting as settled fact.
+
 ### Project Attribution and Scoped Retrieval
 
 Memories can optionally include a first-class `project_id` for attribution and scoped retrieval across multi-project graphs.
@@ -129,11 +154,37 @@ Memories can optionally include a first-class `project_id` for attribution and s
 - `project_id` is optional on writes (`store_memory`, `update_memory`, `import_memories`).
 - `update_memory` accepts `project_id: null` to clear existing project attribution.
 - `search_memories`, `list_memories`, and `memory_stats` accept an optional `project_id` filter.
+- `search_memories`, `list_memories`, and `related_to` accept optional `epistemic_statuses` filters so callers can avoid stale planning memories when appropriate.
+- `search_memories` accepts optional `context` and `recency_weight` parameters. Context is blended into ranking as a lightweight BM25 boost; `recency_weight` must be between `0` and `1` and adds a recency boost without replacing semantic relevance.
+- `search_memories` accepts `min_intensity` / `max_intensity` as the preferred intensity filter names. The legacy `intensity_min` / `intensity_max` aliases remain supported for compatibility.
+- `related_to` accepts an optional `context` parameter to bias related-memory ranking toward the caller's current goal.
 - Stats now include a `perProject` breakdown.
 - Scoped `memory_stats` reports `totalConnections` only for edges where both endpoints are in scope.
 - `list_memories` includes a `project: ...` segment in each line (`unset` when no project attribution exists).
 - Validation contract: `project_id` must match `^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$` (max length 64).
 - Invalid values return stable error code `NM_E020` with recovery guidance.
+
+### Import Diagnostics and Migration Semantics
+
+`storage_diagnostics` reports the resolved snapshot path, the WAL path, and which configuration source won the persistence-path precedence check.
+
+`import_memories` supports two source modes:
+
+- Inline `entries` for ordinary bulk seeding.
+- `file_path` for server snapshot imports, avoiding large MCP payloads.
+
+Import validation flags:
+
+- `dry_run: true` validates the request without writing data and returns deterministic `would_import`, `would_skip`, and `would_fail` counts.
+- `dedupe` accepts `none`, `content_hash`, or `content_plus_tags`.
+- Deduplicated rows are reported with stable reason codes: `DEDUPE_CONTENT_HASH` or `DEDUPE_CONTENT_PLUS_TAGS`.
+- Snapshot `file_path` imports accept `.json` files under the resolved persistence directory by default. Set `NEURODIVERGENT_MEMORY_IMPORT_ALLOW_EXTERNAL_FILE=true` only when importing external snapshot files intentionally.
+
+Snapshot migration flags:
+
+- `preserve_ids` is only valid with `file_path`; any ID collision with the live store is rejected deterministically.
+- `merge_connections` is only valid with `file_path`; every referenced connection target must exist either in the imported snapshot or the live store, or the row fails validation with `INVALID_CONNECTION_TARGET`.
+- If validation failures are present, the non-dry-run import is rejected as a whole. Run `dry_run: true` first to inspect the failure list before retrying.
 
 ### Knowledge Graph Persistence
 
@@ -179,6 +230,62 @@ If you previously mounted data at `/root/.neurodivergent-memory`, your snapshot 
 No `NEURODIVERGENT_MEMORY_DIR` override is needed for option B — the server finds the existing snapshot automatically.
 
 For agents: if memories appear missing after upgrading the container, use `import_memories` to reload from a backup export, or ask your AI assistant to re-run `memory_stats` after the volume is remounted correctly to confirm restoration.
+
+### Multi-Tier Memory Persistence
+
+The server supports a three-tier memory architecture for agents that work across multiple projects. Each tier
+lives in its own directory and can be synced independently.
+
+| Tier | Purpose | Typical path | Env var |
+|---|---|---|---|
+| **project** | Repo-scoped memories — ephemeral, CI-friendly | `.github/agent-kit/memories` | `NEURODIVERGENT_MEMORY_PROJECT_DIR` |
+| **user** | Cross-project personal knowledge — durable, per-developer | `~/.neurodivergent-memory` | `NEURODIVERGENT_MEMORY_USER_DIR` |
+| **org** | Shared organisational knowledge — optional, team-wide | any shared mount | `NEURODIVERGENT_MEMORY_ORG_DIR` |
+
+The primary server still reads its active snapshot from `NEURODIVERGENT_MEMORY_DIR` (or the auto-discovered
+default). Tier variables are used exclusively by the `sync-memories` helper.
+
+#### Tagging memories for sync
+
+Add a `persistence:durable` tag to any memory that should be promoted to the user or org tier. Memories
+without this tag are treated as ephemeral and stay in the project tier.
+
+```json
+["topic:typescript", "scope:global", "kind:pattern", "layer:architecture", "persistence:durable"]
+```
+
+Use `persistence:ephemeral` as an explicit opt-out for memories you never want promoted.
+
+#### Syncing memories between tiers
+
+After a build, milestone, or session — promote durable memories from the project tier to the user tier:
+
+```bash
+NEURODIVERGENT_MEMORY_PROJECT_DIR=.github/agent-kit/memories \
+NEURODIVERGENT_MEMORY_USER_DIR=~/.neurodivergent-memory \
+  npm run sync-memories -- --from project --to user
+```
+
+Or use explicit paths:
+
+```bash
+node build/scripts/sync-memories.js \
+  --from .github/agent-kit/memories \
+  --to ~/.neurodivergent-memory
+```
+
+Full option reference:
+
+```text
+--from <path|tier>      Source snapshot directory, or tier name: project | user | org
+--to   <path|tier>      Target snapshot directory, or tier name: project | user | org
+--tags <tag1,tag2,...>  Promote only memories matching ALL listed tags (default: persistence:durable)
+--any-tag               Match memories that have ANY of the listed tags (OR logic)
+--dry-run               Report counts without writing any data
+```
+
+**Safety note:** stop the MCP server for the target tier before running sync — the script writes directly to
+the snapshot file and will warn if it detects an open WAL for the target directory.
 
 ## Release Security
 
@@ -250,13 +357,14 @@ WIP guardrail behavior:
 - The cap is controlled by `NEURODIVERGENT_MEMORY_WIP_LIMIT` (default: `1`; set `0` to disable).
 - Exceeding the cap emits a warning line in the tool response and logs `NM_E011` for operator visibility.
 
-## Loop Telemetry (Observe-Only)
+## Loop Telemetry And Guardrails
 
-The server now tracks loop signals without blocking behavior changes:
+The server tracks loop signals and can surface targeted guardrail responses:
 
 - Repetition detection on `store_memory` compares incoming content against the 10 most recent memories (same `agent_id` when provided) using raw BM25 similarity scores.
-- Stores that meet the repeat threshold set `repeat_detected: true` in the tool response and increment `repeat_write_count` on the matched memory.
-- Read/write ping-pong transitions are tracked in a rolling operation window and increment `ping_pong_counter` when threshold conditions are met.
+- Stores that meet the repeat threshold set `repeat_detected: true`, increment `repeat_write_count` on the matched memory, and add a `No net-new info` warning to the tool response.
+- Repeated `logical_analysis` reads of `emotional_processing` memories add a `distill_memory` suggestion once the configured threshold is crossed.
+- Read/write ping-pong transitions are tracked in a rolling operation window, increment `ping_pong_counter` when threshold conditions are met, and can optionally start a temporary cross-district write cooldown.
 - `memory_stats` now includes a `loop_telemetry` block with:
   - `repeat_write_candidates` (top 5)
   - `ping_pong_candidates` (top 5)
@@ -267,6 +375,8 @@ Configuration:
 - `NEURODIVERGENT_MEMORY_REPEAT_THRESHOLD` (default: `0.85`)
 - `NEURODIVERGENT_MEMORY_LOOP_WINDOW` (default: `20`)
 - `NEURODIVERGENT_MEMORY_PING_PONG_THRESHOLD` (default: `3`)
+- `NEURODIVERGENT_MEMORY_DISTILL_SUGGEST_THRESHOLD` (default: `3`)
+- `NEURODIVERGENT_MEMORY_CROSS_DISTRICT_COOLDOWN_MS` (default: `0`, disabled)
 
 ## Performance Benchmark Baseline
 
@@ -359,7 +469,7 @@ For Docker:
         "NEURODIVERGENT_MEMORY_DIR=/data",
         "-v",
         "neurodivergent-memory-data:/data",
-        "docker.io/twgbellok/neurodivergent-memory:latest"
+        "docker.io/twgbellok/neurodivergent-memory:0.3.0"
       ]
     }
   }
@@ -383,7 +493,13 @@ Fully auto-approved tools:
         "related_to",
         "list_memories",
         "memory_stats",
-        "import_memories"
+        "storage_diagnostics",
+        "import_memories",
+        "distill_memory",
+        "prepare_memory_city_context",
+        "prepare_synthesis_context",
+        "prepare_packetized_synthesis_context",
+        "register_district"
       ],
       "disabled": false,
       "timeout": 120,
@@ -397,7 +513,7 @@ Fully auto-approved tools:
         "NEURODIVERGENT_MEMORY_DIR=/data",
         "-v",
         "neurodivergent-memory-data:/data",
-        "docker.io/twgbellok/neurodivergent-memory:latest"
+        "docker.io/twgbellok/neurodivergent-memory:0.3.0"
       ],
       "env": {}
     }
@@ -414,7 +530,7 @@ If you want to use the mcp server in Github Copilot Agent Workflows (github spin
       "type": "stdio",
       "command": "npx",
       "args": [
-        "neurodivergent-memory@0.2.0"
+        "neurodivergent-memory@0.3.0"
       ],
       "env": {
         "NEURODIVERGENT_MEMORY_DIR": ".neurodivergent-memory"
@@ -427,6 +543,12 @@ If you want to use the mcp server in Github Copilot Agent Workflows (github spin
         "traverse_from",
         "related_to",
         "import_memories",
+        "storage_diagnostics",
+        "distill_memory",
+        "prepare_memory_city_context",
+        "prepare_synthesis_context",
+        "prepare_packetized_synthesis_context",
+        "register_district",
         "list_memories",
         "store_memory",
         "search_memories",
@@ -455,7 +577,7 @@ If you want per-project isolation instead of a shared global memory file, mount 
         "NEURODIVERGENT_MEMORY_DIR=/data",
         "-v",
         "${workspaceFolder}/.neurodivergent-memory:/data",
-        "docker.io/twgbellok/neurodivergent-memory:latest"
+        "docker.io/twgbellok/neurodivergent-memory:0.3.0"
       ]
     }
   }
@@ -466,10 +588,12 @@ If you want per-project isolation instead of a shared global memory file, mount 
 
 ### Docker Runtime
 
+Use an explicit version tag. The published Docker images intentionally do not maintain a floating `latest` tag.
+
 You can also run the packaged server image directly:
 
 ```bash
-docker run --rm -i twgbellok/neurodivergent-memory:latest
+docker run --rm -i twgbellok/neurodivergent-memory:0.3.0
 ```
 
 ### Debugging
@@ -543,8 +667,9 @@ Search uses **BM25 semantic ranking** — no embedding model or cloud LLM requir
 
 ## Canonical Tag Schema
 
-Always apply tags from the four namespaces below when calling `store_memory`.
+Always apply tags from the five namespaces below when calling `store_memory`.
 Multiple tags from different namespaces are expected on every memory.
+When storing execution-heavy memories, include the reasoning behind the action and, when possible, connect the entry to a durable principle in `logical_analysis` or `creative_synthesis` so retrieval preserves understanding and not just activity.
 
 | Namespace | Purpose | Examples |
 |---|---|---|
@@ -552,10 +677,18 @@ Multiple tags from different namespaces are expected on every memory.
 | `scope:X` | Breadth of the memory | `scope:concept`, `scope:project`, `scope:session`, `scope:global` |
 | `kind:X` | Type of knowledge | `kind:insight`, `kind:decision`, `kind:pattern`, `kind:reference`, `kind:task` |
 | `layer:X` | Abstraction level | `layer:architecture`, `layer:implementation`, `layer:debugging`, `layer:research` |
+| `persistence:X` | Sync-tier eligibility | `persistence:durable`, `persistence:ephemeral` |
 
 **Example tag set for a Unity ECS memory:**
+
 ```json
 ["topic:unity-ecs", "topic:dots", "scope:project", "kind:pattern", "layer:architecture"]
+```
+
+**Example tag set for a durable cross-project memory:**
+
+```json
+["topic:typescript", "scope:global", "kind:pattern", "layer:architecture", "persistence:durable"]
 ```
 
 ---
@@ -581,12 +714,18 @@ Multiple tags from different namespaces are expected on every memory.
 | `update_memory` | Modify content, tags, district, valence, or intensity |
 | `delete_memory` | Remove a memory and all its connections |
 | `connect_memories` | Add an edge between two memory nodes |
-| `search_memories` | BM25-ranked search with optional `min_score`, district, tag, valence, intensity filters |
+| `search_memories` | BM25-ranked search with optional `context`, `recency_weight`, `min_score`, district, tag, valence, and intensity filters |
 | `traverse_from` | BFS graph walk from a node up to N hops |
-| `related_to` | Hop-proximity + BM25 blend for a given memory ID |
+| `related_to` | Hop-proximity + BM25 blend for a given memory ID, with optional goal-context boost |
 | `list_memories` | Paginated enumeration of all stored memories |
-| `memory_stats` | Totals, per-district counts, most-accessed, orphans |
-| `import_memories` | Bulk seed from a JSON array |
+| `memory_stats` | Totals, per-district/per-project counts, most-accessed, and orphans |
+| `storage_diagnostics` | Resolved snapshot path, WAL path, and effective persistence source |
+| `import_memories` | Bulk import from inline entries or a snapshot file with dry-run and migration controls |
+| `distill_memory` | Translate an `emotional_processing` memory into a structured logical artifact |
+| `prepare_memory_city_context` | Tool mirror of `explore_memory_city` for prompt-limited clients |
+| `prepare_synthesis_context` | Tool mirror of `synthesize_memories` for prompt-limited clients |
+| `prepare_packetized_synthesis_context` | Tool mirror of `synthesize_memory_packets` for attachment-constrained clients |
+| `register_district` | Register a custom district with LUCA ancestry validation |
 
 ---
 
@@ -597,13 +736,24 @@ The graph is restored on server startup — no data is lost between restarts.
 
 ---
 
+## Memory Quality Guardrails
+
+- Do not stop at "what happened". Important memories should capture why the action was taken, what tradeoff or principle drove it, and whether the insight is reusable.
+- Treat `practical_execution` as the action log, then pair it with `logical_analysis` or `creative_synthesis` when the deeper rationale should survive longer than the implementation details.
+- When a debug trail, handoff, or emotional/raw memory is noisy, use `distill_memory` or an explicit follow-up memory to preserve the signal while stripping incidental detail.
+- Prefer connective synthesis over isolated task logs: link implementation memories back to durable principles such as explicit state over implicit state, bounded growth, or environment-aware validation.
+
+---
+
 ## Bootstrap checklist for new agent sessions
 
 1. Call `memory_stats` to see how many memories exist.
 2. Use `search_memories` with a broad query to locate relevant prior context.
-3. Apply the canonical tag schema when calling `store_memory`.
-4. Connect new memories to related existing ones with `connect_memories`.
-5. Use `traverse_from` or `related_to` for associative retrieval rather than repeated searches.
-6. **No Quick Task exemption**: any file edit, decision, or finding in this repo is memory-worthy — write the memory before moving on. If you catch yourself thinking "this is too small" — that is the trigger, not a bypass.
+3. Check whether recent memories already explain the rationale or durable principle behind the task, not just the last execution step.
+4. Apply the canonical tag schema when calling `store_memory`.
+5. Connect new memories to related existing ones with `connect_memories`.
+6. Use `traverse_from` or `related_to` for associative retrieval rather than repeated searches.
+7. **No Quick Task exemption**: any file edit, decision, or finding in this repo is memory-worthy — write the memory before moving on. If you catch yourself thinking "this is too small" — that is the trigger, not a bypass.
+8. **No execution-only memory exemption**: if a memory says what changed, it should also say why it changed or link to a memory that does.
 
 ---

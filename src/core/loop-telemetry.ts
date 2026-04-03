@@ -20,6 +20,7 @@ interface OperationEvent {
   memory_id: string;
   district: string;
   agent_id?: string;
+  target_district?: string;
   timestamp: string;
 }
 
@@ -27,6 +28,7 @@ export interface LoopOperationIdentity {
   memory_id: string;
   district: string;
   agent_id?: string;
+  target_district?: string;
 }
 
 export interface LoopTelemetrySummary {
@@ -39,37 +41,55 @@ export class LoopTelemetryTracker {
   private readonly operationWindowSize: number;
   private readonly pingPongThreshold: number;
   private readonly repeatThreshold: number;
+  private readonly distillSuggestionThreshold: number;
+  private readonly crossDistrictCooldownMs: number;
   private readonly operations: OperationEvent[] = [];
   private readonly highSimilarityWrites: HighSimilarityWrite[] = [];
+  private readonly cooldowns = new Map<string, number>();
 
-  constructor(config: LoopTelemetryConfig) {
+  constructor(config: LoopTelemetryConfig & { distillSuggestionThreshold: number; crossDistrictCooldownMs: number }) {
     this.operationWindowSize = config.operationWindowSize;
     this.pingPongThreshold = config.pingPongThreshold;
     this.repeatThreshold = config.repeatThreshold;
+    this.distillSuggestionThreshold = config.distillSuggestionThreshold;
+    this.crossDistrictCooldownMs = config.crossDistrictCooldownMs;
   }
 
   getRepeatThreshold(): number {
     return this.repeatThreshold;
   }
 
-  recordRead(input: MemoryNPC | LoopOperationIdentity): void {
+  recordRead(input: MemoryNPC | LoopOperationIdentity): { distillSuggested: boolean; logicalEmotionalReadCount: number } {
     const identity = this.toOperationIdentity(input);
     this.appendOperation({
       op: "read",
       memory_id: identity.memory_id,
       district: identity.district,
       agent_id: identity.agent_id,
+      target_district: identity.target_district,
       timestamp: new Date().toISOString(),
     });
+
+    const logicalEmotionalReadCount = this.countLogicalEmotionalReads(identity.memory_id);
+    return {
+      distillSuggested: logicalEmotionalReadCount >= this.distillSuggestionThreshold,
+      logicalEmotionalReadCount,
+    };
   }
 
-  recordWrite(input: MemoryNPC | LoopOperationIdentity): { pingPongDetected: boolean; pingPongCount: number } {
+  recordWrite(input: MemoryNPC | LoopOperationIdentity): {
+    pingPongDetected: boolean;
+    pingPongCount: number;
+    cooldownActivated: boolean;
+    cooldownDurationMs: number;
+  } {
     const identity = this.toOperationIdentity(input);
     this.appendOperation({
       op: "write",
       memory_id: identity.memory_id,
       district: identity.district,
       agent_id: identity.agent_id,
+      target_district: identity.target_district,
       timestamp: new Date().toISOString(),
     });
 
@@ -88,7 +108,24 @@ export class LoopTelemetryTracker {
       this.identityKey(previous) !== this.identityKey(current);
     const pingPongDetected = currentTransition && pingPongCount >= this.pingPongThreshold;
 
-    return { pingPongDetected, pingPongCount };
+    let cooldownActivated = false;
+    let cooldownDurationMs = 0;
+    if (pingPongDetected && this.crossDistrictCooldownMs > 0) {
+      cooldownActivated = true;
+      cooldownDurationMs = this.activateCooldown(identity.memory_id);
+    }
+
+    return { pingPongDetected, pingPongCount, cooldownActivated, cooldownDurationMs };
+  }
+
+  getCooldownRemaining(memoryId: string): number {
+    this.pruneCooldown(memoryId);
+    const expiresAt = this.cooldowns.get(memoryId);
+    if (!expiresAt) {
+      return 0;
+    }
+
+    return Math.max(0, expiresAt - Date.now());
   }
 
   recordHighSimilarityWrite(entry: HighSimilarityWrite): void {
@@ -128,6 +165,7 @@ export class LoopTelemetryTracker {
   }
 
   private appendOperation(event: OperationEvent): void {
+    this.pruneExpiredCooldowns();
     this.operations.push(event);
     if (this.operations.length > this.operationWindowSize) {
       this.operations.splice(0, this.operations.length - this.operationWindowSize);
@@ -153,6 +191,38 @@ export class LoopTelemetryTracker {
     return transitions;
   }
 
+  private countLogicalEmotionalReads(memoryId: string): number {
+    return this.operations.filter(event =>
+      event.op === "read" &&
+      event.memory_id === memoryId &&
+      event.district === "logical_analysis" &&
+      event.target_district === "emotional_processing",
+    ).length;
+  }
+
+  private activateCooldown(memoryId: string): number {
+    this.pruneExpiredCooldowns();
+    const expiresAt = Date.now() + this.crossDistrictCooldownMs;
+    this.cooldowns.set(memoryId, expiresAt);
+    return this.crossDistrictCooldownMs;
+  }
+
+  private pruneExpiredCooldowns(): void {
+    const now = Date.now();
+    for (const [memoryId, expiresAt] of this.cooldowns.entries()) {
+      if (expiresAt <= now) {
+        this.cooldowns.delete(memoryId);
+      }
+    }
+  }
+
+  private pruneCooldown(memoryId: string): void {
+    const expiresAt = this.cooldowns.get(memoryId);
+    if (expiresAt !== undefined && expiresAt <= Date.now()) {
+      this.cooldowns.delete(memoryId);
+    }
+  }
+
   private identityKey(event: OperationEvent): string {
     return `${event.district}::${event.agent_id ?? "unassigned"}`;
   }
@@ -163,6 +233,7 @@ export class LoopTelemetryTracker {
         memory_id: input.id,
         district: input.district,
         agent_id: input.agent_id,
+        target_district: input.district,
       };
     }
 

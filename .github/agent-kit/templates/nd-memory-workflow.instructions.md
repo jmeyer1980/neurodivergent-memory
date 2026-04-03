@@ -14,6 +14,9 @@ Use neurodivergent-memory MCP as a persistent memory layer for development sessi
 ## Cadence
 
 - Store key decisions, constraints, and blockers during work.
+- Store the why behind decisions, not just the fact that a decision happened.
+- For substantial implementation work, pair `practical_execution` updates with a `logical_analysis` or `creative_synthesis` memory when the durable principle should outlive the task log.
+- If the source memory is noisy, distill it so the stable reasoning survives separately from the implementation detail.
 - Connect related memories to reduce future rediscovery.
 - Keep tags canonical: `topic:X`, `scope:X`, `kind:X`, `layer:X`.
 
@@ -36,3 +39,4 @@ Create a hand-off memory that captures:
 - Remaining work
 - Immediate next step (`current_slice`)
 - Key constraints/risks
+- The most important rationale or durable principle learned

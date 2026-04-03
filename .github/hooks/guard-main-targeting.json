@@ -1,0 +1,11 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "type": "command",
+        "command": "node .github/hooks/scripts/guard-main-targeting.cjs",
+        "timeout": 10
+      }
+    ]
+  }
+}

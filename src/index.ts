@@ -21,6 +21,7 @@ import {
   ListPromptsRequestSchema,
   GetPromptRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
+import * as crypto from "crypto";
 import * as fs from "fs";
 import * as path from "path";
 import { logger } from "./core/logger.js";
@@ -35,17 +36,51 @@ import {
   mcpErrorResult,
   type McpErrorShape,
 } from "./core/error-codes.js";
-import type { EpistemicStatus, EpistemicStatusFilter, MemoryArchetype, MemoryNPC } from "./core/types.js";
+import type { DistilledArtifact, EpistemicStatus, EpistemicStatusFilter, MemoryArchetype, MemoryNPC } from "./core/types.js";
+
+function resolveServerPackageInfo(): { name: string; version: string } {
+  try {
+    const packageJsonPath = new URL("../package.json", import.meta.url);
+    const raw = fs.readFileSync(packageJsonPath, "utf-8");
+    const parsed = JSON.parse(raw) as { name?: string; version?: string };
+    return {
+      name: parsed.name ?? "neurodivergent-memory",
+      version: parsed.version ?? "unknown",
+    };
+  } catch {
+    return {
+      name: "neurodivergent-memory",
+      version: "unknown",
+    };
+  }
+}
+
+const SERVER_PACKAGE_INFO = resolveServerPackageInfo();
+const SERVER_START_TIME_ISO = new Date().toISOString();
 
 /**
- * Memory district representing a knowledge domain
+ * Canonical district definitions.
+ * Keep canonical district identifiers in one place so validation and
+ * initialization can derive from the same source of truth.
  */
+const CANONICAL_DISTRICT_DEFINITIONS = {
+  logical_analysis: null,
+  emotional_processing: null,
+  practical_execution: null,
+  vigilant_monitoring: null,
+  creative_synthesis: null,
+} as const;
+
+const CANONICAL_DISTRICTS = Object.freeze(
+  Object.keys(CANONICAL_DISTRICT_DEFINITIONS) as Array<keyof typeof CANONICAL_DISTRICT_DEFINITIONS>,
+);
 interface MemoryDistrict {
   name: string;
   description: string;
   archetype: MemoryArchetype;
   activities: string[];
   memories: string[]; // Memory NPC IDs
+  luca_parent?: string; // For custom districts: ancestor chain to a canonical district
 }
 
 /**
@@ -63,6 +98,21 @@ interface StoreMemoryResult {
   similarity_score?: number;
   ping_pong_detected?: boolean;
   ping_pong_count?: number;
+  no_net_new_info_warning?: string;
+  cooldown_duration_ms?: number;
+}
+
+interface RetrieveMemoryResult {
+  memory: MemoryNPC;
+  distill_suggestion?: string;
+  logical_emotional_read_count?: number;
+}
+
+interface UpdateMemoryResult {
+  memory: MemoryNPC;
+  ping_pong_detected?: boolean;
+  ping_pong_count?: number;
+  cooldown_duration_ms?: number;
 }
 
 interface OperationActorContext {
@@ -209,12 +259,15 @@ interface PersistedMemoryNPC extends Omit<MemoryNPC, "created" | "last_accessed"
 interface MemorySnapshot {
   nextMemoryId: number;
   memories: { [id: string]: PersistedMemoryNPC };
+  customDistricts?: { [key: string]: Omit<MemoryDistrict, "memories"> };
 }
 
-type WalOperation = "store" | "update" | "delete" | "connect" | "import";
+type WalOperation = "store" | "update" | "delete" | "connect" | "import" | "register_district";
 
 const PROJECT_ID_MAX_LENGTH = 64;
 const PROJECT_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$/;
+
+const VALID_EPISTEMIC_STATUSES: EpistemicStatus[] = ["draft", "validated", "outdated"];
 
 type MemoryUpdatePayload = Partial<Pick<MemoryNPC, "content" | "tags" | "emotional_valence" | "intensity" | "district" | "epistemic_status" | "project_id" | "repeat_write_count" | "repeat_count" | "last_similarity_score" | "ping_pong_counter">> & {
   project_id?: string | null;
@@ -238,6 +291,86 @@ interface ImportMemoryEntry {
   agent_id?: string;
   project_id?: string;
   epistemic_status?: EpistemicStatus;
+}
+
+type ImportDedupePolicy = "none" | "content_hash" | "content_plus_tags";
+
+interface ImportMemorySnapshot {
+  nextMemoryId?: number;
+  memories?: Record<string, PersistedMemoryNPC>;
+}
+
+interface ImportCandidate {
+  content: string;
+  district: string;
+  tags?: string[];
+  emotional_valence?: number;
+  intensity?: number;
+  agent_id?: string;
+  project_id?: string;
+  epistemic_status?: EpistemicStatus;
+  source_memory_id?: string;
+  source_connections?: string[];
+  name?: string;
+  archetype?: MemoryArchetype;
+  traits?: string[];
+  concerns?: string[];
+  created?: Date;
+  last_accessed?: Date;
+  access_count?: number;
+}
+
+interface ImportPlanSkip {
+  index: number;
+  reason_code: string;
+  detail: string;
+  source_memory_id?: string;
+}
+
+interface ImportPlanFailure {
+  index: number;
+  reason_code: string;
+  detail: string;
+  source_memory_id?: string;
+}
+
+interface PlannedImportMemory {
+  index: number;
+  source_memory_id?: string;
+  source_connections: string[];
+  memory: MemoryNPC;
+}
+
+interface ImportPlan {
+  source: "entries" | "file_path";
+  requested: number;
+  memories: PlannedImportMemory[];
+  skipped: ImportPlanSkip[];
+  failures: ImportPlanFailure[];
+  nextMemoryId: number;
+}
+
+interface ImportExecutionOptions {
+  file_path?: string;
+  dry_run?: boolean;
+  dedupe?: ImportDedupePolicy;
+  preserve_ids?: boolean;
+  merge_connections?: boolean;
+}
+
+interface ImportExecutionResult {
+  source: "entries" | "file_path";
+  requested: number;
+  dry_run: boolean;
+  imported_ids: string[];
+  skipped: ImportPlanSkip[];
+  failures: ImportPlanFailure[];
+}
+
+interface StorageDiagnostics {
+  snapshot_path: string;
+  wal_path: string;
+  resolved_source: string;
 }
 
 /**
@@ -267,10 +400,26 @@ class NeurodivergentMemory {
     3,
     (value) => value > 0,
   );
+  private readonly distillSuggestionThreshold = parseIntegerEnv(
+    process.env.NEURODIVERGENT_MEMORY_DISTILL_SUGGEST_THRESHOLD,
+    3,
+    (value) => value > 0,
+  );
+  private readonly crossDistrictCooldownMs = parseIntegerEnv(
+    process.env.NEURODIVERGENT_MEMORY_CROSS_DISTRICT_COOLDOWN_MS,
+    0,
+    (value) => value >= 0,
+  );
+  private readonly allowExternalImportFiles = parseBooleanEnv(
+    process.env.NEURODIVERGENT_MEMORY_IMPORT_ALLOW_EXTERNAL_FILE,
+    false,
+  );
   private readonly loopTelemetry = new LoopTelemetryTracker({
     operationWindowSize: this.loopTelemetryWindowSize,
     pingPongThreshold: this.pingPongThreshold,
     repeatThreshold: this.repeatThreshold,
+    distillSuggestionThreshold: this.distillSuggestionThreshold,
+    crossDistrictCooldownMs: this.crossDistrictCooldownMs,
   });
   private saveTimer: ReturnType<typeof setTimeout> | null = null;
   // Promise chain that ensures saves never run concurrently
@@ -337,6 +486,14 @@ class NeurodivergentMemory {
       const snapshot: MemorySnapshot = JSON.parse(raw);
 
       this.nextMemoryId = snapshot.nextMemoryId ?? 1;
+
+      // Restore custom districts before loading memories so districts are available for validation.
+      if (snapshot.customDistricts) {
+        for (const [key, districtData] of Object.entries(snapshot.customDistricts)) {
+          if (this.districts[key]) continue; // Skip if already initialised (e.g. canonical)
+          this.districts[key] = { ...districtData, memories: [] };
+        }
+      }
 
       const memoriesMap = snapshot.memories ?? {};
       for (const [id, raw_mem] of Object.entries(memoriesMap)) {
@@ -462,6 +619,32 @@ class NeurodivergentMemory {
         }
         return mutated;
       }
+      case "register_district": {
+        const key = String(entry.payload.key ?? "");
+        // Skip if already registered (idempotent replay)
+        if (this.districts[key]) return false;
+        if ((CANONICAL_DISTRICTS as readonly string[]).includes(key)) return false;
+        const lucaParent = String(entry.payload.luca_parent ?? "");
+        if (!this.districts[lucaParent]) return false;
+        try {
+          const ancestor = this.resolveLucaAncestor(lucaParent);
+          const inheritedArchetype = this.districts[ancestor].archetype;
+          const activities = Array.isArray(entry.payload.activities)
+            ? (entry.payload.activities as string[])
+            : this.districts[lucaParent].activities.slice();
+          this.districts[key] = {
+            name: String(entry.payload.name ?? key),
+            description: String(entry.payload.description ?? ""),
+            archetype: inheritedArchetype,
+            activities,
+            memories: [],
+            luca_parent: lucaParent,
+          };
+          return true;
+        } catch {
+          return false;
+        }
+      }
       default:
         return false;
     }
@@ -503,9 +686,21 @@ class NeurodivergentMemory {
     for (const [id, mem] of Object.entries(this.memories)) {
       persistedMemories[id] = this.serializeMemory(mem);
     }
+
+    // Persist only custom districts (ones with luca_parent). Canonical districts
+    // are always re-initialised from initializeDistricts().
+    const customDistricts: { [key: string]: Omit<MemoryDistrict, "memories"> } = {};
+    for (const [key, district] of Object.entries(this.districts)) {
+      if (district.luca_parent) {
+        const { memories: _memories, ...rest } = district;
+        customDistricts[key] = rest;
+      }
+    }
+
     return {
       nextMemoryId: this.nextMemoryId,
       memories: persistedMemories,
+      customDistricts: Object.keys(customDistricts).length > 0 ? customDistricts : undefined,
     };
   }
 
@@ -649,6 +844,433 @@ class NeurodivergentMemory {
     return [memory.content, memory.name, ...memory.tags].join(" ");
   }
 
+  private normalizedBm25Scores(candidates: MemoryNPC[], query: string): Map<string, number> {
+    const terms = this.bm25.queryTerms(query);
+    if (terms.length === 0 || candidates.length === 0) {
+      return new Map(candidates.map(memory => [memory.id, 0]));
+    }
+
+    const rawScores = candidates.map(memory => ({
+      id: memory.id,
+      score: this.bm25.score(memory.id, terms),
+    }));
+
+    const maxScore = rawScores.reduce((currentMax, candidate) => Math.max(currentMax, candidate.score), 0);
+    if (maxScore === 0) {
+      return new Map(rawScores.map(candidate => [candidate.id, 0]));
+    }
+
+    return new Map(rawScores.map(candidate => [candidate.id, candidate.score / maxScore]));
+  }
+
+  private normalizedRecencyScores(candidates: MemoryNPC[]): Map<string, number> {
+    if (candidates.length === 0) {
+      return new Map();
+    }
+
+    const createdTimes = candidates.map(memory => memory.created.getTime());
+    const oldest = Math.min(...createdTimes);
+    const newest = Math.max(...createdTimes);
+    const range = newest - oldest;
+
+    if (range <= 0) {
+      return new Map(candidates.map(memory => [memory.id, 1]));
+    }
+
+    return new Map(
+      candidates.map(memory => [memory.id, (memory.created.getTime() - oldest) / range]),
+    );
+  }
+
+  storageDiagnostics(): StorageDiagnostics {
+    return {
+      snapshot_path: PERSISTENCE_FILE,
+      wal_path: this.walFile,
+      resolved_source: PERSISTENCE_LOCATION.source,
+    };
+  }
+
+  private resolveImportCandidates(
+    entries: ImportMemoryEntry[] | undefined,
+    filePath?: string,
+  ): { source: "entries" | "file_path"; candidates: ImportCandidate[] } {
+    if (Array.isArray(entries) && entries.length > 0 && filePath) {
+      throw createNMError(
+        NM_ERRORS.INPUT_VALIDATION_FAILED,
+        "Provide either entries or file_path to import_memories, not both.",
+        "Choose one source: inline entries for direct imports, or file_path for snapshot migration/import.",
+      );
+    }
+
+    if (filePath) {
+      return {
+        source: "file_path",
+        candidates: this.readImportSnapshotFile(filePath),
+      };
+    }
+
+    if (!Array.isArray(entries) || entries.length === 0) {
+      throw createNMError(
+        NM_ERRORS.INPUT_VALIDATION_FAILED,
+        "import_memories requires either a non-empty entries array or a file_path.",
+        "Provide entries for inline bulk import, or provide file_path for snapshot import.",
+      );
+    }
+
+    return {
+      source: "entries",
+      candidates: entries.map((entry) => ({ ...entry })),
+    };
+  }
+
+  private validateImportFilePath(filePath: string): string {
+    const resolvedPath = path.resolve(filePath);
+    const resolvedPersistenceDir = path.resolve(PERSISTENCE_DIR);
+    const hasJsonExtension = path.extname(resolvedPath).toLowerCase() === ".json";
+    if (!hasJsonExtension) {
+      throw createNMError(
+        NM_ERRORS.INPUT_VALIDATION_FAILED,
+        `Import file must use a .json extension: ${filePath}`,
+        "Provide a JSON snapshot file path ending in .json.",
+      );
+    }
+
+    const isWithinPersistenceDir =
+      resolvedPath === resolvedPersistenceDir ||
+      resolvedPath.startsWith(`${resolvedPersistenceDir}${path.sep}`);
+
+    if (!this.allowExternalImportFiles && !isWithinPersistenceDir) {
+      throw createNMError(
+        NM_ERRORS.INPUT_VALIDATION_FAILED,
+        `Import file path is outside the allowed persistence directory: ${filePath}`,
+        `Place the snapshot under ${resolvedPersistenceDir}, or set NEURODIVERGENT_MEMORY_IMPORT_ALLOW_EXTERNAL_FILE=true if external file imports are intentional.`,
+      );
+    }
+
+    return resolvedPath;
+  }
+
+  private readImportSnapshotFile(filePath: string): ImportCandidate[] {
+    const validatedPath = this.validateImportFilePath(filePath);
+    let raw = "";
+    try {
+      raw = fs.readFileSync(validatedPath, "utf-8");
+    } catch (error) {
+      throw createNMError(
+        NM_ERRORS.INPUT_VALIDATION_FAILED,
+        `Unable to read import file: ${filePath}`,
+        "Verify file_path points to a readable JSON snapshot on disk, then retry import_memories.",
+      );
+    }
+
+    let parsed: ImportMemorySnapshot;
+    try {
+      parsed = JSON.parse(raw) as ImportMemorySnapshot;
+    } catch {
+      throw createNMError(
+        NM_ERRORS.INPUT_VALIDATION_FAILED,
+        `Import file is not valid JSON: ${filePath}`,
+        "Provide a server snapshot JSON file with a top-level memories object.",
+      );
+    }
+
+    if (!parsed || typeof parsed !== "object" || !parsed.memories || typeof parsed.memories !== "object") {
+      throw createNMError(
+        NM_ERRORS.INPUT_VALIDATION_FAILED,
+        `Import file is not a server snapshot: ${filePath}`,
+        "Provide a JSON snapshot produced by the server, containing nextMemoryId and memories.",
+      );
+    }
+
+    const ordered = Object.entries(parsed.memories)
+      .sort(([leftId], [rightId]) => {
+        const leftNumeric = this.parseMemoryNumericId(leftId);
+        const rightNumeric = this.parseMemoryNumericId(rightId);
+        if (leftNumeric !== rightNumeric) {
+          return leftNumeric - rightNumeric;
+        }
+        return leftId.localeCompare(rightId);
+      });
+
+    return ordered.map(([sourceMemoryId, rawMemory]) => {
+      const deserialized = this.deserializeMemory(rawMemory);
+      if (deserialized.id !== sourceMemoryId) {
+        throw createNMError(
+          NM_ERRORS.INPUT_VALIDATION_FAILED,
+          `Snapshot memory id mismatch for ${sourceMemoryId}: embedded id is ${deserialized.id}.`,
+          "Ensure each snapshot memories key matches the embedded memory.id before retrying import_memories.",
+        );
+      }
+      return {
+        content: deserialized.content,
+        district: deserialized.district,
+        tags: [...deserialized.tags],
+        emotional_valence: deserialized.emotional_valence,
+        intensity: deserialized.intensity,
+        agent_id: deserialized.agent_id,
+        project_id: deserialized.project_id,
+        epistemic_status: deserialized.epistemic_status,
+        source_memory_id: sourceMemoryId,
+        source_connections: [...deserialized.connections],
+        name: deserialized.name,
+        archetype: deserialized.archetype,
+        traits: [...deserialized.traits],
+        concerns: [...deserialized.concerns],
+        created: deserialized.created,
+        last_accessed: deserialized.last_accessed,
+        access_count: deserialized.access_count,
+      };
+    });
+  }
+
+  private fingerprintForImportCandidate(candidate: Pick<ImportCandidate, "content" | "tags">, dedupe: ImportDedupePolicy): string | undefined {
+    switch (dedupe) {
+      case "none":
+        return undefined;
+      case "content_hash":
+        return crypto.createHash("sha256").update(candidate.content).digest("hex");
+      case "content_plus_tags": {
+        const stableTags = [...(candidate.tags ?? [])].sort().join("\u0000");
+        return crypto.createHash("sha256").update(`${candidate.content}\u0001${stableTags}`).digest("hex");
+      }
+    }
+  }
+
+  private dedupeReasonCode(dedupe: ImportDedupePolicy): string {
+    switch (dedupe) {
+      case "none":
+        return "NONE";
+      case "content_hash":
+        return "DEDUPE_CONTENT_HASH";
+      case "content_plus_tags":
+        return "DEDUPE_CONTENT_PLUS_TAGS";
+    }
+  }
+
+  private validateImportDedupePolicy(dedupe: string | undefined): ImportDedupePolicy {
+    if (dedupe === undefined || dedupe === "none" || dedupe === "content_hash" || dedupe === "content_plus_tags") {
+      return dedupe ?? "none";
+    }
+
+    throw createNMError(
+      NM_ERRORS.INPUT_VALIDATION_FAILED,
+      `Invalid dedupe policy: ${dedupe}`,
+      "Use one of: none, content_hash, or content_plus_tags.",
+    );
+  }
+
+  private projectIdFieldPathForImport(planSource: "entries" | "file_path", index: number, candidate: ImportCandidate): string {
+    if (planSource === "file_path") {
+      return candidate.source_memory_id
+        ? `snapshot[${candidate.source_memory_id}].project_id`
+        : `snapshot[${index}].project_id`;
+    }
+
+    return `entries[${index}].project_id`;
+  }
+
+  private buildImportPlan(
+    entries: ImportMemoryEntry[] | undefined,
+    default_agent_id: string | undefined,
+    options: ImportExecutionOptions = {},
+  ): ImportPlan {
+    const dedupe = this.validateImportDedupePolicy(options.dedupe);
+    const preserveIds = options.preserve_ids ?? false;
+    const mergeConnections = options.merge_connections ?? false;
+    const resolved = this.resolveImportCandidates(entries, options.file_path);
+
+    if (preserveIds && resolved.source !== "file_path") {
+      throw createNMError(
+        NM_ERRORS.INPUT_VALIDATION_FAILED,
+        "preserve_ids is only supported when importing from file_path snapshots.",
+        "Use file_path with a server snapshot, or omit preserve_ids for inline entry imports.",
+      );
+    }
+    if (mergeConnections && resolved.source !== "file_path") {
+      throw createNMError(
+        NM_ERRORS.INPUT_VALIDATION_FAILED,
+        "merge_connections is only supported when importing from file_path snapshots.",
+        "Use file_path with a server snapshot, or omit merge_connections for inline entry imports.",
+      );
+    }
+
+    const plan: ImportPlan = {
+      source: resolved.source,
+      requested: resolved.candidates.length,
+      memories: [],
+      skipped: [],
+      failures: [],
+      nextMemoryId: this.nextMemoryId,
+    };
+
+    const seenFingerprints = new Set<string>();
+    if (dedupe !== "none") {
+      for (const memory of Object.values(this.memories)) {
+        const existingFingerprint = this.fingerprintForImportCandidate(memory, dedupe);
+        if (existingFingerprint) {
+          seenFingerprints.add(existingFingerprint);
+        }
+      }
+    }
+
+    const idMap = new Map<string, string>();
+    const reservedIds = new Set<string>(Object.keys(this.memories));
+    let nextId = this.nextMemoryId;
+
+    for (const [index, candidate] of resolved.candidates.entries()) {
+      try {
+        if (!this.districts[candidate.district]) {
+          plan.failures.push({
+            index,
+            source_memory_id: candidate.source_memory_id,
+            reason_code: "UNKNOWN_DISTRICT",
+            detail: `Unknown district: ${candidate.district}`,
+          });
+          continue;
+        }
+
+        if (candidate.project_id !== undefined) {
+          validateProjectId(candidate.project_id, this.projectIdFieldPathForImport(plan.source, index, candidate));
+        }
+
+        const fingerprint = this.fingerprintForImportCandidate(candidate, dedupe);
+        if (fingerprint && seenFingerprints.has(fingerprint)) {
+          plan.skipped.push({
+            index,
+            source_memory_id: candidate.source_memory_id,
+            reason_code: this.dedupeReasonCode(dedupe),
+            detail: `Skipped by dedupe policy ${dedupe}.`,
+          });
+          continue;
+        }
+
+        let targetId: string;
+        if (preserveIds) {
+          const sourceMemoryId = candidate.source_memory_id;
+          if (!sourceMemoryId) {
+            plan.failures.push({
+              index,
+              source_memory_id: candidate.source_memory_id,
+              reason_code: "PRESERVE_IDS_REQUIRES_SNAPSHOT_IDS",
+              detail: "Snapshot import entry is missing a source memory id.",
+            });
+            continue;
+          }
+          if (reservedIds.has(sourceMemoryId)) {
+            plan.failures.push({
+              index,
+              source_memory_id: sourceMemoryId,
+              reason_code: "ID_CONFLICT",
+              detail: `Cannot preserve imported id ${sourceMemoryId}: it already exists in the current store.`,
+            });
+            continue;
+          }
+          targetId = sourceMemoryId;
+        } else {
+          targetId = `memory_${nextId++}`;
+        }
+
+        const districtArchetype = this.districts[candidate.district].archetype;
+        const created = candidate.created ?? new Date();
+        const lastAccessed = candidate.last_accessed ?? created;
+        const memory: MemoryNPC = {
+          id: targetId,
+          name: candidate.name ?? this.generateMemoryName(candidate.archetype ?? districtArchetype, candidate.content),
+          archetype: candidate.archetype ?? districtArchetype,
+          agent_id: candidate.agent_id ?? default_agent_id,
+          project_id: candidate.project_id,
+          district: candidate.district,
+          content: candidate.content,
+          traits: candidate.traits ? [...candidate.traits] : this.generateTraits(candidate.archetype ?? districtArchetype),
+          concerns: candidate.concerns ? [...candidate.concerns] : this.generateConcerns(candidate.archetype ?? districtArchetype),
+          connections: [],
+          tags: candidate.tags ?? [],
+          created,
+          last_accessed: lastAccessed,
+          access_count: candidate.access_count ?? 1,
+          emotional_valence: candidate.emotional_valence,
+          intensity: candidate.intensity ?? 0.5,
+          epistemic_status: resolveDefaultEpistemicStatus(
+            candidate.district,
+            candidate.tags ?? [],
+            candidate.epistemic_status,
+          ),
+        };
+
+        plan.memories.push({
+          index,
+          source_memory_id: candidate.source_memory_id,
+          source_connections: candidate.source_connections ?? [],
+          memory,
+        });
+
+        reservedIds.add(targetId);
+        if (candidate.source_memory_id) {
+          idMap.set(candidate.source_memory_id, targetId);
+        }
+        if (fingerprint) {
+          seenFingerprints.add(fingerprint);
+        }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        plan.failures.push({
+          index,
+          source_memory_id: candidate.source_memory_id,
+          reason_code: "VALIDATION_FAILED",
+          detail: message,
+        });
+      }
+    }
+
+    if (mergeConnections) {
+      const importedIds = new Set(plan.memories.map(entry => entry.memory.id));
+      for (const entry of plan.memories) {
+        const remappedConnections: string[] = [];
+        const seenConnections = new Set<string>();
+        for (const sourceConnectionId of entry.source_connections) {
+          const targetId = idMap.get(sourceConnectionId) ?? sourceConnectionId;
+          const targetExists = importedIds.has(targetId) || Boolean(this.memories[targetId]);
+          if (!targetExists) {
+            plan.failures.push({
+              index: entry.index,
+              source_memory_id: entry.source_memory_id,
+              reason_code: "INVALID_CONNECTION_TARGET",
+              detail: `Connection target ${sourceConnectionId} does not exist in the snapshot import batch or the current store.`,
+            });
+            continue;
+          }
+          if (targetId === entry.memory.id || seenConnections.has(targetId)) {
+            continue;
+          }
+          seenConnections.add(targetId);
+          remappedConnections.push(targetId);
+        }
+        entry.memory.connections = remappedConnections;
+      }
+    }
+
+    plan.nextMemoryId = plan.memories.reduce(
+      (currentMax, entry) => Math.max(currentMax, this.parseMemoryNumericId(entry.memory.id) + 1),
+      nextId,
+    );
+
+    return plan;
+  }
+
+  private formatImportFailures(failures: ImportPlanFailure[]): string {
+    return failures
+      .slice(0, 5)
+      .map(failure => `entry ${failure.index}${failure.source_memory_id ? ` (${failure.source_memory_id})` : ""}: ${failure.reason_code} - ${failure.detail}`)
+      .join("; ");
+  }
+
+  private successfulImportIds(plan: ImportPlan): string[] {
+    const failedIndexes = new Set(plan.failures.map(failure => failure.index));
+    return plan.memories
+      .filter(entry => !failedIndexes.has(entry.index))
+      .map(entry => entry.memory.id);
+  }
+
   private detectRepeatCandidate(content: string, agentId?: string): { memory: MemoryNPC; similarityScore: number } | undefined {
     // Select the 10 most recently created memories for this agent (or globally) in O(N log k) with k=10,
     // instead of sorting all memories (O(N log N)).
@@ -736,11 +1358,17 @@ class NeurodivergentMemory {
     };
   }
 
-  private applyPingPongTelemetry(memory: MemoryNPC, actor?: OperationActorContext): { detected: boolean; count: number } {
+  private applyPingPongTelemetry(memory: MemoryNPC, actor?: OperationActorContext): {
+    detected: boolean;
+    count: number;
+    cooldownActivated: boolean;
+    cooldownDurationMs: number;
+  } {
     const pingPong = this.loopTelemetry.recordWrite({
       memory_id: memory.id,
       district: actor?.district ?? memory.district,
       agent_id: actor?.agent_id ?? memory.agent_id,
+      target_district: memory.district,
     });
     if (pingPong.pingPongDetected) {
       memory.ping_pong_counter = (memory.ping_pong_counter ?? 0) + 1;
@@ -754,13 +1382,54 @@ class NeurodivergentMemory {
           memory_id: memory.id,
           count: pingPong.pingPongCount,
           ping_pong_counter: memory.ping_pong_counter,
+          cooldown_activated: pingPong.cooldownActivated,
+          cooldown_duration_ms: pingPong.cooldownDurationMs,
         },
         "Ping-pong telemetry detected",
       );
-      return { detected: true, count: pingPong.pingPongCount };
+      return {
+        detected: true,
+        count: pingPong.pingPongCount,
+        cooldownActivated: pingPong.cooldownActivated,
+        cooldownDurationMs: pingPong.cooldownDurationMs,
+      };
     }
 
-    return { detected: false, count: pingPong.pingPongCount };
+    return {
+      detected: false,
+      count: pingPong.pingPongCount,
+      cooldownActivated: pingPong.cooldownActivated,
+      cooldownDurationMs: pingPong.cooldownDurationMs,
+    };
+  }
+
+  private buildNoNetNewInfoWarning(matchedMemoryId: string, similarityScore: number): string {
+    return `⚠️ No net-new info: incoming content closely repeats ${matchedMemoryId} (similarity=${similarityScore.toFixed(3)}). Consider updating the existing memory instead of creating another duplicate.`;
+  }
+
+  private buildDistillSuggestion(memoryId: string, logicalEmotionalReadCount: number): string {
+    return `⚠️ Distillation suggested: logical_analysis has accessed emotional_processing memory ${memoryId} ${logicalEmotionalReadCount} times in the current loop window. Consider calling distill_memory to translate the signal before continuing analysis.`;
+  }
+
+  buildCrossDistrictCooldownWarning(memoryId: string, cooldownMs: number): string {
+    return `⚠️ Cross-district cooldown started for ${memoryId}: repetitive cross-district churn was detected. Additional cross-district writes will be blocked for ${cooldownMs}ms.`;
+  }
+
+  private enforceCrossDistrictCooldown(memory: MemoryNPC, actor?: OperationActorContext): void {
+    if (!actor?.district || actor.district === memory.district) {
+      return;
+    }
+
+    const cooldownRemainingMs = this.loopTelemetry.getCooldownRemaining(memory.id);
+    if (cooldownRemainingMs <= 0) {
+      return;
+    }
+
+    throw createNMError(
+      NM_ERRORS.CROSS_DISTRICT_COOLDOWN_ACTIVE,
+      `Cross-district cooldown active for ${memory.id}; retry in ${cooldownRemainingMs}ms.`,
+      "Wait for the cooldown window to expire, reduce repetitive cross-district churn, or set NEURODIVERGENT_MEMORY_CROSS_DISTRICT_COOLDOWN_MS=0 to disable the cooldown.",
+    );
   }
 
   // ── Districts ──────────────────────────────────────────────────────────────
@@ -805,6 +1474,145 @@ class NeurodivergentMemory {
     };
   }
 
+  /**
+   * Resolve the canonical LUCA ancestor for a district by walking the luca_parent chain.
+   * Returns the canonical district key if the chain is valid, or throws if it is broken.
+   */
+  private resolveLucaAncestor(districtKey: string): string {
+    const visited = new Set<string>();
+    let currentDistrictKey = districtKey;
+
+    while (true) {
+      if (visited.has(currentDistrictKey)) {
+        throw createNMError(
+          NM_ERRORS.INPUT_VALIDATION_FAILED,
+          `Cycle detected in LUCA chain while resolving district "${districtKey}": "${currentDistrictKey}" was visited more than once.`,
+          "Ensure every custom district's luca_parent chain is acyclic and ultimately traces back to one of the 5 canonical districts.",
+        );
+      }
+      visited.add(currentDistrictKey);
+
+      const district = this.districts[currentDistrictKey];
+      if (!district) {
+        throw createNMError(
+          NM_ERRORS.UNKNOWN_DISTRICT,
+          `Unknown district in LUCA chain: ${currentDistrictKey}`,
+          "Ensure every district in the ancestry chain is registered before the child district.",
+        );
+      }
+
+      if ((CANONICAL_DISTRICTS as readonly string[]).includes(currentDistrictKey)) {
+        return currentDistrictKey;
+      }
+
+      if (!district.luca_parent) {
+        throw createNMError(
+          NM_ERRORS.INPUT_VALIDATION_FAILED,
+          `Custom district "${currentDistrictKey}" has no luca_parent and is not a canonical district.`,
+          "Every custom district must declare a luca_parent that traces back to one of the 5 canonical districts.",
+        );
+      }
+
+      currentDistrictKey = district.luca_parent;
+    }
+  }
+
+  /**
+   * Register a custom district with LUCA ancestry validation.
+   * Custom districts inherit their archetype from the canonical ancestor.
+   */
+  registerDistrict(
+    key: string,
+    name: string,
+    description: string,
+    lucaParent: string,
+    activities: string[] = [],
+  ): MemoryDistrict {
+    // Validate district key format (snake_case)
+    if (!/^[a-z][a-z0-9_]*$/.test(key)) {
+      throw createNMError(
+        NM_ERRORS.INPUT_VALIDATION_FAILED,
+        `Invalid district key "${key}": must be snake_case (lowercase letters, digits, underscores).`,
+        "Use a snake_case identifier like project_build_pipeline.",
+      );
+    }
+
+    // Prevent overriding canonical districts
+    if ((CANONICAL_DISTRICTS as readonly string[]).includes(key)) {
+      throw createNMError(
+        NM_ERRORS.INPUT_VALIDATION_FAILED,
+        `Cannot override canonical district: ${key}`,
+        "Canonical districts (logical_analysis, emotional_processing, practical_execution, vigilant_monitoring, creative_synthesis) cannot be redefined.",
+      );
+    }
+
+    // Prevent duplicate registration
+    if (this.districts[key]) {
+      throw createNMError(
+        NM_ERRORS.INPUT_VALIDATION_FAILED,
+        `District already registered: ${key}`,
+        "Choose a different key or use the existing district.",
+      );
+    }
+
+    // Validate the LUCA parent exists
+    if (!this.districts[lucaParent]) {
+      throw createNMError(
+        NM_ERRORS.UNKNOWN_DISTRICT,
+        `Unknown LUCA parent: ${lucaParent}`,
+        `Use one of the existing districts as parent: ${Object.keys(this.districts).join(", ")}.`,
+      );
+    }
+
+    // Walk the ancestry chain to verify it reaches a canonical district
+    const ancestor = this.resolveLucaAncestor(lucaParent);
+    const inheritedArchetype = this.districts[ancestor].archetype;
+
+    const district: MemoryDistrict = {
+      name,
+      description,
+      archetype: inheritedArchetype,
+      activities: activities.length > 0 ? activities : this.districts[lucaParent].activities.slice(),
+      memories: [],
+      luca_parent: lucaParent,
+    };
+
+    this.appendWalEntry("register_district", {
+      key,
+      name: district.name,
+      description: district.description,
+      luca_parent: lucaParent,
+      activities: district.activities,
+    });
+    this.districts[key] = district;
+    this.scheduleSave();
+
+    logger.info(
+      { operation: "register_district", key, name, lucaParent, ancestor, archetype: inheritedArchetype },
+      "Registered custom district",
+    );
+
+    return district;
+  }
+
+  /**
+   * Return the ancestry chain for a district key as an ordered array,
+   * starting from the given key and walking up via luca_parent until
+   * reaching a canonical district (which has no luca_parent).
+   *
+   * The caller is responsible for ensuring startKey is a registered district;
+   * if it is not, the returned array will contain only the unknown key.
+   */
+  getDistrictAncestryChain(startKey: string): string[] {
+    const chain: string[] = [];
+    let current: string | undefined = startKey;
+    while (current) {
+      chain.push(current);
+      current = this.districts[current]?.luca_parent;
+    }
+    return chain;
+  }
+
   // ── Core CRUD ──────────────────────────────────────────────────────────────
 
   storeMemory(
@@ -839,9 +1647,12 @@ class NeurodivergentMemory {
     let similarityScore: number | undefined;
     let pingPongDetected = false;
     let pingPongCount: number | undefined;
+    let noNetNewInfoWarning: string | undefined;
+    let cooldownDurationMs: number | undefined;
 
     if (repeatCandidate && repeatCandidate.similarityScore >= this.loopTelemetry.getRepeatThreshold()) {
       const matchedMemory = repeatCandidate.memory;
+      this.enforceCrossDistrictCooldown(matchedMemory, { district, agent_id });
       const nextRepeatCount = (matchedMemory.repeat_write_count ?? matchedMemory.repeat_count ?? 0) + 1;
       matchedMemory.repeat_write_count = nextRepeatCount;
       matchedMemory.repeat_count = nextRepeatCount;
@@ -862,6 +1673,7 @@ class NeurodivergentMemory {
       });
       pingPongDetected = pingPongResult.detected;
       pingPongCount = pingPongResult.count;
+      cooldownDurationMs = pingPongResult.cooldownActivated ? pingPongResult.cooldownDurationMs : undefined;
 
       this.loopTelemetry.recordHighSimilarityWrite({
         memory_id: id,
@@ -875,7 +1687,10 @@ class NeurodivergentMemory {
       repeatDetected = true;
       matchedMemoryId = matchedMemory.id;
       similarityScore = repeatCandidate.similarityScore;
+      noNetNewInfoWarning = this.buildNoNetNewInfoWarning(matchedMemory.id, repeatCandidate.similarityScore);
     }
+
+    const resolvedEpistemicStatus = resolveDefaultEpistemicStatus(district, tags, epistemic_status);
 
     const memory: MemoryNPC = {
       id,
@@ -894,7 +1709,7 @@ class NeurodivergentMemory {
       access_count: 1,
       emotional_valence,
       intensity,
-      epistemic_status,
+      epistemic_status: resolvedEpistemicStatus,
       last_similarity_score: similarityScore,
     };
 
@@ -923,29 +1738,38 @@ class NeurodivergentMemory {
       similarity_score: similarityScore,
       ping_pong_detected: pingPongDetected,
       ping_pong_count: pingPongCount,
+      no_net_new_info_warning: noNetNewInfoWarning,
+      cooldown_duration_ms: cooldownDurationMs,
     };
   }
 
-  retrieveMemory(id: string, actor?: OperationActorContext): MemoryNPC | null {
+  retrieveMemory(id: string, actor?: OperationActorContext): RetrieveMemoryResult | null {
     const memory = this.memories[id];
     if (!memory) {
       return null;
     }
 
-    this.loopTelemetry.recordRead({
+    const readSignal = this.loopTelemetry.recordRead({
       memory_id: id,
       district: actor?.district ?? memory.district,
       agent_id: actor?.agent_id ?? memory.agent_id,
+      target_district: memory.district,
     });
 
-    return memory;
+    return {
+      memory,
+      distill_suggestion: readSignal.distillSuggested
+        ? this.buildDistillSuggestion(id, readSignal.logicalEmotionalReadCount)
+        : undefined,
+      logical_emotional_read_count: readSignal.logicalEmotionalReadCount,
+    };
   }
 
   updateMemory(
     id: string,
     updates: MemoryUpdatePayload,
     actor?: OperationActorContext,
-  ): MemoryNPC {
+  ): UpdateMemoryResult {
     const memory = this.memories[id];
     if (!memory) {
       throw createNMError(
@@ -966,13 +1790,20 @@ class NeurodivergentMemory {
       validateProjectId(updates.project_id);
     }
 
+    this.enforceCrossDistrictCooldown(memory, actor);
+
     this.appendWalEntry("update", { memory_id: id, updates });
     this.applyMemoryUpdates(id, updates);
-    this.applyPingPongTelemetry(this.memories[id], actor);
+    const pingPongResult = this.applyPingPongTelemetry(this.memories[id], actor);
     this.scheduleSave();
     logger.info({ operation: "update", memoryId: id, changedFields: Object.keys(updates).sort() }, "Updated memory");
 
-    return this.memories[id];
+    return {
+      memory: this.memories[id],
+      ping_pong_detected: pingPongResult.detected,
+      ping_pong_count: pingPongResult.count,
+      cooldown_duration_ms: pingPongResult.cooldownActivated ? pingPongResult.cooldownDurationMs : undefined,
+    };
   }
 
   deleteMemory(id: string): void {
@@ -1106,8 +1937,18 @@ class NeurodivergentMemory {
     emotional_valence_min?: number,
     emotional_valence_max?: number,
     intensity_min?: number,
-    intensity_max?: number
+    intensity_max?: number,
+    context?: string,
+    recency_weight = 0,
   ): ScoredMemory[] {
+    if (recency_weight < 0 || recency_weight > 1) {
+      throw createNMError(
+        NM_ERRORS.INPUT_VALIDATION_FAILED,
+        `Invalid recency_weight: ${recency_weight}. Expected a value between 0 and 1.`,
+        "Provide recency_weight as a number in the inclusive range 0..1.",
+      );
+    }
+
     let candidates = Object.values(this.memories);
 
     if (district) {
@@ -1145,25 +1986,47 @@ class NeurodivergentMemory {
       candidates = candidates.filter(m => (m.intensity ?? 0.5) <= intensity_max!);
     }
 
-    const queryTerms = this.bm25.queryTerms(query);
+    const hasContext = typeof context === "string" && context.trim().length > 0;
+    const queryScores = this.normalizedBm25Scores(candidates, query);
+    const contextScores = hasContext
+      ? this.normalizedBm25Scores(candidates, context)
+      : new Map(candidates.map(memory => [memory.id, 0]));
+    const recencyScores = recency_weight > 0
+      ? this.normalizedRecencyScores(candidates)
+      : new Map(candidates.map(memory => [memory.id, 0]));
 
-    const scored: ScoredMemory[] = candidates.map(m => ({
-      memory: m,
-      score: this.bm25.score(m.id, queryTerms),
-    }));
+    const scored = candidates.map(memory => {
+      const queryScore = queryScores.get(memory.id) ?? 0;
+      const contextScore = contextScores.get(memory.id) ?? 0;
+      const semanticScore = hasContext && queryScore > 0
+        ? (queryScore * 0.75) + (contextScore * 0.25)
+        : queryScore;
+      const recencyScore = recencyScores.get(memory.id) ?? 0;
 
-    // Normalise scores to 0-1 range; return empty if no terms matched
-    const maxScore = scored.reduce((mx, s) => Math.max(mx, s.score), 0);
+      return {
+        memory,
+        score: semanticScore + (recencyScore * recency_weight),
+        semanticScore,
+      };
+    });
+
+    if (scored.reduce((mx, candidate) => Math.max(mx, candidate.semanticScore), 0) === 0) {
+      return [];
+    }
+
+    const maxScore = scored.reduce((mx, candidate) => Math.max(mx, candidate.score), 0);
     if (maxScore === 0) {
       return [];
     }
-    for (const s of scored) {
-      s.score = s.score / maxScore;
-    }
+
+    const normalized: ScoredMemory[] = scored.map(candidate => ({
+      memory: candidate.memory,
+      score: candidate.score / maxScore,
+    }));
 
     // Apply min_score filter after normalisation (score >= 0 naturally passes a 0 threshold)
     const threshold = min_score ?? 0;
-    const filtered = scored.filter(s => s.score >= threshold);
+    const filtered = normalized.filter(s => s.score >= threshold);
 
     // Sort descending by score
     filtered.sort((a, b) => b.score - a.score);
@@ -1214,7 +2077,12 @@ class NeurodivergentMemory {
     return results;
   }
 
-  relatedTo(memoryId: string, query?: string): ScoredMemory[] {
+  relatedTo(
+    memoryId: string,
+    query?: string,
+    context?: string,
+    epistemic_statuses?: EpistemicStatusFilter[],
+  ): ScoredMemory[] {
     const root = this.memories[memoryId];
     if (!root) {
       throw createNMError(
@@ -1245,19 +2113,39 @@ class NeurodivergentMemory {
 
     if (hopMap.size === 0) return [];
 
-    const queryTerms = query ? this.bm25.queryTerms(query) : this.bm25.queryTerms(root.content);
+    const candidates = Array.from(hopMap.entries())
+      .map(([id, hops]) => ({ memory: this.memories[id], hops }))
+      .filter((entry): entry is { memory: MemoryNPC; hops: number } => Boolean(entry.memory));
+
+    const filteredCandidates = epistemic_statuses && epistemic_statuses.length > 0
+      ? candidates.filter(({ memory }) => {
+          const status = memory.epistemic_status ?? "unset";
+          return epistemic_statuses.includes(status);
+        })
+      : candidates;
+
+    if (filteredCandidates.length === 0) return [];
+
+    const semanticQuery = query && query.trim().length > 0 ? query : root.content;
+    const hasContext = typeof context === "string" && context.trim().length > 0;
+    const queryScores = this.normalizedBm25Scores(filteredCandidates.map(entry => entry.memory), semanticQuery);
+    const contextScores = hasContext
+      ? this.normalizedBm25Scores(filteredCandidates.map(entry => entry.memory), context)
+      : new Map(filteredCandidates.map(entry => [entry.memory.id, 0]));
 
     const scored: ScoredMemory[] = [];
-    for (const [id, hops] of hopMap.entries()) {
-      const mem = this.memories[id];
-      if (!mem) continue;
-      const semanticScore = this.bm25.score(id, queryTerms);
+    for (const { memory, hops } of filteredCandidates) {
+      const queryScore = queryScores.get(memory.id) ?? 0;
+      const contextScore = contextScores.get(memory.id) ?? 0;
+      const semanticScore = hasContext
+        ? (queryScore * 0.75) + (contextScore * 0.25)
+        : queryScore;
       // Proximity bonus is 1/hops so direct neighbours (hops=1) score 1.0 and
-      // two-hop neighbours score 0.5.  This is added to the raw BM25 score
-      // before the whole result set is normalised to 0-1, which naturally
-      // balances graph proximity against semantic relevance.
+      // two-hop neighbours score 0.5. This is added to the *normalized* semantic
+      // score (0–1) derived from BM25, and then the combined scores are
+      // normalised again to 0–1 to balance graph proximity against relevance.
       const proximityBonus = 1 / hops;
-      scored.push({ memory: mem, score: semanticScore + proximityBonus });
+      scored.push({ memory, score: semanticScore + proximityBonus });
     }
 
     // Normalise
@@ -1272,11 +2160,24 @@ class NeurodivergentMemory {
 
   // ── Listing & Stats ────────────────────────────────────────────────────────
 
-  listMemories(page = 1, page_size = 20, district?: string, archetype?: string, project_id?: string): { memories: MemoryNPC[]; total: number; page: number; page_size: number; total_pages: number } {
+  listMemories(
+    page = 1,
+    page_size = 20,
+    district?: string,
+    archetype?: string,
+    project_id?: string,
+    epistemic_statuses?: EpistemicStatusFilter[],
+  ): { memories: MemoryNPC[]; total: number; page: number; page_size: number; total_pages: number } {
     let all = Object.values(this.memories);
     if (district) all = all.filter(m => m.district === district);
     if (archetype) all = all.filter(m => m.archetype === archetype);
     if (project_id) all = all.filter(m => m.project_id === project_id);
+    if (epistemic_statuses && epistemic_statuses.length > 0) {
+      all = all.filter(m => {
+        const status = m.epistemic_status ?? "unset";
+        return epistemic_statuses.includes(status);
+      });
+    }
 
     all.sort((a, b) => b.created.getTime() - a.created.getTime());
 
@@ -1303,7 +2204,6 @@ class NeurodivergentMemory {
       outdated: 0,
       unset: 0,
     };
-    const KNOWN_EPISTEMIC_STATUSES: EpistemicStatusFilter[] = ["draft", "validated", "outdated", "unset"];
     for (const key of Object.keys(this.districts)) perDistrict[key] = 0;
     for (const m of allMems) perDistrict[m.district] = (perDistrict[m.district] ?? 0) + 1;
     for (const m of allMems) {
@@ -1313,7 +2213,7 @@ class NeurodivergentMemory {
       perProject[projectKey] = (perProject[projectKey] ?? 0) + 1;
       const rawStatus = m.epistemic_status ?? "unset";
       const statusKey: EpistemicStatusFilter =
-        (KNOWN_EPISTEMIC_STATUSES as string[]).includes(rawStatus) ? (rawStatus as EpistemicStatusFilter) : "unset";
+        (VALID_EPISTEMIC_STATUSES as string[]).includes(rawStatus) ? (rawStatus as EpistemicStatusFilter) : "unset";
       epistemicStatusBreakdown[statusKey] = (epistemicStatusBreakdown[statusKey] ?? 0) + 1;
     }
 
@@ -1429,29 +2329,246 @@ class NeurodivergentMemory {
   }
 
   /**
-   * Import memories from a structured JSON array (bootstrap/seed).
-   * Each entry must have: content, district.
-   * Optional per-entry fields:
-   * - tags
-   * - emotional_valence
-   * - intensity
-   * - agent_id (overrides default_agent_id when provided)
-   * - project_id
-   * - epistemic_status (must be a valid EpistemicStatus)
-   * Returns the list of newly created memory IDs.
+   * Distill an emotional memory into a structured logical artifact.
+   * Translates raw emotional processing content into signals, triggers, constraints,
+   * next_actions, and risk_flags that logical/planning agents can consume efficiently.
    */
-  importMemories(entries: Array<{ content: string; district: string; tags?: string[]; emotional_valence?: number; intensity?: number; agent_id?: string; project_id?: string; epistemic_status?: EpistemicStatus }>, default_agent_id?: string): string[] {
-    const materialized = this.materializeImportMemories(entries, default_agent_id);
-    // Append WAL entry for the import before mutating in-memory state to preserve the
-    // "append before mutate" invariant used elsewhere in the system.
+  distillMemory(sourceMemoryId: string, agent_id?: string): {
+    distilled: MemoryNPC;
+    artifact: DistilledArtifact;
+  } {
+    const sourceMemory = this.memories[sourceMemoryId];
+    if (!sourceMemory) {
+      throw createNMError(
+        NM_ERRORS.MEMORY_NOT_FOUND,
+        `Memory not found: ${sourceMemoryId}`,
+        "List or search memories first, then retry with a valid memory ID.",
+      );
+    }
+    if (sourceMemory.district !== "emotional_processing") {
+      throw createNMError(
+        NM_ERRORS.INPUT_VALIDATION_FAILED,
+        `Memory ${sourceMemoryId} is not in emotional_processing district (it is in ${sourceMemory.district})`,
+        "distill_memory only operates on emotional_processing memories.",
+      );
+    }
+
+    const content = sourceMemory.content.toLowerCase();
+    const originalIntensity = sourceMemory.intensity ?? 0.5;
+    const distilledIntensity = Math.max(0, originalIntensity * 0.4); // Reduced intensity for logical consumption
+
+    // Extract signals: look for patterns indicating emotional states or needs
+    const signalPatterns = [
+      { pattern: /shame|guilt|embarrass/i, signal: "shame_cycle_detected" },
+      { pattern: /avoidanc|procrastinat|put\s*off/i, signal: "avoidance_behavior" },
+      { pattern: /overwhelm|too\s*much|can't\s*(start|begin|do)/i, signal: "overwhelm_state" },
+      { pattern: /perfection|perfect|just\s*right/i, signal: "perfectionism_tendency" },
+      { pattern: /focus|distract|wander|drift/i, signal: "attention_fragmentation" },
+      { pattern: /energy|tired|exhaust|fatigue/i, signal: "energy_depletion" },
+      { pattern: /motivat|drive|want|need/i, signal: "motivation_signal" },
+      { pattern: /frustrat|anger|annoy|irritat/i, signal: "frustration_state" },
+      { pattern: /anxiet|worried|fear|panic/i, signal: "anxiety_signal" },
+      { pattern: /creativ|insight|idea|connection/i, signal: "creative_insight" },
+    ];
+
+    const signals: string[] = signalPatterns
+      .filter(({ pattern }) => pattern.test(content))
+      .map(({ signal }) => signal);
+
+    if (signals.length === 0) {
+      signals.push("unclassified_emotional_state");
+    }
+
+    // Extract triggers: conditions that may have caused the emotional state
+    const triggerPatterns = [
+      { pattern: /deadline|due|time\s*press|urgent/i, trigger: "time_pressure" },
+      { pattern: /complex|hard|difficult|confusing/i, trigger: "task_complexity" },
+      { pattern: /interrup|noise|distraction|environment/i, trigger: "environmental_disruption" },
+      { pattern: /expect|pressure|demand|require/i, trigger: "external_expectation" },
+      { pattern: /unclear|unknown|unsure|ambiguous/i, trigger: "ambiguity" },
+      { pattern: /transit|switch|context.?switch|multi.?task/i, trigger: "context_switching" },
+      { pattern: /social|people|meeting|group/i, trigger: "social_demand" },
+      { pattern: /novel|new|unfamiliar|unknown/i, trigger: "novelty" },
+    ];
+
+    const triggers: string[] = triggerPatterns
+      .filter(({ pattern }) => pattern.test(content))
+      .map(({ trigger }) => trigger);
+
+    if (triggers.length === 0) {
+      triggers.push("unspecified_trigger");
+    }
+
+    // Extract constraints: limitations or boundaries relevant to the situation
+    const constraints: string[] = [];
+    if (/time|schedule|deadline/i.test(content)) constraints.push("time_bounded");
+    if (/energy|fatigue|tired/i.test(content)) constraints.push("energy_limited");
+    if (/attention|focus|distract/i.test(content)) constraints.push("attention_fragmented");
+    if (/resource|budget|money/i.test(content)) constraints.push("resource_limited");
+    if (/support|help|alone/i.test(content)) constraints.push("support_dependent");
+    if (/deadline|must|need.*by/i.test(content)) constraints.push("time_sensitive");
+    if (constraints.length === 0) constraints.push("no_explicit_constraints");
+
+    // Extract next actions: actionable recommendations
+    const actionPatterns = [
+      { pattern: /break.*down|slice|chunk|split/i, action: "decompose_task" },
+      { pattern: /time.?box|timer|pomodoro|minute/i, action: "apply_timeboxing" },
+      { pattern: /rest|break|pause|stop/i, action: "schedule_rest" },
+      { pattern: /write|note|document|record/i, action: "externalize_thought" },
+      { pattern: /ask|help|collaborate|support/i, action: "seek_support" },
+      { pattern: /simplify|reduce|strip/i, action: "reduce_scope" },
+      { pattern: /start|begin|first.*step|just.*do/i, action: "initiate_minimum_effort" },
+      { pattern: /review|reflect|check|assess/i, action: "reflect_on_pattern" },
+      { pattern: /connect|link|relate/i, action: "connect_related_knowledge" },
+    ];
+
+    const next_actions: string[] = actionPatterns
+      .filter(({ pattern }) => pattern.test(content))
+      .map(({ action }) => action);
+
+    if (next_actions.length === 0) {
+      next_actions.push("monitor_for_clarity");
+    }
+
+    // Extract risk flags: warning indicators
+    const riskPatterns = [
+      { pattern: /shame|cycle|rut|stuck|loop/i, risk: "negative_feedback_loop" },
+      { pattern: /avoid|escape|quit|give.?up/i, risk: "task_abandonment" },
+      { pattern: /perfection|all.?or.?nothing|binary/i, risk: "perfectionism_trap" },
+      { pattern: /compare|others|worse|inferior/i, risk: "comparison_distortion" },
+      { pattern: /catastroph|worst|always|never/i, risk: "catastrophizing" },
+      { pattern: /burnout|empty|hollow|numb/i, risk: "burnout_indicator" },
+      { pattern: /impulse|rash|without.?thinking/i, risk: "impulsive_decision" },
+    ];
+
+    const risk_flags: string[] = riskPatterns
+      .filter(({ pattern }) => pattern.test(content))
+      .map(({ risk }) => risk);
+
+    if (/ruminate|repeat|same.?thought|spiral/i.test(content)) {
+      risk_flags.push("rumination_loop");
+    }
+
+    // Build artifact
+    const artifact: DistilledArtifact = {
+      signals,
+      triggers,
+      constraints,
+      next_actions,
+      risk_flags,
+      abstracted_from: sourceMemoryId,
+    };
+
+    // Create distilled memory in logical_analysis district
+    const id = `memory_${this.nextMemoryId++}`;
+    const now = new Date();
+    const distilledContent = `Distilled artifact from ${sourceMemoryId}: signals=[${signals.join(", ")}], triggers=[${triggers.join(", ")}], constraints=[${constraints.join(", ")}], actions=[${next_actions.join(", ")}], risks=[${risk_flags.join(", ")}]`;
+
+    // Compute updated connections before WAL write to preserve "append before mutate" invariant
+    const updatedConnections = [...sourceMemory.connections, id];
+
+    const distilledMemory: MemoryNPC = {
+      id,
+      name: `distilled_${sourceMemoryId}_${now.toISOString()}`,
+      archetype: "scholar",
+      agent_id,
+      project_id: sourceMemory.project_id,
+      district: "logical_analysis",
+      content: distilledContent,
+      traits: ["analytical", "structured"],
+      concerns: ["clarity", "actionability"],
+      connections: [sourceMemoryId],
+      tags: ["topic:distillation", "scope:derived", "kind:distilled", "layer:abstraction"],
+      created: now,
+      last_accessed: now,
+      access_count: 1,
+      emotional_valence: 0, // Neutral emotional valence for logical consumption
+      intensity: distilledIntensity,
+      abstracted_from: sourceMemoryId,
+      epistemic_status: sourceMemory.epistemic_status,
+    };
+
+    // Append WAL entries before mutating in-memory state (durability invariant)
+    this.ensureCapacityForInsert();
+    this.appendWalEntry("store", { memory: this.serializeMemory(distilledMemory) });
+    this.appendWalEntry("update", { memory_id: sourceMemoryId, updates: { connections: updatedConnections } });
+    this.insertMemory(distilledMemory);
+    // Apply mutations after WAL writes
+    sourceMemory.connections = updatedConnections;
+    this.scheduleSave();
+
+    logger.info(
+      {
+        operation: "distill",
+        sourceMemoryId,
+        distilledMemoryId: id,
+        signalCount: signals.length,
+        riskFlagCount: risk_flags.length,
+      },
+      "Distilled emotional memory",
+    );
+
+    return {
+      distilled: distilledMemory,
+      artifact,
+    };
+  }
+
+  /**
+   * Import multiple memories in a single WAL-backed operation.
+   * Materializes entries first so the import record is appended before in-memory mutation.
+   */
+  importMemories(
+    entries: Array<{ content: string; district: string; tags?: string[]; emotional_valence?: number; intensity?: number; agent_id?: string; project_id?: string; epistemic_status?: EpistemicStatus }> | undefined,
+    default_agent_id?: string,
+    options: ImportExecutionOptions = {},
+  ): ImportExecutionResult {
+    const plan = this.buildImportPlan(entries, default_agent_id, options);
+    if (options.dry_run) {
+      return {
+        source: plan.source,
+        requested: plan.requested,
+        dry_run: true,
+        imported_ids: this.successfulImportIds(plan),
+        skipped: plan.skipped,
+        failures: plan.failures,
+      };
+    }
+
+    if (plan.failures.length > 0) {
+      throw createNMError(
+        NM_ERRORS.INPUT_VALIDATION_FAILED,
+        `Import validation failed: ${this.formatImportFailures(plan.failures)}`,
+        "Run import_memories with dry_run=true to inspect the deterministic failure list, then fix the reported rows before retrying.",
+      );
+    }
+
+    const materialized = plan.memories.map(entry => entry.memory);
     this.appendWalEntry("import", { memories: materialized.map(mem => this.serializeMemory(mem)) });
     for (const memory of materialized) {
       this.ensureCapacityForInsert();
       this.insertMemory(memory);
     }
+    this.nextMemoryId = Math.max(this.nextMemoryId, plan.nextMemoryId);
     this.scheduleSave();
-    logger.info({ operation: "import", importedCount: materialized.length, agentId: default_agent_id ?? "unassigned" }, "Imported memories");
-    return materialized.map(mem => mem.id);
+    logger.info(
+      {
+        operation: "import",
+        importedCount: materialized.length,
+        skippedCount: plan.skipped.length,
+        source: plan.source,
+        agentId: default_agent_id ?? "unassigned",
+      },
+      "Imported memories",
+    );
+    return {
+      source: plan.source,
+      requested: plan.requested,
+      dry_run: false,
+      imported_ids: materialized.map(mem => mem.id),
+      skipped: plan.skipped,
+      failures: plan.failures,
+    };
   }
 
   private materializeImportMemories(
@@ -1505,6 +2622,15 @@ class NeurodivergentMemory {
 // Global memory system instance
 const memorySystem = new NeurodivergentMemory();
 
+const SYNTHESIS_PROMPT_INCLUDE_ALL_THRESHOLD = 60;
+const SYNTHESIS_PROMPT_MAX_MEMORIES = 75;
+const SYNTHESIS_PROMPT_RECENT_FRACTION = 0.6;
+const SYNTHESIS_PROMPT_OLDER_FRACTION = 0.2;
+const SYNTHESIS_PACKET_BASE_MAX_SLICES = 8;
+const SYNTHESIS_PACKET_TARGET_SLICE_SIZE = 12;
+const SYNTHESIS_PACKET_MAX_MEMORIES_PER_SLICE = 20;
+const SYNTHESIS_PACKET_SUMMARY_LENGTH = 240;
+
 const DEFAULT_WRITE_QUEUE_DEPTH = 50;
 const DEFAULT_WIP_LIMIT = 1;
 const writeMutex = new AsyncMutex();
@@ -1522,6 +2648,359 @@ const configuredWipLimit = parseIntegerEnv(
 let pendingWriteQueueDepth = 0;
 let queueBackpressureActive = false;
 
+function selectSynthesisPromptMemories(allMemories: MemoryNPC[]): {
+  memories: MemoryNPC[];
+  totalAvailable: number;
+  selectionMode: "all" | "mixed";
+} {
+  const sortedByCreated = [...allMemories].sort((a, b) => b.created.getTime() - a.created.getTime());
+  const totalAvailable = sortedByCreated.length;
+
+  if (totalAvailable <= SYNTHESIS_PROMPT_INCLUDE_ALL_THRESHOLD) {
+    return {
+      memories: sortedByCreated,
+      totalAvailable,
+      selectionMode: "all",
+    };
+  }
+
+  const selected = new Map<string, MemoryNPC>();
+  const recentQuota = Math.max(1, Math.ceil(SYNTHESIS_PROMPT_MAX_MEMORIES * SYNTHESIS_PROMPT_RECENT_FRACTION));
+  const olderQuota = Math.max(1, Math.ceil(SYNTHESIS_PROMPT_MAX_MEMORIES * SYNTHESIS_PROMPT_OLDER_FRACTION));
+
+  for (const memory of sortedByCreated.slice(0, recentQuota)) {
+    selected.set(memory.id, memory);
+  }
+
+  for (const memory of [...sortedByCreated].reverse()) {
+    if (selected.size >= recentQuota + olderQuota) break;
+    if (!selected.has(memory.id)) {
+      selected.set(memory.id, memory);
+    }
+  }
+
+  const remainingBySignal = [...sortedByCreated]
+    .filter(memory => !selected.has(memory.id))
+    .sort((a, b) => {
+      const accessDelta = b.access_count - a.access_count;
+      if (accessDelta !== 0) return accessDelta;
+
+      const connectionDelta = b.connections.length - a.connections.length;
+      if (connectionDelta !== 0) return connectionDelta;
+
+      return b.created.getTime() - a.created.getTime();
+    });
+
+  for (const memory of remainingBySignal) {
+    if (selected.size >= SYNTHESIS_PROMPT_MAX_MEMORIES) break;
+    selected.set(memory.id, memory);
+  }
+
+  return {
+    memories: [...selected.values()].sort((a, b) => b.created.getTime() - a.created.getTime()),
+    totalAvailable,
+    selectionMode: "mixed",
+  };
+}
+
+function summarizeMemoryForPacket(memory: MemoryNPC): string {
+  const normalized = memory.content.replace(/\s+/g, " ").trim();
+  if (normalized.length <= SYNTHESIS_PACKET_SUMMARY_LENGTH) {
+    return normalized;
+  }
+
+  return `${normalized.slice(0, SYNTHESIS_PACKET_SUMMARY_LENGTH - 1).trimEnd()}…`;
+}
+
+function collectTopTopics(memories: MemoryNPC[], limit = 8): string[] {
+  const counts = new Map<string, number>();
+
+  for (const memory of memories) {
+    for (const tag of memory.tags) {
+      if (!tag.startsWith("topic:")) continue;
+      counts.set(tag, (counts.get(tag) ?? 0) + 1);
+    }
+  }
+
+  return [...counts.entries()]
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+    .slice(0, limit)
+    .map(([tag]) => tag);
+}
+
+function buildSynthesisPacketResources(allMemories: MemoryNPC[]): {
+  manifest: {
+    packet_type: string;
+    total_memories: number;
+    slice_count: number;
+    resource_count: number;
+    coverage_mode: string;
+    id_range: { newest?: string; oldest?: string };
+    created_range: { newest?: string; oldest?: string };
+    districts: Array<{ district: string; count: number }>;
+    top_topics: string[];
+    slice_ids: string[];
+    max_memories_per_slice: number;
+  };
+  resources: Array<{ type: "resource"; resource: { uri: string; mimeType: string; text: string } }>;
+} {
+  const sortedByCreated = [...allMemories].sort((a, b) => b.created.getTime() - a.created.getTime());
+  if (sortedByCreated.length === 0) {
+    return {
+      manifest: {
+        packet_type: "coverage_manifest",
+        total_memories: 0,
+        slice_count: 0,
+        resource_count: 0,
+        coverage_mode: "full_graph_packetized",
+        id_range: {},
+        created_range: {},
+        districts: [],
+        top_topics: [],
+        slice_ids: [],
+        max_memories_per_slice: SYNTHESIS_PACKET_MAX_MEMORIES_PER_SLICE,
+      },
+      resources: [],
+    };
+  }
+
+  const preferredSliceCount = Math.min(
+    SYNTHESIS_PACKET_BASE_MAX_SLICES,
+    Math.max(1, Math.ceil(sortedByCreated.length / SYNTHESIS_PACKET_TARGET_SLICE_SIZE)),
+  );
+  const requiredSliceCount = Math.max(
+    1,
+    Math.ceil(sortedByCreated.length / SYNTHESIS_PACKET_MAX_MEMORIES_PER_SLICE),
+  );
+  const sliceCount = Math.max(preferredSliceCount, requiredSliceCount);
+  const sliceSize = Math.ceil(sortedByCreated.length / sliceCount);
+  const slices = Array.from({ length: sliceCount }, (_, index) =>
+    sortedByCreated.slice(index * sliceSize, (index + 1) * sliceSize),
+  ).filter(slice => slice.length > 0);
+
+  const manifest = {
+    packet_type: "coverage_manifest",
+    total_memories: sortedByCreated.length,
+    slice_count: slices.length,
+    resource_count: slices.length + 1,
+    coverage_mode: "full_graph_packetized",
+    id_range: {
+      newest: sortedByCreated[0]?.id,
+      oldest: sortedByCreated[sortedByCreated.length - 1]?.id,
+    },
+    created_range: {
+      newest: sortedByCreated[0]?.created.toISOString(),
+      oldest: sortedByCreated[sortedByCreated.length - 1]?.created.toISOString(),
+    },
+    districts: Object.entries(
+      sortedByCreated.reduce<Record<string, number>>((acc, memory) => {
+        acc[memory.district] = (acc[memory.district] ?? 0) + 1;
+        return acc;
+      }, {}),
+    )
+      .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+      .map(([district, count]) => ({ district, count })),
+    top_topics: collectTopTopics(sortedByCreated),
+    slice_ids: slices.map((_, index) => `slice_${index + 1}`),
+    max_memories_per_slice: SYNTHESIS_PACKET_MAX_MEMORIES_PER_SLICE,
+  };
+
+  const manifestResource = {
+    type: "resource" as const,
+    resource: {
+      uri: "memory://packet/manifest",
+      mimeType: "application/json",
+      text: JSON.stringify(manifest, null, 2),
+    },
+  };
+
+  const sliceResources = slices.map((slice, index) => ({
+    type: "resource" as const,
+    resource: {
+      uri: `memory://packet/slice_${index + 1}`,
+      mimeType: "application/json",
+      text: JSON.stringify({
+        packet_type: "memory_slice",
+        slice_id: `slice_${index + 1}`,
+        title: `Memory slice ${index + 1}`,
+        memory_count: slice.length,
+        id_range: {
+          newest: slice[0]?.id,
+          oldest: slice[slice.length - 1]?.id,
+        },
+        created_range: {
+          newest: slice[0]?.created.toISOString(),
+          oldest: slice[slice.length - 1]?.created.toISOString(),
+        },
+        districts: Object.entries(
+          slice.reduce<Record<string, number>>((acc, memory) => {
+            acc[memory.district] = (acc[memory.district] ?? 0) + 1;
+            return acc;
+          }, {}),
+        )
+          .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+          .map(([district, count]) => ({ district, count })),
+        top_topics: collectTopTopics(slice, 6),
+        memories: slice.map(memory => ({
+          id: memory.id,
+          name: memory.name,
+          district: memory.district,
+          archetype: memory.archetype,
+          tags: memory.tags,
+          project_id: memory.project_id ?? null,
+          access_count: memory.access_count,
+          connection_count: memory.connections.length,
+          created: memory.created.toISOString(),
+          summary: summarizeMemoryForPacket(memory),
+        })),
+      }, null, 2),
+    },
+  }));
+
+  return {
+    manifest,
+    resources: [manifestResource, ...sliceResources],
+  };
+}
+
+function buildExploreMemoryCityMessages() {
+  const districtSummaries = memorySystem.getAllDistricts().map(d => ({
+    type: "resource" as const,
+    resource: {
+      uri: `memory://district/${d.name.toLowerCase().replace(/\s+/g, '_')}`,
+      mimeType: "application/json",
+      text: JSON.stringify(d, null, 2)
+    }
+  }));
+
+  return [
+    {
+      role: "user" as const,
+      content: {
+        type: "text" as const,
+        text: "Welcome to your neurodivergent memory city! Here are the districts where your thoughts reside:"
+      }
+    },
+    ...districtSummaries.map(district => ({
+      role: "user" as const,
+      content: district
+    })),
+    {
+      role: "user" as const,
+      content: {
+        type: "text" as const,
+        text: "Explore these districts and understand how your mind organizes different types of thoughts. What patterns do you notice?"
+      }
+    }
+  ];
+}
+
+function buildSynthesizeMemoriesMessages() {
+  const synthesisSelection = selectSynthesisPromptMemories(memorySystem.getAllMemories());
+  const memoryResources = synthesisSelection.memories.map(memory => ({
+    type: "resource" as const,
+    resource: {
+      uri: `memory://memory/${memory.id}`,
+      mimeType: "application/json",
+      text: JSON.stringify({
+        name: memory.name,
+        content: memory.content,
+        archetype: memory.archetype,
+        district: memory.district,
+        tags: memory.tags
+      }, null, 2)
+    }
+  }));
+
+  return [
+    {
+      role: "user" as const,
+      content: {
+        type: "text" as const,
+        text: synthesisSelection.selectionMode === "all"
+          ? `Let's synthesize new insights from your stored memories. Here are all ${synthesisSelection.totalAvailable} currently stored memories, ordered by recency:`
+          : `Let's synthesize new insights from your stored memories. Here is a broad cross-section of ${memoryResources.length} memories selected from ${synthesisSelection.totalAvailable} total memories, combining recent entries with older high-signal memories:`
+      }
+    },
+    ...memoryResources.map(memory => ({
+      role: "user" as const,
+      content: memory
+    })),
+    {
+      role: "user" as const,
+      content: {
+        type: "text" as const,
+        text: "Looking at these memories, what new connections or insights emerge? How do they relate to each other?"
+      }
+    }
+  ];
+}
+
+function buildSynthesizeMemoryPacketsMessages() {
+  const packetPayload = buildSynthesisPacketResources(memorySystem.getAllMemories());
+  const packetResources = packetPayload.resources;
+
+  if (packetResources.length === 0) {
+    return [
+      {
+        role: "user" as const,
+        content: {
+          type: "text" as const,
+          text: "No memories are currently stored, so there are no synthesis packets to review yet."
+        }
+      }
+    ];
+  }
+
+  return [
+    {
+      role: "user" as const,
+      content: {
+        type: "text" as const,
+        text: `Let's synthesize new insights from your stored memories using packetized coverage. The attached resources include 1 coverage manifest plus ${packetPayload.manifest.slice_count} structured memory slices spanning all ${packetPayload.manifest.total_memories} stored memories.`
+      }
+    },
+    ...packetResources.map(resource => ({
+      role: "user" as const,
+      content: resource,
+    })),
+    {
+      role: "user" as const,
+      content: {
+        type: "text" as const,
+        text: "Use the coverage manifest to understand graph scope, then synthesize patterns across the slice packets. Prefer broad graph-level insights, but cite concrete memory ids when a specific claim depends on a particular packet entry."
+      }
+    }
+  ];
+}
+
+function promptMessagesToToolContent(messages: Array<{ content: unknown }>) {
+  return messages.map(message => message.content);
+}
+
+function listPromptDescriptors() {
+  return [
+    {
+      name: "explore_memory_city",
+      title: "Explore Memory City",
+      description: "Explore the neurodivergent memory city and its districts",
+      arguments: []
+    },
+    {
+      name: "synthesize_memories",
+      title: "Synthesize Memories",
+      description: "Create new insights by connecting existing memories",
+      arguments: []
+    },
+    {
+      name: "synthesize_memory_packets",
+      title: "Synthesize Memory Packets",
+      description: "Create new insights from packetized memory slices for attachment-constrained clients",
+      arguments: []
+    }
+  ];
+}
+
 function parseIntegerEnv(
   rawValue: string | undefined,
   fallback: number,
@@ -1537,6 +3016,22 @@ function parseIntegerEnv(
   }
 
   return parsed;
+}
+
+function parseBooleanEnv(rawValue: string | undefined, fallback: boolean): boolean {
+  if (!rawValue || !rawValue.trim()) {
+    return fallback;
+  }
+
+  const normalized = rawValue.trim().toLowerCase();
+  if (["1", "true", "yes", "on"].includes(normalized)) {
+    return true;
+  }
+  if (["0", "false", "no", "off"].includes(normalized)) {
+    return false;
+  }
+
+  return fallback;
 }
 
 function parseNumberEnv(
@@ -1590,20 +3085,45 @@ function normalizeTag(tag: string): string {
     .replace(/[\s-]+/g, "_");
 }
 
-function hasTaskInProgressTags(tags: string[] = []): boolean {
+function hasTaskTag(tags: string[] = []): boolean {
   const normalizedTags = new Set(tags.map(normalizeTag));
 
-  const hasTaskTag =
+  return (
     normalizedTags.has("kind:task") ||
     normalizedTags.has("type:task") ||
-    normalizedTags.has("task");
+    normalizedTags.has("task")
+  );
+}
+
+function resolveDefaultEpistemicStatus(
+  district: string,
+  tags: string[] = [],
+  explicitStatus?: EpistemicStatus,
+): EpistemicStatus | undefined {
+  // Normalize null or non-string values so they don't bypass defaulting or store invalid data
+  const normalizedStatus =
+    typeof explicitStatus === "string" && (VALID_EPISTEMIC_STATUSES as string[]).includes(explicitStatus)
+      ? (explicitStatus as EpistemicStatus)
+      : undefined;
+
+  if (normalizedStatus !== undefined) {
+    return normalizedStatus;
+  }
+
+  return district === "practical_execution" && hasTaskTag(tags)
+    ? "draft"
+    : undefined;
+}
+
+function hasTaskInProgressTags(tags: string[] = []): boolean {
+  const normalizedTags = new Set(tags.map(normalizeTag));
 
   const hasInProgressTag =
     normalizedTags.has("status:in_progress") ||
     normalizedTags.has("state:in_progress") ||
     normalizedTags.has("in_progress");
 
-  return hasTaskTag && hasInProgressTag;
+  return hasTaskTag(tags) && hasInProgressTag;
 }
 
 function findExistingInProgressTasks(agentId: string): MemoryNPC[] {
@@ -1708,8 +3228,8 @@ function toolErrorResult(toolName: string, summary: string, error: unknown, fall
  */
 const server = new Server(
   {
-    name: "neurodivergent-memory",
-    version: "0.1.0",
+    name: SERVER_PACKAGE_INFO.name,
+    version: SERVER_PACKAGE_INFO.version,
   },
   {
     capabilities: {
@@ -1804,7 +3324,8 @@ server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
 
   if (url.protocol === 'memory:' && url.pathname.startsWith('/memory/')) {
     const memoryId = url.pathname.replace('/memory/', '');
-    const memory = memorySystem.retrieveMemory(memoryId);
+    const retrieval = memorySystem.retrieveMemory(memoryId);
+    const memory = retrieval?.memory;
 
     if (!memory) {
       throw createNMError(
@@ -2020,7 +3541,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: "search_memories",
-        description: "Search memories using BM25 semantic ranking. Returns results sorted by relevance score (0-1).",
+        description: "Search memories using BM25 semantic ranking with optional goal-context blending, recency bias, and filters. Returns results sorted by relevance score (0-1).",
         inputSchema: {
           type: "object",
           properties: {
@@ -2053,6 +3574,16 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
               maximum: 1,
               description: "Minimum relevance score (0-1). Only return results at or above this threshold."
             },
+            context: {
+              type: "string",
+              description: "Optional short goal/context string blended into ranking as a lightweight BM25 boost."
+            },
+            recency_weight: {
+              type: "number",
+              minimum: 0,
+              maximum: 1,
+              description: "Optional recency boost strength from 0 (off) to 1 (strongest). Recent memories receive more weight without replacing semantic relevance."
+            },
             emotional_valence_min: {
               type: "number",
               minimum: -1,
@@ -2069,13 +3600,25 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
               type: "number",
               minimum: 0,
               maximum: 1,
-              description: "Minimum intensity filter (0-1)"
+              description: "Minimum intensity filter (0-1). Deprecated alias for min_intensity."
             },
             intensity_max: {
               type: "number",
               minimum: 0,
               maximum: 1,
-              description: "Maximum intensity filter (0-1)"
+              description: "Maximum intensity filter (0-1). Deprecated alias for max_intensity."
+            },
+            min_intensity: {
+              type: "number",
+              minimum: 0,
+              maximum: 1,
+              description: "Minimum intensity filter (0-1). Preferred name for new callers."
+            },
+            max_intensity: {
+              type: "number",
+              minimum: 0,
+              maximum: 1,
+              description: "Maximum intensity filter (0-1). Preferred name for new callers."
             }
           },
           required: ["query"]
@@ -2108,7 +3651,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: "related_to",
-        description: "Find memories related to a given memory ID, ranked by graph proximity + BM25 semantic score",
+        description: "Find memories related to a given memory ID, ranked by graph proximity + BM25 semantic score with optional goal-context blending.",
         inputSchema: {
           type: "object",
           properties: {
@@ -2119,6 +3662,15 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             query: {
               type: "string",
               description: "Optional extra query to bias semantic ranking. If omitted, the source memory content is used."
+            },
+            context: {
+              type: "string",
+              description: "Optional short goal/context string blended into ranking as a lightweight BM25 boost."
+            },
+            epistemic_statuses: {
+              type: "array",
+              items: { type: "string", enum: ["draft", "validated", "outdated", "unset"] },
+              description: "Optional epistemic status filters for related memories"
             }
           },
           required: ["memory_id"]
@@ -2154,6 +3706,11 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             project_id: {
               type: "string",
               description: "Optional project_id filter"
+            },
+            epistemic_statuses: {
+              type: "array",
+              items: { type: "string", enum: ["draft", "validated", "outdated", "unset"] },
+              description: "Optional epistemic status filters"
             }
           }
         }
@@ -2172,8 +3729,24 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         }
       },
       {
+        name: "storage_diagnostics",
+        description: "Show the resolved snapshot path, WAL path, and the effective environment/config source used for persistence.",
+        inputSchema: {
+          type: "object",
+          properties: {}
+        }
+      },
+      {
+        name: "server_handshake",
+        description: "Return runtime server identity and version details so clients can confirm the active build.",
+        inputSchema: {
+          type: "object",
+          properties: {}
+        }
+      },
+      {
         name: "import_memories",
-        description: "Bulk-import memories from a JSON array or from a snapshot file path. Provide either 'entries' (array) or 'file_path' (absolute path to a memories.json snapshot). Each entry requires content and district; tags, emotional_valence, intensity, and epistemic_status are optional.",
+        description: "Bulk-import memories from inline entries or from a snapshot file. Supports dry-run validation, dedupe policies, and explicit snapshot migration flags.",
         inputSchema: {
           type: "object",
           properties: {
@@ -2200,27 +3773,107 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             },
             file_path: {
               type: "string",
-              description: "Absolute path to a memories.json snapshot file generated by this server. Required if entries is not provided."
+              description: "Absolute path to a server snapshot JSON file (typically a memories.json snapshot generated by this server). Required if entries is not provided."
+            },
+            dry_run: {
+              type: "boolean",
+              description: "Validate the import and return would_import / would_skip / would_fail counts without writing any data"
+            },
+            dedupe: {
+              type: "string",
+              enum: ["none", "content_hash", "content_plus_tags"],
+              description: "Optional dedupe policy: none, content_hash, or content_plus_tags"
+            },
+            preserve_ids: {
+              type: "boolean",
+              description: "Snapshot-import only. Preserve source memory IDs; conflicting IDs are rejected deterministically"
+            },
+            merge_connections: {
+              type: "boolean",
+              description: "Snapshot-import only. Merge the imported connection graph after validating all referenced IDs"
             },
             agent_id: {
               type: "string",
               description: "Optional default agent identifier applied to entries without agent_id"
             }
           },
-          oneOf: [
-            {
-              required: ["entries"],
-              not: {
-                required: ["file_path"]
-              }
-            },
-            {
-              required: ["file_path"],
-              not: {
-                required: ["entries"]
-              }
-            }
+          anyOf: [
+            { required: ["entries"] },
+            { required: ["file_path"] }
           ]
+        }
+      },
+      {
+        name: "distill_memory",
+        description: "Translate an emotional_processing memory into a structured logical artifact (signals, triggers, constraints, next_actions, risk_flags). Creates a distilled memory in logical_analysis district with reduced intensity and neutral valence for efficient consumption by planning agents. Only operates on emotional_processing memories.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            memory_id: {
+              type: "string",
+              description: "ID of the emotional_processing memory to distill"
+            },
+            agent_id: {
+              type: "string",
+              description: "Optional agent identifier for the distilled memory"
+            }
+          },
+          required: ["memory_id"]
+        }
+      },
+      {
+        name: "prepare_memory_city_context",
+        description: "Return the same exploration context exposed by the explore_memory_city prompt, packaged as a tool result for clients that support tools but not MCP prompts.",
+        inputSchema: {
+          type: "object",
+          properties: {}
+        }
+      },
+      {
+        name: "prepare_synthesis_context",
+        description: "Return the same context exposed by the synthesize_memories prompt, packaged as a tool result for prompt-limited clients.",
+        inputSchema: {
+          type: "object",
+          properties: {}
+        }
+      },
+      {
+        name: "prepare_packetized_synthesis_context",
+        description: "Return the same context exposed by the synthesize_memory_packets prompt, packaged as a tool result for prompt-limited or attachment-constrained clients.",
+        inputSchema: {
+          type: "object",
+          properties: {}
+        }
+      },
+      {
+        name: "register_district",
+        description: "Register a custom district with LUCA ancestry validation. Custom districts must declare a valid parent that traces back to one of the 5 canonical districts (logical_analysis, emotional_processing, practical_execution, vigilant_monitoring, creative_synthesis). The custom district inherits its archetype from the canonical ancestor.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            key: {
+              type: "string",
+              description: "Snake_case district identifier (e.g. project_build_pipeline)"
+            },
+            name: {
+              type: "string",
+              description: "Human-readable district name"
+            },
+            description: {
+              type: "string",
+              description: "District description explaining its purpose"
+            },
+            luca_parent: {
+              type: "string",
+              description: "Parent district key. Must be an existing district that traces back to a canonical district."
+            },
+            activities: {
+              type: "array",
+              items: { type: "string" },
+              description: "Optional list of activities for this district. Inherits parent activities if omitted."
+            }
+          },
+          required: ["key", "name", "description", "luca_parent"]
         }
       }
     ]
@@ -2279,6 +3932,10 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         );
         const memory = storeResult.memory;
         const warningLine = wipWarning ? `\n${wipWarning}` : "";
+        const repeatWarningLine = storeResult.no_net_new_info_warning ? `\n${storeResult.no_net_new_info_warning}` : "";
+        const cooldownLine = storeResult.cooldown_duration_ms
+          ? `\n${memorySystem.buildCrossDistrictCooldownWarning(storeResult.matched_memory_id ?? memory.id, storeResult.cooldown_duration_ms)}`
+          : "";
         const repeatLines = [
           `repeat_detected: ${storeResult.repeat_detected ? "true" : "false"}`,
           storeResult.matched_memory_id ? `matched_memory_id: ${storeResult.matched_memory_id}` : undefined,
@@ -2288,7 +3945,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         return {
           content: [{
             type: "text",
-            text: `🧠 Stored memory "${memory.name}" in ${memorySystem.getAllDistricts().find(d => d.name.toLowerCase().replace(/\s+/g, '_') === district)?.name || district}\nID: ${memory.id}\nArchetype: ${memory.archetype}\nAgent: ${memory.agent_id ?? "unassigned"}\nProject: ${memory.project_id ?? "unset"}\nEpistemic status: ${memory.epistemic_status ?? "unset"}\n${repeatLines}${warningLine}`
+            text: `🧠 Stored memory "${memory.name}" in ${memorySystem.getAllDistricts().find(d => d.name.toLowerCase().replace(/\s+/g, '_') === district)?.name || district}\nID: ${memory.id}\nArchetype: ${memory.archetype}\nAgent: ${memory.agent_id ?? "unassigned"}\nProject: ${memory.project_id ?? "unset"}\nEpistemic status: ${memory.epistemic_status ?? "unset"}\n${repeatLines}${warningLine}${repeatWarningLine}${cooldownLine}`
           }]
         };
       } catch (error) {
@@ -2307,7 +3964,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
     case "retrieve_memory": {
       const { memory_id, district, agent_id } = request.params.arguments as any;
-      const memory = memorySystem.retrieveMemory(memory_id, { district, agent_id });
+      const retrieval = memorySystem.retrieveMemory(memory_id, { district, agent_id });
+      const memory = retrieval?.memory;
 
       if (!memory) {
         return toolErrorResult(
@@ -2329,7 +3987,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       return {
         content: [{
           type: "text",
-          text: `🧠 Retrieved memory "${memory.name}"\nDistrict: ${memory.district}\nAgent: ${memory.agent_id ?? 'unassigned'}\nProject: ${memory.project_id ?? 'unset'}\nEpistemic status: ${memory.epistemic_status ?? 'unset'}\nContent: ${memory.content}\nTags: ${memory.tags.join(', ')}\nEmotional valence: ${memory.emotional_valence ?? 'unset'}\nIntensity: ${memory.intensity ?? 'unset'}\nAccess count: ${memory.access_count}`
+          text: `🧠 Retrieved memory "${memory.name}"\nDistrict: ${memory.district}\nAgent: ${memory.agent_id ?? 'unassigned'}\nProject: ${memory.project_id ?? 'unset'}\nEpistemic status: ${memory.epistemic_status ?? 'unset'}\nContent: ${memory.content}\nTags: ${memory.tags.join(', ')}\nEmotional valence: ${memory.emotional_valence ?? 'unset'}\nIntensity: ${memory.intensity ?? 'unset'}\nAccess count: ${memory.access_count}${retrieval?.distill_suggestion ? `\n${retrieval.distill_suggestion}` : ''}`
         }]
       };
     }
@@ -2346,14 +4004,18 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         if (epistemic_status !== undefined) updates.epistemic_status = epistemic_status;
         if (project_id !== undefined) updates.project_id = project_id;
 
-        const memory = await runMutatingTool(
+        const updateResult = await runMutatingTool(
           "update_memory",
           () => memorySystem.updateMemory(memory_id, updates, { district: actor_district, agent_id }),
         );
+        const memory = updateResult.memory;
+        const cooldownLine = updateResult.cooldown_duration_ms
+          ? `\n${memorySystem.buildCrossDistrictCooldownWarning(memory_id, updateResult.cooldown_duration_ms)}`
+          : "";
         return {
           content: [{
             type: "text",
-            text: `✏️ Updated memory "${memory.name}" (${memory_id})\nDistrict: ${memory.district}\nProject: ${memory.project_id ?? 'unset'}\nEpistemic status: ${memory.epistemic_status ?? 'unset'}\nTags: ${memory.tags.join(', ')}`
+            text: `✏️ Updated memory "${memory.name}" (${memory_id})\nDistrict: ${memory.district}\nProject: ${memory.project_id ?? 'unset'}\nEpistemic status: ${memory.epistemic_status ?? 'unset'}\nTags: ${memory.tags.join(', ')}${cooldownLine}`
           }]
         };
       } catch (error) {
@@ -2423,19 +4085,25 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       const {
         query, district, project_id, tags, epistemic_statuses,
         min_score,
+        context, recency_weight,
         emotional_valence_min, emotional_valence_max,
-        intensity_min, intensity_max
+        intensity_min, intensity_max,
+        min_intensity, max_intensity,
       } = request.params.arguments as any;
       try {
         if (project_id !== undefined) {
           validateProjectId(project_id);
         }
 
+        const resolvedIntensityMin = min_intensity ?? intensity_min;
+        const resolvedIntensityMax = max_intensity ?? intensity_max;
+
         const results = memorySystem.searchMemories(
           query, district, project_id, tags, epistemic_statuses,
           min_score,
           emotional_valence_min, emotional_valence_max,
-          intensity_min, intensity_max
+          resolvedIntensityMin, resolvedIntensityMax,
+          context, recency_weight,
         );
 
         if (results.length === 0) {
@@ -2497,9 +4165,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     }
 
     case "related_to": {
-      const { memory_id, query } = request.params.arguments as any;
+      const { memory_id, query, context, epistemic_statuses } = request.params.arguments as any;
       try {
-        const results = memorySystem.relatedTo(memory_id, query);
+        const results = memorySystem.relatedTo(memory_id, query, context, epistemic_statuses);
         if (results.length === 0) {
           return { content: [{ type: "text", text: `🔗 No related memories found for ${memory_id}` }] };
         }
@@ -2522,12 +4190,12 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     }
 
     case "list_memories": {
-      const { page = 1, page_size = 20, district, archetype, project_id } = request.params.arguments as any;
+      const { page = 1, page_size = 20, district, archetype, project_id, epistemic_statuses } = request.params.arguments as any;
       try {
         if (project_id !== undefined) {
           validateProjectId(project_id);
         }
-        const result = memorySystem.listMemories(page, page_size, district, archetype, project_id);
+        const result = memorySystem.listMemories(page, page_size, district, archetype, project_id, epistemic_statuses);
         if (result.memories.length === 0) {
           return { content: [{ type: "text", text: `📋 No memories found (page ${page})` }] };
         }
@@ -2615,264 +4283,73 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
     }
 
-    case "import_memories": {
-      const { entries, file_path, agent_id } = request.params.arguments as any;
+    case "storage_diagnostics": {
       try {
-        let entriesToImport: ImportMemoryEntry[];
-
-        if (file_path !== undefined && entries !== undefined) {
-          return toolErrorResult(
-            "import_memories",
-            "Import failed",
-            createNMError(
-              NM_ERRORS.INPUT_VALIDATION_FAILED,
-              "Provide either 'entries' or 'file_path', not both.",
-              "Remove one of the two parameters and retry import_memories.",
-            ),
-            formatMcpError(
-              NM_ERRORS.INPUT_VALIDATION_FAILED,
-              "Provide either 'entries' or 'file_path', not both.",
-              "Remove one of the two parameters and retry import_memories.",
-            ),
-          );
-        }
-
-        if (file_path !== undefined) {
-          // Security: require absolute paths to prevent relative path traversal.
-          if (typeof file_path !== "string" || !path.isAbsolute(file_path)) {
-            return toolErrorResult(
-              "import_memories",
-              "Import failed",
-              createNMError(
-                NM_ERRORS.INPUT_VALIDATION_FAILED,
-                "file_path must be an absolute path.",
-                "Provide an absolute file path (e.g. /home/user/.neurodivergent-memory/memories.json) and retry.",
-              ),
-              formatMcpError(
-                NM_ERRORS.INPUT_VALIDATION_FAILED,
-                "file_path must be an absolute path.",
-                "Provide an absolute file path (e.g. /home/user/.neurodivergent-memory/memories.json) and retry.",
-              ),
-            );
-          }
-          // Security: resolve realpath and constrain to the persistence directory.
-          let resolvedPath: string;
-          try {
-            resolvedPath = fs.realpathSync(file_path);
-          } catch {
-            return toolErrorResult(
-              "import_memories",
-              "Import failed",
-              createNMError(
-                NM_ERRORS.INPUT_VALIDATION_FAILED,
-                "file_path does not exist or cannot be resolved.",
-                "Verify the file exists and is readable, then retry import_memories.",
-              ),
-              formatMcpError(
-                NM_ERRORS.INPUT_VALIDATION_FAILED,
-                "file_path does not exist or cannot be resolved.",
-                "Verify the file exists and is readable, then retry import_memories.",
-              ),
-            );
-          }
-          const allowedRoot = fs.realpathSync(PERSISTENCE_DIR);
-          if (!resolvedPath.startsWith(allowedRoot + path.sep)) {
-            return toolErrorResult(
-              "import_memories",
-              "Import failed",
-              createNMError(
-                NM_ERRORS.INPUT_VALIDATION_FAILED,
-                "file_path must be within the persistence directory.",
-                `Only files inside ${allowedRoot} may be imported. Verify the path and retry import_memories.`,
-              ),
-              formatMcpError(
-                NM_ERRORS.INPUT_VALIDATION_FAILED,
-                "file_path must be within the persistence directory.",
-                `Only files inside ${allowedRoot} may be imported. Verify the path and retry import_memories.`,
-              ),
-            );
-          }
-          let raw: string;
-          try {
-            raw = await fs.promises.readFile(resolvedPath, "utf-8");
-          } catch (readErr) {
-            return toolErrorResult(
-              "import_memories",
-              "Import failed",
-              readErr,
-              formatMcpError(
-                NM_ERRORS.INPUT_VALIDATION_FAILED,
-                "Could not read the snapshot file.",
-                "Verify the file exists and is readable, then retry import_memories.",
-              ),
-            );
-          }
-          let snapshot: MemorySnapshot;
-          try {
-            snapshot = JSON.parse(raw) as MemorySnapshot;
-          } catch (parseErr) {
-            return toolErrorResult(
-              "import_memories",
-              "Import failed",
-              parseErr,
-              formatMcpError(
-                NM_ERRORS.INPUT_VALIDATION_FAILED,
-                "Snapshot file is not valid JSON.",
-                "Verify the file is a memories.json snapshot produced by this server, then retry.",
-              ),
-            );
-          }
-          if (!snapshot || snapshot.memories === null || snapshot.memories === undefined || typeof snapshot.memories !== "object" || Array.isArray(snapshot.memories)) {
-            return toolErrorResult(
-              "import_memories",
-              "Import failed",
-              createNMError(
-                NM_ERRORS.INPUT_VALIDATION_FAILED,
-                "Snapshot file does not contain a valid memories map.",
-                "The file must be a memories.json snapshot produced by this server.",
-              ),
-              formatMcpError(
-                NM_ERRORS.INPUT_VALIDATION_FAILED,
-                "Snapshot file does not contain a valid memories map.",
-                "The file must be a memories.json snapshot produced by this server.",
-              ),
-            );
-          }
-          const rawMemories = snapshot.memories as Record<string, any>;
-          const validatedEntries: ImportMemoryEntry[] = [];
-          for (const [memId, mem] of Object.entries(rawMemories)) {
-            if (typeof mem !== "object" || mem === null) {
-              return toolErrorResult(
-                "import_memories",
-                "Import failed",
-                createNMError(
-                  NM_ERRORS.INPUT_VALIDATION_FAILED,
-                  `Snapshot memory '${memId}' is invalid: entry must be an object.`,
-                  "Ensure all memories in the snapshot are JSON objects and retry import_memories.",
-                ),
-                formatMcpError(
-                  NM_ERRORS.INPUT_VALIDATION_FAILED,
-                  `Snapshot memory '${memId}' is invalid: entry must be an object.`,
-                  "Ensure all memories in the snapshot are JSON objects and retry import_memories.",
-                ),
-              );
-            }
-            if (typeof mem.content !== "string") {
-              return toolErrorResult(
-                "import_memories",
-                "Import failed",
-                createNMError(
-                  NM_ERRORS.INPUT_VALIDATION_FAILED,
-                  `Snapshot memory '${memId}' is invalid: 'content' must be a string.`,
-                  "Ensure each memory has a string 'content' field and retry import_memories.",
-                ),
-                formatMcpError(
-                  NM_ERRORS.INPUT_VALIDATION_FAILED,
-                  `Snapshot memory '${memId}' is invalid: 'content' must be a string.`,
-                  "Ensure each memory has a string 'content' field and retry import_memories.",
-                ),
-              );
-            }
-            if (mem.tags !== undefined && !Array.isArray(mem.tags)) {
-              return toolErrorResult(
-                "import_memories",
-                "Import failed",
-                createNMError(
-                  NM_ERRORS.INPUT_VALIDATION_FAILED,
-                  `Snapshot memory '${memId}' is invalid: 'tags' must be an array when present.`,
-                  "Ensure 'tags' is an array of strings or omit it, then retry import_memories.",
-                ),
-                formatMcpError(
-                  NM_ERRORS.INPUT_VALIDATION_FAILED,
-                  `Snapshot memory '${memId}' is invalid: 'tags' must be an array when present.`,
-                  "Ensure 'tags' is an array of strings or omit it, then retry import_memories.",
-                ),
-              );
-            }
-            if (mem.district !== undefined && typeof mem.district !== "string") {
-              return toolErrorResult(
-                "import_memories",
-                "Import failed",
-                createNMError(
-                  NM_ERRORS.INPUT_VALIDATION_FAILED,
-                  `Snapshot memory '${memId}' is invalid: 'district' must be a string when present.`,
-                  "Ensure 'district' is a string (e.g. 'logical_analysis') or omit it, then retry import_memories.",
-                ),
-                formatMcpError(
-                  NM_ERRORS.INPUT_VALIDATION_FAILED,
-                  `Snapshot memory '${memId}' is invalid: 'district' must be a string when present.`,
-                  "Ensure 'district' is a string (e.g. 'logical_analysis') or omit it, then retry import_memories.",
-                ),
-              );
-            }
-            if (mem.emotional_valence !== undefined && typeof mem.emotional_valence !== "number") {
-              return toolErrorResult(
-                "import_memories",
-                "Import failed",
-                createNMError(
-                  NM_ERRORS.INPUT_VALIDATION_FAILED,
-                  `Snapshot memory '${memId}' is invalid: 'emotional_valence' must be a number when present.`,
-                  "Ensure 'emotional_valence' is a number or omit it, then retry import_memories.",
-                ),
-                formatMcpError(
-                  NM_ERRORS.INPUT_VALIDATION_FAILED,
-                  `Snapshot memory '${memId}' is invalid: 'emotional_valence' must be a number when present.`,
-                  "Ensure 'emotional_valence' is a number or omit it, then retry import_memories.",
-                ),
-              );
-            }
-            if (mem.intensity !== undefined && typeof mem.intensity !== "number") {
-              return toolErrorResult(
-                "import_memories",
-                "Import failed",
-                createNMError(
-                  NM_ERRORS.INPUT_VALIDATION_FAILED,
-                  `Snapshot memory '${memId}' is invalid: 'intensity' must be a number when present.`,
-                  "Ensure 'intensity' is a number or omit it, then retry import_memories.",
-                ),
-                formatMcpError(
-                  NM_ERRORS.INPUT_VALIDATION_FAILED,
-                  `Snapshot memory '${memId}' is invalid: 'intensity' must be a number when present.`,
-                  "Ensure 'intensity' is a number or omit it, then retry import_memories.",
-                ),
-              );
-            }
-            validatedEntries.push({
-              content: mem.content,
-              district: mem.district,
-              tags: mem.tags,
-              emotional_valence: mem.emotional_valence,
-              intensity: mem.intensity,
-              agent_id: mem.agent_id,
-              project_id: mem.project_id,
-              epistemic_status: mem.epistemic_status,
-            } as ImportMemoryEntry);
-          }
-          entriesToImport = validatedEntries;
-        } else if (Array.isArray(entries)) {
-          entriesToImport = entries as ImportMemoryEntry[];
-        } else {
-          return toolErrorResult(
-            "import_memories",
-            "Import failed",
-            createNMError(
-              NM_ERRORS.INPUT_VALIDATION_FAILED,
-              "Either 'entries' array or 'file_path' must be provided.",
-              "Pass an entries array or an absolute path to a snapshot file, then retry import_memories.",
-            ),
-            formatMcpError(
-              NM_ERRORS.INPUT_VALIDATION_FAILED,
-              "Either 'entries' array or 'file_path' must be provided.",
-              "Pass an entries array or an absolute path to a snapshot file, then retry import_memories.",
-            ),
-          );
-        }
-
-        const ids = await runMutatingTool("import_memories", () => memorySystem.importMemories(entriesToImport, agent_id));
+        const diagnostics = memorySystem.storageDiagnostics();
         return {
           content: [{
             type: "text",
-            text: `📥 Imported ${ids.length} memories: ${ids.join(', ')}`
+            text: `📦 Storage Diagnostics\nSnapshot path: ${diagnostics.snapshot_path}\nWAL path: ${diagnostics.wal_path}\nResolved source: ${diagnostics.resolved_source}`,
+          }],
+        };
+      } catch (error) {
+        return toolErrorResult(
+          "storage_diagnostics",
+          "Storage diagnostics failed",
+          error,
+          formatMcpError(
+            NM_ERRORS.INPUT_VALIDATION_FAILED,
+            "Unable to resolve storage diagnostics.",
+            "Retry storage_diagnostics; if the problem persists, inspect server startup configuration.",
+          ),
+        );
+      }
+    }
+
+    case "server_handshake": {
+      return {
+        content: [{
+          type: "text",
+          text: [
+            "🤝 Server Handshake",
+            `Name: ${SERVER_PACKAGE_INFO.name}`,
+            `Version: ${SERVER_PACKAGE_INFO.version}`,
+            `Started: ${SERVER_START_TIME_ISO}`,
+            `PID: ${process.pid}`,
+            `Node.js: ${process.version}`,
+            "Transport: stdio",
+          ].join("\n"),
+        }],
+      };
+    }
+
+    case "import_memories": {
+      const { entries, file_path, dry_run = false, dedupe = "none", preserve_ids = false, merge_connections = false, agent_id } = request.params.arguments as any;
+      try {
+        const executeImport = () => memorySystem.importMemories(entries, agent_id, {
+          file_path,
+          dry_run,
+          dedupe,
+          preserve_ids,
+          merge_connections,
+        });
+        const result = dry_run
+          ? executeImport()
+          : await runMutatingTool("import_memories", executeImport);
+
+        const skipLines = result.skipped.length > 0
+          ? result.skipped.map(skip => `  entry ${skip.index}${skip.source_memory_id ? ` (${skip.source_memory_id})` : ""}: ${skip.reason_code} - ${skip.detail}`).join("\n")
+          : "  (none)";
+        const failureLines = result.failures.length > 0
+          ? result.failures.map(failure => `  entry ${failure.index}${failure.source_memory_id ? ` (${failure.source_memory_id})` : ""}: ${failure.reason_code} - ${failure.detail}`).join("\n")
+          : "  (none)";
+
+        return {
+          content: [{
+            type: "text",
+            text: dry_run
+              ? `📥 Import Dry Run\nSource: ${result.source}\nRequested rows: ${result.requested}\nWould import: ${result.imported_ids.length}\nWould skip: ${result.skipped.length}\nWould fail: ${result.failures.length}\n\nSkipped rows:\n${skipLines}\n\nFailed rows:\n${failureLines}`
+              : `📥 Imported ${result.imported_ids.length} memories from ${result.source}: ${result.imported_ids.join(', ') || '(none)'}\nRequested rows: ${result.requested}\nSkipped rows: ${result.skipped.length}\nFailed rows: ${result.failures.length}\n\nSkipped rows:\n${skipLines}`
           }]
         };
       } catch (error) {
@@ -2884,6 +4361,96 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             NM_ERRORS.INPUT_VALIDATION_FAILED,
             "Import request was invalid.",
             "Verify each entry includes valid required fields, then retry import_memories.",
+          ),
+        );
+      }
+    }
+
+    case "distill_memory": {
+      const { memory_id, agent_id } = request.params.arguments as any;
+      try {
+        const result = await runMutatingTool(
+          "distill_memory",
+          () => memorySystem.distillMemory(memory_id, agent_id),
+        );
+        const artifact = result.artifact;
+        const distilled = result.distilled;
+        const artifactText = [
+          `signals: ${artifact.signals.length > 0 ? artifact.signals.join(", ") : "(none)"}`,
+          `triggers: ${artifact.triggers.length > 0 ? artifact.triggers.join(", ") : "(none)"}`,
+          `constraints: ${artifact.constraints.length > 0 ? artifact.constraints.join(", ") : "(none)"}`,
+          `next_actions: ${artifact.next_actions.length > 0 ? artifact.next_actions.join(", ") : "(none)"}`,
+          `risk_flags: ${artifact.risk_flags.length > 0 ? artifact.risk_flags.join(", ") : "(none)"}`,
+        ].join("\n");
+
+        return {
+          content: [{
+            type: "text",
+            text: `🔬 Distilled memory ${memory_id}\nCreated distilled memory: ${distilled.id}\nDistrict: ${distilled.district}\nIntensity: ${(distilled.intensity ?? 0).toFixed(2)} (reduced from source)\nValence: 0 (neutral)\n\nArtifact:\n${artifactText}`
+          }]
+        };
+      } catch (error) {
+        return toolErrorResult(
+          "distill_memory",
+          "Distillation failed",
+          error,
+          formatMcpError(
+            NM_ERRORS.INPUT_VALIDATION_FAILED,
+            "Distillation request was invalid.",
+            "Verify the memory ID is a valid emotional_processing memory, then retry distill_memory.",
+          ),
+        );
+      }
+    }
+
+    case "prepare_memory_city_context": {
+      const messages = buildExploreMemoryCityMessages();
+      return {
+        content: promptMessagesToToolContent(messages)
+      };
+    }
+
+    case "prepare_synthesis_context": {
+      const messages = buildSynthesizeMemoriesMessages();
+      return {
+        content: promptMessagesToToolContent(messages)
+      };
+    }
+
+    case "prepare_packetized_synthesis_context": {
+      const messages = buildSynthesizeMemoryPacketsMessages();
+      return {
+        content: promptMessagesToToolContent(messages)
+      };
+    }
+
+    case "register_district": {
+      const { key, name, description, luca_parent, activities } = request.params.arguments as any;
+      try {
+        const district = memorySystem.registerDistrict(
+          key,
+          name,
+          description,
+          luca_parent,
+          activities ?? [],
+        );
+        const ancestorChain = memorySystem.getDistrictAncestryChain(luca_parent);
+
+        return {
+          content: [{
+            type: "text",
+            text: `🏛️ Registered custom district "${district.name}" (key: ${key})\nDescription: ${district.description}\nArchetype: ${district.archetype} (inherited from LUCA ancestor)\nLUCA ancestry: ${key} → ${ancestorChain.join(" → ")}\nActivities: ${district.activities.join(", ") || "(inherited)"}`,
+          }],
+        };
+      } catch (error) {
+        return toolErrorResult(
+          "register_district",
+          "Failed to register district",
+          error,
+          formatMcpError(
+            NM_ERRORS.INPUT_VALIDATION_FAILED,
+            "Register district request was invalid.",
+            "Verify key (snake_case), name, description, and luca_parent, then retry register_district.",
           ),
         );
       }
@@ -2913,16 +4480,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
  */
 server.setRequestHandler(ListPromptsRequestSchema, async () => {
   return {
-    prompts: [
-      {
-        name: "explore_memory_city",
-        description: "Explore the neurodivergent memory city and its districts",
-      },
-      {
-        name: "synthesize_memories",
-        description: "Create new insights by connecting existing memories",
-      }
-    ]
+    prompts: listPromptDescriptors()
   };
 });
 
@@ -2932,78 +4490,26 @@ server.setRequestHandler(ListPromptsRequestSchema, async () => {
 server.setRequestHandler(GetPromptRequestSchema, async (request) => {
   switch (request.params.name) {
     case "explore_memory_city": {
-      const districts = memorySystem.getAllDistricts();
-      const districtSummaries = districts.map(d => ({
-        type: "resource" as const,
-        resource: {
-          uri: `memory://district/${d.name.toLowerCase().replace(/\s+/g, '_')}`,
-          mimeType: "application/json",
-          text: JSON.stringify(d, null, 2)
-        }
-      }));
-
       return {
-        messages: [
-          {
-            role: "user",
-            content: {
-              type: "text",
-              text: "Welcome to your neurodivergent memory city! Here are the districts where your thoughts reside:"
-            }
-          },
-          ...districtSummaries.map(district => ({
-            role: "user" as const,
-            content: district
-          })),
-          {
-            role: "user",
-            content: {
-              type: "text",
-              text: "Explore these districts and understand how your mind organizes different types of thoughts. What patterns do you notice?"
-            }
-          }
-        ]
+        title: "Explore Memory City",
+        description: "Explore the neurodivergent memory city and its districts",
+        messages: buildExploreMemoryCityMessages()
       };
     }
 
     case "synthesize_memories": {
-      const memories = memorySystem.getAllMemories().slice(0, 10); // Limit to recent memories
-      const memoryResources = memories.map(memory => ({
-        type: "resource" as const,
-        resource: {
-          uri: `memory://memory/${memory.id}`,
-          mimeType: "application/json",
-          text: JSON.stringify({
-            name: memory.name,
-            content: memory.content,
-            archetype: memory.archetype,
-            district: memory.district,
-            tags: memory.tags
-          }, null, 2)
-        }
-      }));
-
       return {
-        messages: [
-          {
-            role: "user",
-            content: {
-              type: "text",
-              text: "Let's synthesize new insights from your stored memories. Here are some recent thoughts:"
-            }
-          },
-          ...memoryResources.map(memory => ({
-            role: "user" as const,
-            content: memory
-          })),
-          {
-            role: "user",
-            content: {
-              type: "text",
-              text: "Looking at these memories, what new connections or insights emerge? How do they relate to each other?"
-            }
-          }
-        ]
+        title: "Synthesize Memories",
+        description: "Create new insights by connecting existing memories",
+        messages: buildSynthesizeMemoriesMessages()
+      };
+    }
+
+    case "synthesize_memory_packets": {
+      return {
+        title: "Synthesize Memory Packets",
+        description: "Create new insights from packetized memory slices for attachment-constrained clients",
+        messages: buildSynthesizeMemoryPacketsMessages()
       };
     }
 
