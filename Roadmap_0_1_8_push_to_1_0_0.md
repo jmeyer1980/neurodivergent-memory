@@ -18,7 +18,7 @@ This position is intentional and consistent with semantic versioning conventions
 Release-readiness snapshot for the `development` branch as of 2026-04-03:
 
 - Latest published package version remains `0.2.0`.
-- Core planned v0.3.0 feature issues `#54` through `#59` are implemented and merged.
+- Core planned v0.3.0 feature issues #54 through #59 are implemented and merged.
 - Remaining release-readiness work is primarily tracker/documentation reconciliation plus follow-up Issue #74 for the residual epistemic-status gap.
 
 ---
