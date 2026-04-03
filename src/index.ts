@@ -1168,7 +1168,11 @@ class NeurodivergentMemory {
           access_count: candidate.access_count ?? 1,
           emotional_valence: candidate.emotional_valence,
           intensity: candidate.intensity ?? 0.5,
-          epistemic_status: candidate.epistemic_status,
+          epistemic_status: resolveDefaultEpistemicStatus(
+            candidate.district,
+            candidate.tags ?? [],
+            candidate.epistemic_status,
+          ),
         };
 
         plan.memories.push({
@@ -1664,6 +1668,8 @@ class NeurodivergentMemory {
       noNetNewInfoWarning = this.buildNoNetNewInfoWarning(matchedMemory.id, repeatCandidate.similarityScore);
     }
 
+    const resolvedEpistemicStatus = resolveDefaultEpistemicStatus(district, tags, epistemic_status);
+
     const memory: MemoryNPC = {
       id,
       name,
@@ -1681,7 +1687,7 @@ class NeurodivergentMemory {
       access_count: 1,
       emotional_valence,
       intensity,
-      epistemic_status,
+      epistemic_status: resolvedEpistemicStatus,
       last_similarity_score: similarityScore,
     };
 
@@ -2049,7 +2055,12 @@ class NeurodivergentMemory {
     return results;
   }
 
-  relatedTo(memoryId: string, query?: string, context?: string): ScoredMemory[] {
+  relatedTo(
+    memoryId: string,
+    query?: string,
+    context?: string,
+    epistemic_statuses?: EpistemicStatusFilter[],
+  ): ScoredMemory[] {
     const root = this.memories[memoryId];
     if (!root) {
       throw createNMError(
@@ -2084,15 +2095,24 @@ class NeurodivergentMemory {
       .map(([id, hops]) => ({ memory: this.memories[id], hops }))
       .filter((entry): entry is { memory: MemoryNPC; hops: number } => Boolean(entry.memory));
 
+    const filteredCandidates = epistemic_statuses && epistemic_statuses.length > 0
+      ? candidates.filter(({ memory }) => {
+          const status = memory.epistemic_status ?? "unset";
+          return epistemic_statuses.includes(status);
+        })
+      : candidates;
+
+    if (filteredCandidates.length === 0) return [];
+
     const semanticQuery = query && query.trim().length > 0 ? query : root.content;
     const hasContext = typeof context === "string" && context.trim().length > 0;
-    const queryScores = this.normalizedBm25Scores(candidates.map(entry => entry.memory), semanticQuery);
+    const queryScores = this.normalizedBm25Scores(filteredCandidates.map(entry => entry.memory), semanticQuery);
     const contextScores = hasContext
-      ? this.normalizedBm25Scores(candidates.map(entry => entry.memory), context)
-      : new Map(candidates.map(entry => [entry.memory.id, 0]));
+      ? this.normalizedBm25Scores(filteredCandidates.map(entry => entry.memory), context)
+      : new Map(filteredCandidates.map(entry => [entry.memory.id, 0]));
 
     const scored: ScoredMemory[] = [];
-    for (const { memory, hops } of candidates) {
+    for (const { memory, hops } of filteredCandidates) {
       const queryScore = queryScores.get(memory.id) ?? 0;
       const contextScore = contextScores.get(memory.id) ?? 0;
       const semanticScore = hasContext
@@ -2118,11 +2138,24 @@ class NeurodivergentMemory {
 
   // ── Listing & Stats ────────────────────────────────────────────────────────
 
-  listMemories(page = 1, page_size = 20, district?: string, archetype?: string, project_id?: string): { memories: MemoryNPC[]; total: number; page: number; page_size: number; total_pages: number } {
+  listMemories(
+    page = 1,
+    page_size = 20,
+    district?: string,
+    archetype?: string,
+    project_id?: string,
+    epistemic_statuses?: EpistemicStatusFilter[],
+  ): { memories: MemoryNPC[]; total: number; page: number; page_size: number; total_pages: number } {
     let all = Object.values(this.memories);
     if (district) all = all.filter(m => m.district === district);
     if (archetype) all = all.filter(m => m.archetype === archetype);
     if (project_id) all = all.filter(m => m.project_id === project_id);
+    if (epistemic_statuses && epistemic_statuses.length > 0) {
+      all = all.filter(m => {
+        const status = m.epistemic_status ?? "unset";
+        return epistemic_statuses.includes(status);
+      });
+    }
 
     all.sort((a, b) => b.created.getTime() - a.created.getTime());
 
@@ -3031,20 +3064,39 @@ function normalizeTag(tag: string): string {
     .replace(/[\s-]+/g, "_");
 }
 
-function hasTaskInProgressTags(tags: string[] = []): boolean {
+function hasTaskTag(tags: string[] = []): boolean {
   const normalizedTags = new Set(tags.map(normalizeTag));
 
-  const hasTaskTag =
+  return (
     normalizedTags.has("kind:task") ||
     normalizedTags.has("type:task") ||
-    normalizedTags.has("task");
+    normalizedTags.has("task")
+  );
+}
+
+function resolveDefaultEpistemicStatus(
+  district: string,
+  tags: string[] = [],
+  explicitStatus?: EpistemicStatus,
+): EpistemicStatus | undefined {
+  if (explicitStatus !== undefined) {
+    return explicitStatus;
+  }
+
+  return district === "practical_execution" && hasTaskTag(tags)
+    ? "draft"
+    : undefined;
+}
+
+function hasTaskInProgressTags(tags: string[] = []): boolean {
+  const normalizedTags = new Set(tags.map(normalizeTag));
 
   const hasInProgressTag =
     normalizedTags.has("status:in_progress") ||
     normalizedTags.has("state:in_progress") ||
     normalizedTags.has("in_progress");
 
-  return hasTaskTag && hasInProgressTag;
+  return hasTaskTag(tags) && hasInProgressTag;
 }
 
 function findExistingInProgressTasks(agentId: string): MemoryNPC[] {
@@ -3587,6 +3639,11 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             context: {
               type: "string",
               description: "Optional short goal/context string blended into ranking as a lightweight BM25 boost."
+            },
+            epistemic_statuses: {
+              type: "array",
+              items: { type: "string", enum: ["draft", "validated", "outdated", "unset"] },
+              description: "Optional epistemic status filters for related memories"
             }
           },
           required: ["memory_id"]
@@ -3622,6 +3679,11 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             project_id: {
               type: "string",
               description: "Optional project_id filter"
+            },
+            epistemic_statuses: {
+              type: "array",
+              items: { type: "string", enum: ["draft", "validated", "outdated", "unset"] },
+              description: "Optional epistemic status filters"
             }
           }
         }
@@ -4068,9 +4130,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     }
 
     case "related_to": {
-      const { memory_id, query, context } = request.params.arguments as any;
+      const { memory_id, query, context, epistemic_statuses } = request.params.arguments as any;
       try {
-        const results = memorySystem.relatedTo(memory_id, query, context);
+        const results = memorySystem.relatedTo(memory_id, query, context, epistemic_statuses);
         if (results.length === 0) {
           return { content: [{ type: "text", text: `🔗 No related memories found for ${memory_id}` }] };
         }
@@ -4093,12 +4155,12 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     }
 
     case "list_memories": {
-      const { page = 1, page_size = 20, district, archetype, project_id } = request.params.arguments as any;
+      const { page = 1, page_size = 20, district, archetype, project_id, epistemic_statuses } = request.params.arguments as any;
       try {
         if (project_id !== undefined) {
           validateProjectId(project_id);
         }
-        const result = memorySystem.listMemories(page, page_size, district, archetype, project_id);
+        const result = memorySystem.listMemories(page, page_size, district, archetype, project_id, epistemic_statuses);
         if (result.memories.length === 0) {
           return { content: [{ type: "text", text: `📋 No memories found (page ${page})` }] };
         }
