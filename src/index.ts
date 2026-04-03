@@ -39,10 +39,21 @@ import {
 import type { DistilledArtifact, EpistemicStatus, EpistemicStatusFilter, MemoryArchetype, MemoryNPC } from "./core/types.js";
 
 /**
- * Memory district representing a knowledge domain
+ * Canonical district definitions.
+ * Keep canonical district identifiers in one place so validation and
+ * initialization can derive from the same source of truth.
  */
-const CANONICAL_DISTRICTS = ["logical_analysis", "emotional_processing", "practical_execution", "vigilant_monitoring", "creative_synthesis"] as const;
+const CANONICAL_DISTRICT_DEFINITIONS = {
+  logical_analysis: null,
+  emotional_processing: null,
+  practical_execution: null,
+  vigilant_monitoring: null,
+  creative_synthesis: null,
+} as const;
 
+const CANONICAL_DISTRICTS = Object.freeze(
+  Object.keys(CANONICAL_DISTRICT_DEFINITIONS) as Array<keyof typeof CANONICAL_DISTRICT_DEFINITIONS>,
+);
 interface MemoryDistrict {
   name: string;
   description: string;
