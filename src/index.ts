@@ -247,6 +247,8 @@ type WalOperation = "store" | "update" | "delete" | "connect" | "import" | "regi
 const PROJECT_ID_MAX_LENGTH = 64;
 const PROJECT_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$/;
 
+const VALID_EPISTEMIC_STATUSES: EpistemicStatus[] = ["draft", "validated", "outdated"];
+
 type MemoryUpdatePayload = Partial<Pick<MemoryNPC, "content" | "tags" | "emotional_valence" | "intensity" | "district" | "epistemic_status" | "project_id" | "repeat_write_count" | "repeat_count" | "last_similarity_score" | "ping_pong_counter">> & {
   project_id?: string | null;
 };
@@ -2182,7 +2184,6 @@ class NeurodivergentMemory {
       outdated: 0,
       unset: 0,
     };
-    const KNOWN_EPISTEMIC_STATUSES: EpistemicStatusFilter[] = ["draft", "validated", "outdated", "unset"];
     for (const key of Object.keys(this.districts)) perDistrict[key] = 0;
     for (const m of allMems) perDistrict[m.district] = (perDistrict[m.district] ?? 0) + 1;
     for (const m of allMems) {
@@ -2192,7 +2193,7 @@ class NeurodivergentMemory {
       perProject[projectKey] = (perProject[projectKey] ?? 0) + 1;
       const rawStatus = m.epistemic_status ?? "unset";
       const statusKey: EpistemicStatusFilter =
-        (KNOWN_EPISTEMIC_STATUSES as string[]).includes(rawStatus) ? (rawStatus as EpistemicStatusFilter) : "unset";
+        (VALID_EPISTEMIC_STATUSES as string[]).includes(rawStatus) ? (rawStatus as EpistemicStatusFilter) : "unset";
       epistemicStatusBreakdown[statusKey] = (epistemicStatusBreakdown[statusKey] ?? 0) + 1;
     }
 
@@ -3080,9 +3081,8 @@ function resolveDefaultEpistemicStatus(
   explicitStatus?: EpistemicStatus,
 ): EpistemicStatus | undefined {
   // Normalize null or non-string values so they don't bypass defaulting or store invalid data
-  const VALID_STATUSES: EpistemicStatus[] = ["draft", "validated", "outdated"];
   const normalizedStatus =
-    typeof explicitStatus === "string" && (VALID_STATUSES as string[]).includes(explicitStatus)
+    typeof explicitStatus === "string" && (VALID_EPISTEMIC_STATUSES as string[]).includes(explicitStatus)
       ? (explicitStatus as EpistemicStatus)
       : undefined;
 
