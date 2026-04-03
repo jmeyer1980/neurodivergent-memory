@@ -1,1 +1,0 @@
-This is a test file created by the filesystem MCP server to verify write functionality. The server should be able to create, read, and modify files successfully.

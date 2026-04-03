@@ -469,7 +469,7 @@ For Docker:
         "NEURODIVERGENT_MEMORY_DIR=/data",
         "-v",
         "neurodivergent-memory-data:/data",
-        "docker.io/twgbellok/neurodivergent-memory:0.2.0"
+        "docker.io/twgbellok/neurodivergent-memory:0.3.0"
       ]
     }
   }
@@ -513,7 +513,7 @@ Fully auto-approved tools:
         "NEURODIVERGENT_MEMORY_DIR=/data",
         "-v",
         "neurodivergent-memory-data:/data",
-        "docker.io/twgbellok/neurodivergent-memory:0.2.0"
+        "docker.io/twgbellok/neurodivergent-memory:0.3.0"
       ],
       "env": {}
     }
@@ -530,7 +530,7 @@ If you want to use the mcp server in Github Copilot Agent Workflows (github spin
       "type": "stdio",
       "command": "npx",
       "args": [
-        "neurodivergent-memory@0.2.0"
+        "neurodivergent-memory@0.3.0"
       ],
       "env": {
         "NEURODIVERGENT_MEMORY_DIR": ".neurodivergent-memory"
@@ -577,7 +577,7 @@ If you want per-project isolation instead of a shared global memory file, mount 
         "NEURODIVERGENT_MEMORY_DIR=/data",
         "-v",
         "${workspaceFolder}/.neurodivergent-memory:/data",
-        "docker.io/twgbellok/neurodivergent-memory:0.2.0"
+        "docker.io/twgbellok/neurodivergent-memory:0.3.0"
       ]
     }
   }
@@ -593,7 +593,7 @@ Use an explicit version tag. The published Docker images intentionally do not ma
 You can also run the packaged server image directly:
 
 ```bash
-docker run --rm -i twgbellok/neurodivergent-memory:0.2.0
+docker run --rm -i twgbellok/neurodivergent-memory:0.3.0
 ```
 
 ### Debugging

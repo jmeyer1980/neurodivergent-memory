@@ -182,6 +182,39 @@ test("dry-run reports counts without writing", () => {
   }
 });
 
+test("directory inputs default to memories.json when tier env vars are unset", () => {
+  const { base, source, target } = createTempDirs();
+
+  try {
+    writeSnapshot(source, {
+      nextMemoryId: 2,
+      memories: {
+        memory_1: {
+          id: "memory_1",
+          content: "dir-based import source",
+          district: "logical_analysis",
+          tags: ["persistence:durable", "kind:insight"],
+        },
+      },
+    });
+
+    writeSnapshot(target, { nextMemoryId: 1, memories: {} });
+
+    const output = runSync(["--from", source, "--to", target], {
+      NEURODIVERGENT_MEMORY_PROJECT_DIR: "",
+      NEURODIVERGENT_MEMORY_USER_DIR: "",
+      NEURODIVERGENT_MEMORY_ORG_DIR: "",
+    });
+
+    assert.match(output, /imported:\s+1/);
+
+    const result = readSnapshot(target);
+    assert.ok(result.memories.memory_1, "directory inputs should resolve to memories.json");
+  } finally {
+    fs.rmSync(base, { recursive: true, force: true });
+  }
+});
+
 test("any-tag flag uses OR matching", () => {
   const { base, source, target } = createTempDirs();
 

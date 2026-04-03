@@ -166,14 +166,7 @@ function snapshotPathForDir(dir: string): string {
     .map((location) => path.basename(location.file))
     .find((fileName) => fileName.length > 0);
 
-  if (!snapshotFileName) {
-    die(
-      "Cannot derive snapshot filename from configured persistence tiers. Provide an explicit snapshot path or configure a persistence tier.",
-      1,
-    );
-  }
-
-  return path.join(dir, snapshotFileName);
+  return path.join(dir, snapshotFileName ?? "memories.json");
 }
 
 // ── Snapshot I/O ─────────────────────────────────────────────────────────────
