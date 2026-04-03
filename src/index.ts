@@ -3079,8 +3079,15 @@ function resolveDefaultEpistemicStatus(
   tags: string[] = [],
   explicitStatus?: EpistemicStatus,
 ): EpistemicStatus | undefined {
-  if (explicitStatus !== undefined) {
-    return explicitStatus;
+  // Normalize null or non-string values so they don't bypass defaulting or store invalid data
+  const VALID_STATUSES: EpistemicStatus[] = ["draft", "validated", "outdated"];
+  const normalizedStatus =
+    typeof explicitStatus === "string" && (VALID_STATUSES as string[]).includes(explicitStatus)
+      ? (explicitStatus as EpistemicStatus)
+      : undefined;
+
+  if (normalizedStatus !== undefined) {
+    return normalizedStatus;
   }
 
   return district === "practical_execution" && hasTaskTag(tags)

@@ -144,7 +144,7 @@ Memories can optionally carry `epistemic_status` to distinguish tentative planni
 - `validated` — confirmed and safe to treat as established
 - `outdated` — superseded but retained for history
 
-When `store_memory` or `import_memories` creates a new `practical_execution` memory tagged `kind:task` without an explicit `epistemic_status`, the server defaults it to `draft`. This keeps planning notes from silently presenting as settled fact.
+When `store_memory` or `import_memories` creates a new `practical_execution` memory without an explicit `epistemic_status`, the server defaults it to `draft` if the memory has a task tag. The canonical task tag is `kind:task`, and the server also accepts the compatibility synonyms `type:task` and bare `task`. This keeps planning notes from silently presenting as settled fact.
 
 ### Project Attribution and Scoped Retrieval
 
