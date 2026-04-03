@@ -14,6 +14,12 @@ export interface PersistenceLocation {
   source: string;
 }
 
+export interface MemoryTiers {
+  project?: PersistenceLocation;
+  user?: PersistenceLocation;
+  org?: PersistenceLocation;
+}
+
 interface ResolvePersistenceLocationOptions {
   env?: NodeJS.ProcessEnv;
   homeDir?: string;
@@ -133,4 +139,46 @@ export function resolvePersistenceLocation(
     file: snapshotFileForPlatform(fallbackDir, platform),
     source: "default home directory",
   };
+}
+
+export function walPathForSnapshot(snapshotFile: string): string {
+  return `${snapshotFile}.wal.jsonl`;
+}
+
+export function resolveMemoryTiers(
+  options: ResolvePersistenceLocationOptions = {},
+): MemoryTiers {
+  const env = options.env ?? process.env;
+  const platform = options.platform ?? process.platform;
+
+  const tiers: MemoryTiers = {};
+
+  const projectDir = trimEnvValue(env.NEURODIVERGENT_MEMORY_PROJECT_DIR);
+  if (projectDir) {
+    tiers.project = {
+      dir: projectDir,
+      file: snapshotFileForPlatform(projectDir, platform),
+      source: "NEURODIVERGENT_MEMORY_PROJECT_DIR",
+    };
+  }
+
+  const userDir = trimEnvValue(env.NEURODIVERGENT_MEMORY_USER_DIR);
+  if (userDir) {
+    tiers.user = {
+      dir: userDir,
+      file: snapshotFileForPlatform(userDir, platform),
+      source: "NEURODIVERGENT_MEMORY_USER_DIR",
+    };
+  }
+
+  const orgDir = trimEnvValue(env.NEURODIVERGENT_MEMORY_ORG_DIR);
+  if (orgDir) {
+    tiers.org = {
+      dir: orgDir,
+      file: snapshotFileForPlatform(orgDir, platform),
+      source: "NEURODIVERGENT_MEMORY_ORG_DIR",
+    };
+  }
+
+  return tiers;
 }

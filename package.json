@@ -34,6 +34,7 @@
   "scripts": {
     "bench": "npm run benchmark",
     "build": "tsc && node -e \"require('fs').chmodSync('build/index.js', '755')\"",
+    "sync-memories": "npm run build && node build/scripts/sync-memories.js",
     "lint": "npm run lint:code && npm run lint:md",
     "lint:code": "tsc --noEmit",
     "lint:md": "npx --yes markdownlint-cli --config .markdownlint.json README.md CHANGELOG.md CONTRIBUTING.md CODE_OF_CONDUCT.md SECURITY.md SUPPORT.md TEST_SUMMARY.md SMOKE_TEST_REPORT.md",
