@@ -143,7 +143,37 @@ function resolveDir(spec: string): string {
 }
 
 function snapshotPathForDir(dir: string): string {
-  return path.join(dir, "memories.json");
+  const tiers = resolveMemoryTiers();
+  const configuredLocations = [tiers.project, tiers.user, tiers.org].filter(
+    (location): location is NonNullable<(typeof tiers)[keyof typeof tiers]> =>
+      Boolean(location),
+  );
+
+  const resolvedDir = path.resolve(dir);
+  const matchingLocation = configuredLocations.find(
+    (location) => path.resolve(location.dir) === resolvedDir,
+  );
+
+  if (matchingLocation) {
+    return matchingLocation.file;
+  }
+
+  if (path.extname(dir).toLowerCase() === ".json") {
+    return dir;
+  }
+
+  const snapshotFileName = configuredLocations
+    .map((location) => path.basename(location.file))
+    .find((fileName) => fileName.length > 0);
+
+  if (!snapshotFileName) {
+    die(
+      "Cannot derive snapshot filename from configured persistence tiers. Provide an explicit snapshot path or configure a persistence tier.",
+      1,
+    );
+  }
+
+  return path.join(dir, snapshotFileName);
 }
 
 // ── Snapshot I/O ─────────────────────────────────────────────────────────────
