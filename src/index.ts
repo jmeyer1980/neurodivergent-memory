@@ -24,6 +24,7 @@ import {
 import * as crypto from "crypto";
 import * as fs from "fs";
 import * as path from "path";
+import { fileURLToPath } from "url";
 import { logger } from "./core/logger.js";
 import { resolvePersistenceLocation } from "./core/persistence.js";
 import { AsyncMutex } from "./core/async-mutex.js";
@@ -57,6 +58,177 @@ function resolveServerPackageInfo(): { name: string; version: string } {
 
 const SERVER_PACKAGE_INFO = resolveServerPackageInfo();
 const SERVER_START_TIME_ISO = new Date().toISOString();
+
+type AgentKitInstallMode = "prompt-first" | "auto-setup";
+
+interface AgentKitCliOptions {
+  targetRoot: string;
+  dryRun: boolean;
+  force: boolean;
+  mode: AgentKitInstallMode;
+}
+
+interface AgentKitInstallEntry {
+  sourcePath: string;
+  targetPath: string;
+}
+
+function parseAgentKitCliOptions(argv: string[]): AgentKitCliOptions {
+  let targetRoot = process.cwd();
+  let dryRun = false;
+  let force = false;
+  let mode: AgentKitInstallMode = "prompt-first";
+
+  for (let index = 0; index < argv.length; index += 1) {
+    const arg = argv[index];
+
+    switch (arg) {
+      case "--target": {
+        const value = argv[index + 1];
+        if (!value) {
+          throw new Error("Missing value for --target");
+        }
+        targetRoot = path.resolve(value);
+        index += 1;
+        break;
+      }
+
+      case "--dry-run":
+        dryRun = true;
+        break;
+
+      case "--force":
+        force = true;
+        break;
+
+      case "--mode": {
+        const value = argv[index + 1];
+        if (value !== "prompt-first" && value !== "auto-setup") {
+          throw new Error("Invalid value for --mode. Use prompt-first or auto-setup.");
+        }
+        mode = value;
+        index += 1;
+        break;
+      }
+
+      default:
+        throw new Error(`Unknown argument: ${arg}`);
+    }
+  }
+
+  return {
+    targetRoot,
+    dryRun,
+    force,
+    mode,
+  };
+}
+
+function resolveAgentKitSourceRoot(): string {
+  const candidates = [
+    fileURLToPath(new URL("../.github/agent-kit/templates", import.meta.url)),
+    fileURLToPath(new URL("../templates/agent-kit", import.meta.url)),
+  ];
+
+  for (const candidate of candidates) {
+    if (fs.existsSync(candidate)) {
+      return candidate;
+    }
+  }
+
+  throw new Error(
+    "Agent kit templates not found. Run npm pack/prepack first or use the repository source tree.",
+  );
+}
+
+function resolveAgentKitTargetRelativePaths(templateFileName: string): string[] {
+  // Always install to .github/agent-kit/templates/ so post-install references remain valid.
+  const relativeTargetPaths = [path.join(".github", "agent-kit", "templates", templateFileName)];
+
+  if (templateFileName === "copilot-instructions.md") {
+    relativeTargetPaths.push(path.join(".github", "copilot-instructions.md"));
+    return relativeTargetPaths;
+  }
+
+  if (templateFileName.endsWith(".agent.md")) {
+    relativeTargetPaths.push(path.join(".github", "agents", templateFileName));
+    return relativeTargetPaths;
+  }
+
+  if (templateFileName.endsWith(".instructions.md")) {
+    relativeTargetPaths.push(path.join(".github", "instructions", templateFileName));
+    return relativeTargetPaths;
+  }
+
+  if (templateFileName.endsWith(".prompt.md")) {
+    relativeTargetPaths.push(path.join(".github", "prompts", templateFileName));
+    return relativeTargetPaths;
+  }
+
+  return relativeTargetPaths;
+}
+
+function buildAgentKitInstallEntries(sourceRoot: string, targetRoot: string): AgentKitInstallEntry[] {
+  // Each source template maps to one or more target paths (agent-kit/templates/ plus its standard location).
+  const entries = fs
+    .readdirSync(sourceRoot, { withFileTypes: true })
+    .filter(entry => entry.isFile())
+    .flatMap((entry) =>
+      resolveAgentKitTargetRelativePaths(entry.name).map((relativeTargetPath) => ({
+        sourcePath: path.join(sourceRoot, entry.name),
+        targetPath: path.join(targetRoot, relativeTargetPath),
+      }) satisfies AgentKitInstallEntry),
+    );
+
+  entries.sort((left, right) => left.targetPath.localeCompare(right.targetPath));
+  return entries;
+}
+
+function runInitAgentKit(argv: string[]): number {
+  const options = parseAgentKitCliOptions(argv);
+  const sourceRoot = resolveAgentKitSourceRoot();
+  const installEntries = buildAgentKitInstallEntries(sourceRoot, options.targetRoot);
+
+  if (installEntries.length === 0) {
+    throw new Error(`No installable templates were found in ${sourceRoot}`);
+  }
+
+  console.log(`Installing neurodivergent-memory agent kit into ${options.targetRoot}`);
+  console.log(`Install policy: ${options.mode}`);
+  console.log(`Dry run: ${options.dryRun ? "yes" : "no"}`);
+  console.log(`Overwrite existing files: ${options.force ? "yes" : "no"}`);
+
+  let copiedCount = 0;
+  let skippedCount = 0;
+
+  for (const entry of installEntries) {
+    const targetExists = fs.existsSync(entry.targetPath);
+
+    if (targetExists && !options.force) {
+      skippedCount += 1;
+      console.log(`SKIPPED ${entry.targetPath}`);
+      continue;
+    }
+
+    if (!options.dryRun) {
+      fs.mkdirSync(path.dirname(entry.targetPath), { recursive: true });
+      fs.copyFileSync(entry.sourcePath, entry.targetPath);
+    }
+
+    copiedCount += 1;
+    console.log(`${options.dryRun ? "WOULD COPY" : "COPIED"} ${entry.targetPath}`);
+  }
+
+  console.log(`Summary: ${copiedCount} ${options.dryRun ? "planned" : "copied"}, ${skippedCount} skipped.`);
+
+  if (options.mode === "auto-setup") {
+    console.log(
+      "Note: the installed templates remain the source-authored files. If you want auto-setup wording in the agent body, adjust the copied files after install.",
+    );
+  }
+
+  return 0;
+}
 
 /**
  * Canonical district definitions.
@@ -1271,15 +1443,13 @@ class NeurodivergentMemory {
       .map(entry => entry.memory.id);
   }
 
-  private detectRepeatCandidate(content: string, agentId?: string): { memory: MemoryNPC; similarityScore: number } | undefined {
-    // Select the 10 most recently created memories for this agent (or globally) in O(N log k) with k=10,
-    // instead of sorting all memories (O(N log N)).
-    const candidates = Object.values(this.memories).filter(memory =>
-      agentId ? memory.agent_id === agentId : true,
-    );
+  private getTopKRecentMemories(memories: MemoryNPC[], limit: number): MemoryNPC[] {
+    if (limit <= 0 || memories.length === 0) {
+      return [];
+    }
 
     const recentCandidates: MemoryNPC[] = [];
-    for (const memory of candidates) {
+    for (const memory of memories) {
       const createdTime = memory.created.getTime();
 
       if (recentCandidates.length === 0) {
@@ -1287,12 +1457,11 @@ class NeurodivergentMemory {
         continue;
       }
 
-      // If we don't yet have 10 candidates, insert in sorted (descending created) position.
-      if (recentCandidates.length < 10) {
+      if (recentCandidates.length < limit) {
         let inserted = false;
-        for (let i = 0; i < recentCandidates.length; i++) {
-          if (createdTime > recentCandidates[i].created.getTime()) {
-            recentCandidates.splice(i, 0, memory);
+        for (let index = 0; index < recentCandidates.length; index += 1) {
+          if (createdTime > recentCandidates[index].created.getTime()) {
+            recentCandidates.splice(index, 0, memory);
             inserted = true;
             break;
           }
@@ -1303,59 +1472,111 @@ class NeurodivergentMemory {
         continue;
       }
 
-      // We already have 10; only insert if this memory is newer than the oldest in the list.
       const oldest = recentCandidates[recentCandidates.length - 1];
       if (createdTime <= oldest.created.getTime()) {
         continue;
       }
 
       let inserted = false;
-      for (let i = 0; i < recentCandidates.length; i++) {
-        if (createdTime > recentCandidates[i].created.getTime()) {
-          recentCandidates.splice(i, 0, memory);
+      for (let index = 0; index < recentCandidates.length; index += 1) {
+        if (createdTime > recentCandidates[index].created.getTime()) {
+          recentCandidates.splice(index, 0, memory);
           inserted = true;
           break;
         }
       }
-      if (inserted) {
-        // Trim back to 10 most recent
-        if (recentCandidates.length > 10) {
-          recentCandidates.length = 10;
-        }
+
+      if (inserted && recentCandidates.length > limit) {
+        recentCandidates.length = limit;
       }
     }
+
+    return recentCandidates;
+  }
+
+  private exactTokenSequenceMatch(leftTokens: string[], rightTokens: string[]): boolean {
+    if (leftTokens.length !== rightTokens.length) {
+      return false;
+    }
+
+    for (let index = 0; index < leftTokens.length; index += 1) {
+      if (leftTokens[index] !== rightTokens[index]) {
+        return false;
+      }
+    }
+
+    return true;
+  }
+
+  private tokenOverlapSimilarity(leftTokens: string[], rightTokens: string[]): number {
+    if (leftTokens.length === 0 || rightTokens.length === 0) {
+      return 0;
+    }
+
+    const leftSet = new Set(leftTokens);
+    const rightSet = new Set(rightTokens);
+
+    let overlapCount = 0;
+    for (const token of leftSet) {
+      if (rightSet.has(token)) {
+        overlapCount += 1;
+      }
+    }
+
+    if (overlapCount === 0) {
+      return 0;
+    }
+
+    const diceSimilarity = (2 * overlapCount) / (leftSet.size + rightSet.size);
+    const containmentSimilarity = overlapCount / Math.min(leftSet.size, rightSet.size);
+
+    // Blend symmetric overlap with containment so small appended details do not fall just below
+    // the default repeat threshold while unrelated text with only boilerplate overlap stays low.
+    return (diceSimilarity + containmentSimilarity) / 2;
+  }
+
+  private detectRepeatCandidate(content: string, agentId?: string): { memory: MemoryNPC; similarityScore: number } | undefined {
+    const candidates = Object.values(this.memories).filter(memory =>
+      agentId ? memory.agent_id === agentId : true,
+    );
+
+    // Repeat detection only compares against the recent write window to catch immediate re-statements
+    // without turning the full corpus into a duplicate gate.
+    const recentCandidates = this.getTopKRecentMemories(candidates, 10);
     if (recentCandidates.length === 0) {
       return undefined;
     }
 
-    const queryTerms = this.bm25.queryTerms(content);
-    const rawScores = recentCandidates.map(memory => ({
-      memory,
-      score: this.bm25.score(memory.id, queryTerms),
-    }));
-
-    // Normalize BM25 scores to a 0–1 similarity range relative to the best candidate,
-    // so that NEURODIVERGENT_MEMORY_REPEAT_THRESHOLD remains stable across corpus sizes.
-    const positiveScores = rawScores.filter(candidate => candidate.score > 0);
-    if (positiveScores.length === 0) {
+    const queryTokens = this.bm25.queryTerms(content);
+    if (queryTokens.length === 0) {
       return undefined;
     }
 
-    const maxScore = positiveScores.reduce(
-      (currentMax, candidate) => (candidate.score > currentMax ? candidate.score : currentMax),
-      positiveScores[0].score,
-    );
+    let bestMatch: { memory: MemoryNPC; similarityScore: number } | undefined;
 
-    const best = positiveScores.reduce(
-      (currentBest, candidate) => (candidate.score > currentBest.score ? candidate : currentBest),
-      positiveScores[0],
-    );
+    for (const memory of recentCandidates) {
+      const memoryTokens = this.bm25.queryTerms(memory.content);
+      if (memoryTokens.length === 0) {
+        continue;
+      }
 
-    return {
-      memory: best.memory,
-      // Return similarity on a 0–1 scale so thresholds remain stable across corpus sizes.
-      similarityScore: best.score / maxScore,
-    };
+      if (this.exactTokenSequenceMatch(queryTokens, memoryTokens)) {
+        return {
+          memory,
+          similarityScore: 1,
+        };
+      }
+
+      const similarityScore = this.tokenOverlapSimilarity(queryTokens, memoryTokens);
+      if (!bestMatch || similarityScore > bestMatch.similarityScore) {
+        bestMatch = {
+          memory,
+          similarityScore,
+        };
+      }
+    }
+
+    return bestMatch;
   }
 
   private applyPingPongTelemetry(memory: MemoryNPC, actor?: OperationActorContext): {
@@ -4527,6 +4748,14 @@ server.setRequestHandler(GetPromptRequestSchema, async (request) => {
  * This allows the server to communicate via standard input/output streams.
  */
 async function main() {
+  const command = process.argv[2];
+
+  if (command === "init-agent-kit" || command === "setup-agent-kit") {
+    const exitCode = runInitAgentKit(process.argv.slice(3));
+    process.exitCode = exitCode;
+    return;
+  }
+
   const transport = new StdioServerTransport();
   await server.connect(transport);
 }

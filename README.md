@@ -33,6 +33,49 @@
   </tr>
 </table>
 
+## Quick-start
+
+### Windows
+
+```powershell
+# Download and install Chocolatey:
+powershell -c "irm https://community.chocolatey.org/install.ps1|iex"
+
+# Download and install Node.js:
+choco install nodejs --version="24.14.1"
+
+# Verify the Node.js version:
+node -v # Should print a Node.js 24.x version.
+
+# Verify npm version:
+npm -v # Should print an npm 11.x version.
+
+# Run the packaged neurodivergent-memory CLI without a global install
+npx neurodivergent-memory@latest init-agent-kit
+```
+
+### Linux/macOS
+
+```bash
+# Download and install nvm:
+curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.4/install.sh | bash
+
+# in lieu of restarting the shell
+. "$HOME/.nvm/nvm.sh"
+
+# Download and install Node.js:
+nvm install 24
+
+# Verify the Node.js version:
+node -v # Should print a Node.js 24.x version.
+
+# Verify npm version:
+npm -v # Should print an npm 11.x version.
+
+# Run the packaged neurodivergent-memory CLI without a global install
+npx neurodivergent-memory@latest init-agent-kit
+```
+
 ## Model Flow
 
 ```mermaid
@@ -361,7 +404,7 @@ WIP guardrail behavior:
 
 The server tracks loop signals and can surface targeted guardrail responses:
 
-- Repetition detection on `store_memory` compares incoming content against the 10 most recent memories (same `agent_id` when provided) using raw BM25 similarity scores.
+- Repetition detection on `store_memory` compares incoming content against the 10 most recent memories (same `agent_id` when provided) using tokenizer-consistent token-overlap scoring with an exact-match fast path.
 - Stores that meet the repeat threshold set `repeat_detected: true`, increment `repeat_write_count` on the matched memory, and add a `No net-new info` warning to the tool response.
 - Repeated `logical_analysis` reads of `emotional_processing` memories add a `distill_memory` suggestion once the configured threshold is crossed.
 - Read/write ping-pong transitions are tracked in a rolling operation window, increment `ping_pong_counter` when threshold conditions are met, and can optionally start a temporary cross-district write cooldown.
@@ -438,7 +481,7 @@ npm run watch
 
 To use with Claude Desktop, add the server config:
 
-On MacOS: `~/Library/Application Support/Claude/claude_desktop_config.json`
+On macOS: `~/Library/Application Support/Claude/claude_desktop_config.json`
 On Windows: `%APPDATA%/Claude/claude_desktop_config.json`
 
 For npm:
@@ -608,8 +651,8 @@ The Inspector will provide a URL to access debugging tools in your browser.
 
 ## Agent Workflow Setup
 
-This repository ships a reusable **agent customization kit** at [`.github/agent-kit/`](.github/agent-kit/).
-It contains ready-to-use templates for wiring neurodivergent-memory into any agent that supports MCP — regardless of platform, language, or project type.
+This repository ships a reusable **agent customization kit** whose authoring source lives at [`.github/agent-kit/`](.github/agent-kit/).
+Use the packaged installer to materialize those templates into a consumer repository's `.github/...` folders instead of tracking a live generated agent file in this repo.
 
 ### Contents
 
@@ -623,7 +666,28 @@ It contains ready-to-use templates for wiring neurodivergent-memory into any age
 | `templates/explore_memory_city.prompt.md` | Prompt for guided exploration of memory districts and graph structure. |
 | `templates/memory-driven-issue-execution.prompt.md` | Prompt for executing a tracked issue with full memory-driven context (pull → plan → act → update). |
 
-### How to use these templates
+### Install the kit into a project
+
+Install the current packaged kit into the repo you are standing in:
+
+```bash
+npx neurodivergent-memory@latest init-agent-kit
+```
+
+Useful options:
+
+- `--target <path>` installs into a different repository root.
+- `--dry-run` shows what would be copied without writing files.
+- `--force` overwrites existing destination files.
+- `--mode prompt-first|auto-setup` records the intended install policy in command output while leaving template wording unchanged.
+
+The installer copies templates into standard customization locations such as `.github/agents/`, `.github/instructions/`, `.github/prompts/`, and `.github/copilot-instructions.md`.
+
+### Authoring source and generated files
+
+The source of truth remains under [`.github/agent-kit/templates/`](.github/agent-kit/templates/). The installed live agent file `.github/agents/neurodivergent-agent.agent.md` is intentionally treated as generated consumer state rather than a tracked repo artifact, so remote Copilot updates cannot keep wiping it out in this repository.
+
+### Manual copy fallback
 
 **Copy** the files you need into your project's standard customization locations — do not move them, so the originals remain available as a reference for future agents or contributors.
 

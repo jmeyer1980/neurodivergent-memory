@@ -1,7 +1,7 @@
 ---
 name: neurodivergent-agent
 description: "Use when doing memory-driven development: researching, learning, planning with neurodivergent-memory MCP, taking action on code/tasks, updating memory, and creating hand-offs. Maintains living project memory and project context across sessions."
-tools: [neurodivergent-memory/*]
+tools: [read, edit, execute, search, agent, web, todo, neurodivergent-memory/*]
 user-invocable: true
 ---
 
