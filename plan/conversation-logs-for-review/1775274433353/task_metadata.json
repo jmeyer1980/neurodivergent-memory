@@ -1,0 +1,53 @@
+{
+  "files_in_context": [
+    {
+      "path": "/home/jerry/.cline/data/settings/cline_mcp_settings.json",
+      "record_state": "stale",
+      "record_source": "cline_edited",
+      "cline_read_date": 1775274506558,
+      "cline_edit_date": 1775274506558,
+      "user_edit_date": null
+    },
+    {
+      "path": "/home/jerry/.cline/data/settings/cline_mcp_settings.json",
+      "record_state": "stale",
+      "record_source": "cline_edited",
+      "cline_read_date": 1775274563271,
+      "cline_edit_date": 1775274563271,
+      "user_edit_date": null
+    },
+    {
+      "path": "/home/jerry/.cline/data/settings/cline_mcp_settings.json",
+      "record_state": "active",
+      "record_source": "cline_edited",
+      "cline_read_date": 1775275011989,
+      "cline_edit_date": 1775275011989,
+      "user_edit_date": null
+    }
+  ],
+  "model_usage": [
+    {
+      "ts": 1775274433488,
+      "model_id": "kwaipilot/kat-coder-pro",
+      "model_provider_id": "cline",
+      "mode": "act"
+    },
+    {
+      "ts": 1775276208880,
+      "model_id": "arcee-ai/trinity-large-preview:free",
+      "model_provider_id": "cline",
+      "mode": "act"
+    }
+  ],
+  "environment_history": [
+    {
+      "ts": 1775274433485,
+      "os_name": "linux",
+      "os_version": "6.17.0-19-generic",
+      "os_arch": "x64",
+      "host_name": "Visual Studio Code",
+      "host_version": "1.113.0",
+      "cline_version": "3.77.0"
+    }
+  ]
+}

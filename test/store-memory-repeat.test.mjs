@@ -117,6 +117,66 @@ test("store_memory repeat detection surfaces in tool response and memory_stats t
   }
 });
 
+test("store_memory does not flag unrelated content that only shares boilerplate tokens", async () => {
+  const server = startServer({
+    env: {
+      NEURODIVERGENT_MEMORY_REPEAT_THRESHOLD: "0.85",
+    },
+  });
+
+  try {
+    await server.callTool(30, "store_memory", {
+      content: "This is a note about quantum computing error correction and logical qubits.",
+      district: "logical_analysis",
+      tags: ["topic:test", "scope:session", "kind:insight", "layer:research"],
+      agent_id: "agent-alpha",
+    });
+
+    const second = await server.callTool(31, "store_memory", {
+      content: "This is a note about Renaissance fresco painting and workshop apprentices.",
+      district: "logical_analysis",
+      tags: ["topic:test", "scope:session", "kind:insight", "layer:research"],
+      agent_id: "agent-alpha",
+    });
+
+    const secondText = second.result?.content?.[0]?.text ?? "";
+    assert.doesNotMatch(secondText, /repeat_detected: true/);
+    assert.doesNotMatch(secondText, /No net-new info/);
+  } finally {
+    server.stop();
+  }
+});
+
+test("store_memory still flags near-duplicate content with a small appended detail", async () => {
+  const server = startServer({
+    env: {
+      NEURODIVERGENT_MEMORY_REPEAT_THRESHOLD: "0.85",
+    },
+  });
+
+  try {
+    await server.callTool(40, "store_memory", {
+      content: "Plan release validation checklist for RC handshake and packaged agent kit.",
+      district: "practical_execution",
+      tags: ["topic:test", "scope:session", "kind:task", "layer:implementation"],
+      agent_id: "agent-alpha",
+    });
+
+    const second = await server.callTool(41, "store_memory", {
+      content: "Plan release validation checklist for RC handshake and packaged agent kit with Linux smoke coverage.",
+      district: "practical_execution",
+      tags: ["topic:test", "scope:session", "kind:task", "layer:implementation"],
+      agent_id: "agent-alpha",
+    });
+
+    const secondText = second.result?.content?.[0]?.text ?? "";
+    assert.match(secondText, /repeat_detected: true/);
+    assert.match(secondText, /matched_memory_id: memory_1/);
+  } finally {
+    server.stop();
+  }
+});
+
 test("retrieve_memory suggests distillation after repeated logical reads of emotional content", async () => {
   const server = startServer({
     env: {

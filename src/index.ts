@@ -1441,15 +1441,13 @@ class NeurodivergentMemory {
       .map(entry => entry.memory.id);
   }
 
-  private detectRepeatCandidate(content: string, agentId?: string): { memory: MemoryNPC; similarityScore: number } | undefined {
-    // Select the 10 most recently created memories for this agent (or globally) in O(N log k) with k=10,
-    // instead of sorting all memories (O(N log N)).
-    const candidates = Object.values(this.memories).filter(memory =>
-      agentId ? memory.agent_id === agentId : true,
-    );
+  private getTopKRecentMemories(memories: MemoryNPC[], limit: number): MemoryNPC[] {
+    if (limit <= 0 || memories.length === 0) {
+      return [];
+    }
 
     const recentCandidates: MemoryNPC[] = [];
-    for (const memory of candidates) {
+    for (const memory of memories) {
       const createdTime = memory.created.getTime();
 
       if (recentCandidates.length === 0) {
@@ -1457,12 +1455,11 @@ class NeurodivergentMemory {
         continue;
       }
 
-      // If we don't yet have 10 candidates, insert in sorted (descending created) position.
-      if (recentCandidates.length < 10) {
+      if (recentCandidates.length < limit) {
         let inserted = false;
-        for (let i = 0; i < recentCandidates.length; i++) {
-          if (createdTime > recentCandidates[i].created.getTime()) {
-            recentCandidates.splice(i, 0, memory);
+        for (let index = 0; index < recentCandidates.length; index += 1) {
+          if (createdTime > recentCandidates[index].created.getTime()) {
+            recentCandidates.splice(index, 0, memory);
             inserted = true;
             break;
           }
@@ -1473,59 +1470,111 @@ class NeurodivergentMemory {
         continue;
       }
 
-      // We already have 10; only insert if this memory is newer than the oldest in the list.
       const oldest = recentCandidates[recentCandidates.length - 1];
       if (createdTime <= oldest.created.getTime()) {
         continue;
       }
 
       let inserted = false;
-      for (let i = 0; i < recentCandidates.length; i++) {
-        if (createdTime > recentCandidates[i].created.getTime()) {
-          recentCandidates.splice(i, 0, memory);
+      for (let index = 0; index < recentCandidates.length; index += 1) {
+        if (createdTime > recentCandidates[index].created.getTime()) {
+          recentCandidates.splice(index, 0, memory);
           inserted = true;
           break;
         }
       }
-      if (inserted) {
-        // Trim back to 10 most recent
-        if (recentCandidates.length > 10) {
-          recentCandidates.length = 10;
-        }
+
+      if (inserted && recentCandidates.length > limit) {
+        recentCandidates.length = limit;
       }
     }
+
+    return recentCandidates;
+  }
+
+  private exactTokenSequenceMatch(leftTokens: string[], rightTokens: string[]): boolean {
+    if (leftTokens.length !== rightTokens.length) {
+      return false;
+    }
+
+    for (let index = 0; index < leftTokens.length; index += 1) {
+      if (leftTokens[index] !== rightTokens[index]) {
+        return false;
+      }
+    }
+
+    return true;
+  }
+
+  private tokenOverlapSimilarity(leftTokens: string[], rightTokens: string[]): number {
+    if (leftTokens.length === 0 || rightTokens.length === 0) {
+      return 0;
+    }
+
+    const leftSet = new Set(leftTokens);
+    const rightSet = new Set(rightTokens);
+
+    let overlapCount = 0;
+    for (const token of leftSet) {
+      if (rightSet.has(token)) {
+        overlapCount += 1;
+      }
+    }
+
+    if (overlapCount === 0) {
+      return 0;
+    }
+
+    const diceSimilarity = (2 * overlapCount) / (leftSet.size + rightSet.size);
+    const containmentSimilarity = overlapCount / Math.min(leftSet.size, rightSet.size);
+
+    // Blend symmetric overlap with containment so small appended details do not fall just below
+    // the default repeat threshold while unrelated text with only boilerplate overlap stays low.
+    return (diceSimilarity + containmentSimilarity) / 2;
+  }
+
+  private detectRepeatCandidate(content: string, agentId?: string): { memory: MemoryNPC; similarityScore: number } | undefined {
+    const candidates = Object.values(this.memories).filter(memory =>
+      agentId ? memory.agent_id === agentId : true,
+    );
+
+    // Repeat detection only compares against the recent write window to catch immediate re-statements
+    // without turning the full corpus into a duplicate gate.
+    const recentCandidates = this.getTopKRecentMemories(candidates, 10);
     if (recentCandidates.length === 0) {
       return undefined;
     }
 
-    const queryTerms = this.bm25.queryTerms(content);
-    const rawScores = recentCandidates.map(memory => ({
-      memory,
-      score: this.bm25.score(memory.id, queryTerms),
-    }));
-
-    // Normalize BM25 scores to a 0–1 similarity range relative to the best candidate,
-    // so that NEURODIVERGENT_MEMORY_REPEAT_THRESHOLD remains stable across corpus sizes.
-    const positiveScores = rawScores.filter(candidate => candidate.score > 0);
-    if (positiveScores.length === 0) {
+    const queryTokens = this.bm25.queryTerms(content);
+    if (queryTokens.length === 0) {
       return undefined;
     }
 
-    const maxScore = positiveScores.reduce(
-      (currentMax, candidate) => (candidate.score > currentMax ? candidate.score : currentMax),
-      positiveScores[0].score,
-    );
+    let bestMatch: { memory: MemoryNPC; similarityScore: number } | undefined;
 
-    const best = positiveScores.reduce(
-      (currentBest, candidate) => (candidate.score > currentBest.score ? candidate : currentBest),
-      positiveScores[0],
-    );
+    for (const memory of recentCandidates) {
+      const memoryTokens = this.bm25.queryTerms(memory.content);
+      if (memoryTokens.length === 0) {
+        continue;
+      }
 
-    return {
-      memory: best.memory,
-      // Return similarity on a 0–1 scale so thresholds remain stable across corpus sizes.
-      similarityScore: best.score / maxScore,
-    };
+      if (this.exactTokenSequenceMatch(queryTokens, memoryTokens)) {
+        return {
+          memory,
+          similarityScore: 1,
+        };
+      }
+
+      const similarityScore = this.tokenOverlapSimilarity(queryTokens, memoryTokens);
+      if (!bestMatch || similarityScore > bestMatch.similarityScore) {
+        bestMatch = {
+          memory,
+          similarityScore,
+        };
+      }
+    }
+
+    return bestMatch;
   }
 
   private applyPingPongTelemetry(memory: MemoryNPC, actor?: OperationActorContext): {
