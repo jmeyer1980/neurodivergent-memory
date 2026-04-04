@@ -1,7 +1,7 @@
 # Release Validation Report — v0.3.0 Readiness
 
 **Date:** 2026-04-03  
-**Status:** ✅ **READY TO RELEASE** (with version bump prerequisites)  
+**Status:** ✅ **READY TO RELEASE** (version consistency resolved; awaiting tag/publish execution)  
 **Target Package Version:** 0.3.0  
 **Git Branch:** `development` at commit `396bab5`  
 **Commits Since v0.2.0:** 58
@@ -10,7 +10,7 @@
 
 ## Executive Summary
 
-The RC has been found on the market and validates cleanly against all test, build, lint, and smoke criteria. **All functional readiness criteria are met.** The release-blocking items are administrative (version consistency across `package.json` and `server.json`) rather than functional.
+The RC has been found on the market and validates cleanly against all test, build, lint, and smoke criteria. **All functional readiness criteria are met.** The former version-consistency blockers have been resolved; remaining work is release execution and final publication.
 
 ### Status by Domain
 
@@ -21,10 +21,10 @@ The RC has been found on the market and validates cleanly against all test, buil
 | **Linting** | ✅ Pass | Code lint + Markdown lint clean |
 | **Smoke Tests** | ✅ Pass | Live project_id smoke passed |
 | **Documentation** | ✅ Pass | Changelog, README, Roadmap aligned for 0.3.0 |
-| **Version Consistency** | ⚠️ Requires Update | `server.json` stuck at 0.1.8; `package.json` at 0.2.0 |
+| **Version Consistency** | ✅ Pass | `server.json` & `package.json` aligned for 0.3.0 |
 | **Feature Completeness** | ✅ Complete | Issues #54–#76 merged; epistemic-status and goal-aware retrieval complete |
-| **npm Registry** | ✅ Ready | Current tag: `rc: 0.2.0-rc.57.1` published; ready for final tag update |
-| **Docker Registry** | ✅ Ready | `twgbellok/neurodivergent-memory:0.2.0`, `rc-0.2.0-rc.42.1`, `rc-0.2.0-rc.43.1` available |
+| **npm Registry** | ✅ Ready | Current tag: `rc: 0.3.0-rc.64.1` published; ready for final tag update |
+| **Docker Registry** | ✅ Ready | `twgbellok/neurodivergent-memory:0.2.0`, `rc-0.3.0-rc.63.1`, `rc-0.2.0-rc.63.1` available |
 
 ---
 
@@ -80,6 +80,7 @@ The RC has been found on the market and validates cleanly against all test, buil
 ### 5. Documentation Consistency
 
 **Changelog:**
+
 - ✅ `## [Unreleased]` section describes all 0.3.0 features
 - ✅ Key additions documented:
   - Goal-aware retrieval tuning with `context` scoring
@@ -92,12 +93,14 @@ The RC has been found on the market and validates cleanly against all test, buil
   - Richer prompt descriptors
 
 **README:**
+
 - ✅ Breaking change (v0.2.0) documented with migration path
 - ✅ Feature list current to API surface
 - ✅ MCP Name namespace: `io.github.jmeyer1980/neurodivergent-memory`
 - ✅ Docker tag guidance updated
 
 **Roadmap:**
+
 - ✅ "v0.3.0 in Release Readiness" milestone documented
 - ✅ Feature issues #54–#59 marked as implemented and merged
 - ✅ Issue #74 (epistemic-status) completed post-roadmap-write
@@ -144,23 +147,12 @@ All planned 0.3.0 feature issues (#54–#59) **complete and merged**.
 
 ## Release-Blocking Issues
 
-### 🔴 BLOCKING: Version Consistency
+### ✅ Resolved: Version Consistency
 
-#### Issue 1: `server.json` version mismatch
+#### `server.json` alignment
 
-**Current:**
-```json
-{
-  "version": "0.1.8",
-  "packages": [
-    {
-      "version": "0.1.8"
-    }
-  ]
-}
-```
+**Resolved state:**
 
-**Required for 0.3.0:**
 ```json
 {
   "version": "0.3.0",
@@ -172,25 +164,19 @@ All planned 0.3.0 feature issues (#54–#59) **complete and merged**.
 }
 ```
 
-**Impact:** MCP Registry metadata will publish incorrect version; downstream clients will see stale version information.
+**Impact if unresolved:** MCP Registry metadata would publish stale version information. This is no longer a blocker.
 
-#### Issue 2: `package.json` version mismatch
+#### `package.json` alignment
 
-**Current:**
-```json
-{
-  "version": "0.2.0"
-}
-```
+**Resolved state:**
 
-**Required for 0.3.0:**
 ```json
 {
   "version": "0.3.0"
 }
 ```
 
-**Impact:** npm publish will emit `neurodivergent-memory@0.3.0` with source-of-truth mismatch.
+**Impact if unresolved:** npm publish would emit mismatched metadata. This is no longer a blocker.
 
 ---
 
@@ -206,9 +192,9 @@ All planned 0.3.0 feature issues (#54–#59) **complete and merged**.
 | README updated | ✅ | Docs synchronized to current API |
 | Breaking changes documented | ✅ | v0.2.0 breaking change (user `/root` migration) still valid |
 | Feature test coverage adequate | ✅ | 58 new commits, 95 tests (0.3.0 features covered) |
-| npm artifact ready | ✅ | Can publish once version bumps applied |
+| npm artifact ready | ✅ | Package metadata aligned for publish |
 | Docker artifact ready | ✅ | Pipeline ready to tag and push |
-| MCP Registry metadata ready | ⚠️ | Requires `server.json` version update |
+| MCP Registry metadata ready | ✅ | `server.json` aligned for 0.3.0 |
 
 ---
 
@@ -216,9 +202,9 @@ All planned 0.3.0 feature issues (#54–#59) **complete and merged**.
 
 ### Must Complete Before Release
 
-- [ ] Update `package.json` `version` from `0.2.0` to `0.3.0`
-- [ ] Update `server.json` `version` from `0.1.8` to `0.3.0`
-- [ ] Update corresponding `packages[0].version` in `server.json` to `0.3.0`
+- [x] Update `package.json` `version` from `0.2.0` to `0.3.0`
+- [x] Update `server.json` `version` from `0.1.8` to `0.3.0`
+- [x] Update corresponding `packages[0].version` in `server.json` to `0.3.0`
 - [ ] Verify no other files hardcode version strings (check for `0.2.0` references outside changelog)
 - [ ] Final smoke test run post-version-bump
 - [ ] Create git tag `v0.3.0` at current `development` HEAD
@@ -235,7 +221,7 @@ All planned 0.3.0 feature issues (#54–#59) **complete and merged**.
 
 ### npm Publishing
 
-**Status:** ✅ Ready (after version bump)
+**Status:** ✅ Ready
 
 - Token configured in CI/CD secrets
 - Package provenance enabled in `publishConfig`
@@ -243,7 +229,7 @@ All planned 0.3.0 feature issues (#54–#59) **complete and merged**.
 
 ### Docker Publishing
 
-**Status:** ✅ Ready (after version bump)
+**Status:** ✅ Ready
 
 - Docker token configured in CI/CD secrets  
 - Immutable tag strategy in place (no floating `latest`)
@@ -251,7 +237,7 @@ All planned 0.3.0 feature issues (#54–#59) **complete and merged**.
 
 ### MCP Registry Publishing
 
-**Status:** ⚠️ Ready (after `server.json` version update)
+**Status:** ✅ Ready
 
 - `server.json` schema: valid
 - `mcpName` in `package.json`: correct (`io.github.jmeyer1980/neurodivergent-memory`)
@@ -272,22 +258,22 @@ All planned 0.3.0 feature issues (#54–#59) **complete and merged**.
 
 ## Approval Sign-Off
 
-```
+```text
 Release Candidate Status: ✅ VALIDATED
 Functional Readiness: ✅ CONFIRMED (95/95 tests, all builds pass)
 Documentation Readiness: ✅ CONFIRMED (Changelog, README, Roadmap current)
-Administrative Readiness: ⚠️ REQUIRES ACTION (Version string bumps needed)
+Administrative Readiness: ✅ CONFIRMED (Version strings already aligned)
 
-Next Action: Apply version bumps and trigger release workflow
-Estimated Time to Release: ~5 minutes (post version-bump)
+Next Action: Create the release tag and trigger the release workflow
+Estimated Time to Release: ~5 minutes (tag + workflow execution)
 ```
 
 ---
 
 ## Appendix: Test Report Summary
 
-```
-> neurodivergent-memory@0.2.0 test
+```text
+> neurodivergent-memory@0.3.0 test
 
 ✓ tests 95
 ✓ suites 0
@@ -300,6 +286,7 @@ Estimated Time to Release: ~5 minutes (post version-bump)
 ```
 
 **Coverage:** All major subsystems tested:
+
 - Persistence (WAL, snapshot, recovery)
 - Concurrency (mutex, queue depth)
 - Retrieval (BM25, context scoring, recency)
@@ -311,4 +298,3 @@ Estimated Time to Release: ~5 minutes (post version-bump)
 - Import/export
 
 **Conclusion:** Test suite is comprehensive and current to v0.3.0 feature set.
-

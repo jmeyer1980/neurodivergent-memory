@@ -404,7 +404,7 @@ WIP guardrail behavior:
 
 The server tracks loop signals and can surface targeted guardrail responses:
 
-- Repetition detection on `store_memory` compares incoming content against the 10 most recent memories (same `agent_id` when provided) using raw BM25 similarity scores.
+- Repetition detection on `store_memory` compares incoming content against the 10 most recent memories (same `agent_id` when provided) using tokenizer-consistent token-overlap scoring with an exact-match fast path.
 - Stores that meet the repeat threshold set `repeat_detected: true`, increment `repeat_write_count` on the matched memory, and add a `No net-new info` warning to the tool response.
 - Repeated `logical_analysis` reads of `emotional_processing` memories add a `distill_memory` suggestion once the configured threshold is crossed.
 - Read/write ping-pong transitions are tracked in a rolling operation window, increment `ping_pong_counter` when threshold conditions are met, and can optionally start a temporary cross-district write cooldown.
@@ -481,7 +481,7 @@ npm run watch
 
 To use with Claude Desktop, add the server config:
 
-On MacOS: `~/Library/Application Support/Claude/claude_desktop_config.json`
+On macOS: `~/Library/Application Support/Claude/claude_desktop_config.json`
 On Windows: `%APPDATA%/Claude/claude_desktop_config.json`
 
 For npm:
@@ -671,7 +671,7 @@ Use the packaged installer to materialize those templates into a consumer reposi
 Install the current packaged kit into the repo you are standing in:
 
 ```bash
-npx neurodivergent-memory init-agent-kit
+npx neurodivergent-memory@latest init-agent-kit
 ```
 
 Useful options:

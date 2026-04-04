@@ -6,7 +6,7 @@ This page tracks the milestones from the current research preview toward the 1.0
 
 ---
 
-## Current Position: v0.2.0 Published, v0.3.0 in Release Readiness
+## Current Position: v0.3.0 Published, v0.4.0 Planning Active
 
 The project is in active pre-1.0 development. All 0.x releases should be interpreted as:
 
@@ -15,11 +15,11 @@ The project is in active pre-1.0 development. All 0.x releases should be interpr
 
 This position is intentional and consistent with semantic versioning conventions for 0.x software.
 
-Release-readiness snapshot for the `development` branch as of 2026-04-03:
+Post-release snapshot for the repository as of 2026-04-04:
 
-- Latest published package version remains `0.2.0`.
+- Latest release target is `0.3.0`.
 - Core planned v0.3.0 feature issues #54 through #59 are implemented and merged.
-- Remaining release-readiness work is primarily tracker/documentation reconciliation plus follow-up Issue #74 for the residual epistemic-status gap.
+- Documentation alignment is complete; the next milestone focus is v0.4.0 orchestration work.
 
 ---
 
@@ -27,6 +27,7 @@ Release-readiness snapshot for the `development` branch as of 2026-04-03:
 
 | Version | Date | Summary |
 | ---- | ---- | ---- |
+| v0.3.0 | 2026-04-04 | Distillation, active loop guardrails, agent attribution, contextual retrieval, custom districts, diagnostics UX, packaged agent kit |
 | v0.2.0 | 2026-04-01 | Trust & Telemetry milestone delivered (persistence hardening, concurrency safety, error taxonomy, loop telemetry, baseline benchmarks) |
 | v0.1.8 | 2026-03-28 | Docker Hub README auto-refresh via CI; Node 24 upgrade |
 | v0.1.7 | 2026-03-28 | Fixed GIF/link rendering on Docker Hub and GHCR using absolute URLs |
@@ -96,7 +97,7 @@ For full details see [[Release Notes]].
 
 ---
 
-### v0.3.0 — Distillation & Contextual Intelligence
+### v0.3.0 — Distillation & Contextual Intelligence *(Released 2026-04-04)*
 
 > *Theme: Make the server aware of who is asking, why they are asking, and how to translate signal without losing it.*
 

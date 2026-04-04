@@ -19,7 +19,7 @@ This directory is a reusable, project-agnostic customization pack for memory-dri
 For packaged releases, prefer the installer command instead of manually copying from `node_modules`:
 
 ```bash
-npx neurodivergent-memory init-agent-kit
+npx neurodivergent-memory@latest init-agent-kit
 ```
 
 This copies the packaged templates into the target repository's `.github/...` locations. Use `--dry-run` to preview and `--force` to overwrite existing files.
