@@ -29,11 +29,13 @@
     "neurodivergent-memory": "./build/index.js"
   },
   "files": [
-    "build"
+    "build",
+    "templates"
   ],
   "scripts": {
     "bench": "npm run benchmark",
     "build": "tsc && node -e \"require('fs').chmodSync('build/index.js', '755')\"",
+    "prepack": "node scripts/prepare-agent-kit.cjs",
     "sync-memories": "npm run build && node build/scripts/sync-memories.js",
     "lint": "npm run lint:code && npm run lint:md",
     "lint:code": "tsc --noEmit",

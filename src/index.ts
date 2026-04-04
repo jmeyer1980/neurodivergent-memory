@@ -24,6 +24,7 @@ import {
 import * as crypto from "crypto";
 import * as fs from "fs";
 import * as path from "path";
+import { fileURLToPath } from "url";
 import { logger } from "./core/logger.js";
 import { resolvePersistenceLocation } from "./core/persistence.js";
 import { AsyncMutex } from "./core/async-mutex.js";
@@ -57,6 +58,175 @@ function resolveServerPackageInfo(): { name: string; version: string } {
 
 const SERVER_PACKAGE_INFO = resolveServerPackageInfo();
 const SERVER_START_TIME_ISO = new Date().toISOString();
+
+type AgentKitInstallMode = "prompt-first" | "auto-setup";
+
+interface AgentKitCliOptions {
+  targetRoot: string;
+  dryRun: boolean;
+  force: boolean;
+  mode: AgentKitInstallMode;
+}
+
+interface AgentKitInstallEntry {
+  sourcePath: string;
+  targetPath: string;
+}
+
+function parseAgentKitCliOptions(argv: string[]): AgentKitCliOptions {
+  let targetRoot = process.cwd();
+  let dryRun = false;
+  let force = false;
+  let mode: AgentKitInstallMode = "prompt-first";
+
+  for (let index = 0; index < argv.length; index += 1) {
+    const arg = argv[index];
+
+    switch (arg) {
+      case "--target": {
+        const value = argv[index + 1];
+        if (!value) {
+          throw new Error("Missing value for --target");
+        }
+        targetRoot = path.resolve(value);
+        index += 1;
+        break;
+      }
+
+      case "--dry-run":
+        dryRun = true;
+        break;
+
+      case "--force":
+        force = true;
+        break;
+
+      case "--mode": {
+        const value = argv[index + 1];
+        if (value !== "prompt-first" && value !== "auto-setup") {
+          throw new Error("Invalid value for --mode. Use prompt-first or auto-setup.");
+        }
+        mode = value;
+        index += 1;
+        break;
+      }
+
+      default:
+        throw new Error(`Unknown argument: ${arg}`);
+    }
+  }
+
+  return {
+    targetRoot,
+    dryRun,
+    force,
+    mode,
+  };
+}
+
+function resolveAgentKitSourceRoot(): string {
+  const candidates = [
+    fileURLToPath(new URL("../templates/agent-kit", import.meta.url)),
+    fileURLToPath(new URL("../.github/agent-kit/templates", import.meta.url)),
+  ];
+
+  for (const candidate of candidates) {
+    if (fs.existsSync(candidate)) {
+      return candidate;
+    }
+  }
+
+  throw new Error(
+    "Agent kit templates not found. Run npm pack/prepack first or use the repository source tree.",
+  );
+}
+
+function resolveAgentKitTargetRelativePath(fileName: string): string | null {
+  if (fileName === "copilot-instructions.md") {
+    return path.join(".github", "copilot-instructions.md");
+  }
+
+  if (fileName.endsWith(".agent.md")) {
+    return path.join(".github", "agents", fileName);
+  }
+
+  if (fileName.endsWith(".instructions.md")) {
+    return path.join(".github", "instructions", fileName);
+  }
+
+  if (fileName.endsWith(".prompt.md")) {
+    return path.join(".github", "prompts", fileName);
+  }
+
+  return null;
+}
+
+function buildAgentKitInstallEntries(sourceRoot: string, targetRoot: string): AgentKitInstallEntry[] {
+  const entries = fs
+    .readdirSync(sourceRoot, { withFileTypes: true })
+    .filter(entry => entry.isFile())
+    .map((entry) => {
+      const relativeTargetPath = resolveAgentKitTargetRelativePath(entry.name);
+      if (!relativeTargetPath) {
+        return null;
+      }
+
+      return {
+        sourcePath: path.join(sourceRoot, entry.name),
+        targetPath: path.join(targetRoot, relativeTargetPath),
+      } satisfies AgentKitInstallEntry;
+    })
+    .filter((entry): entry is AgentKitInstallEntry => entry !== null);
+
+  entries.sort((left, right) => left.targetPath.localeCompare(right.targetPath));
+  return entries;
+}
+
+function runInitAgentKit(argv: string[]): number {
+  const options = parseAgentKitCliOptions(argv);
+  const sourceRoot = resolveAgentKitSourceRoot();
+  const installEntries = buildAgentKitInstallEntries(sourceRoot, options.targetRoot);
+
+  if (installEntries.length === 0) {
+    throw new Error(`No installable templates were found in ${sourceRoot}`);
+  }
+
+  console.log(`Installing neurodivergent-memory agent kit into ${options.targetRoot}`);
+  console.log(`Install policy: ${options.mode}`);
+  console.log(`Dry run: ${options.dryRun ? "yes" : "no"}`);
+  console.log(`Overwrite existing files: ${options.force ? "yes" : "no"}`);
+
+  let copiedCount = 0;
+  let skippedCount = 0;
+
+  for (const entry of installEntries) {
+    const targetExists = fs.existsSync(entry.targetPath);
+
+    if (targetExists && !options.force) {
+      skippedCount += 1;
+      console.log(`SKIPPED ${entry.targetPath}`);
+      continue;
+    }
+
+    if (!options.dryRun) {
+      fs.mkdirSync(path.dirname(entry.targetPath), { recursive: true });
+      fs.copyFileSync(entry.sourcePath, entry.targetPath);
+    }
+
+    copiedCount += 1;
+    console.log(`${options.dryRun ? "WOULD COPY" : "COPIED"} ${entry.targetPath}`);
+  }
+
+  console.log(`Summary: ${copiedCount} ${options.dryRun ? "planned" : "copied"}, ${skippedCount} skipped.`);
+
+  if (options.mode === "auto-setup") {
+    console.log(
+      "Note: the installed templates remain the source-authored files. If you want auto-setup wording in the agent body, adjust the copied files after install.",
+    );
+  }
+
+  return 0;
+}
 
 /**
  * Canonical district definitions.
@@ -4527,6 +4697,14 @@ server.setRequestHandler(GetPromptRequestSchema, async (request) => {
  * This allows the server to communicate via standard input/output streams.
  */
 async function main() {
+  const command = process.argv[2];
+
+  if (command === "init-agent-kit" || command === "setup-agent-kit") {
+    const exitCode = runInitAgentKit(process.argv.slice(3));
+    process.exitCode = exitCode;
+    return;
+  }
+
   const transport = new StdioServerTransport();
   await server.connect(transport);
 }

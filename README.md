@@ -608,8 +608,8 @@ The Inspector will provide a URL to access debugging tools in your browser.
 
 ## Agent Workflow Setup
 
-This repository ships a reusable **agent customization kit** at [`.github/agent-kit/`](.github/agent-kit/).
-It contains ready-to-use templates for wiring neurodivergent-memory into any agent that supports MCP — regardless of platform, language, or project type.
+This repository ships a reusable **agent customization kit** whose authoring source lives at [`.github/agent-kit/`](.github/agent-kit/).
+Use the packaged installer to materialize those templates into a consumer repository's `.github/...` folders instead of tracking a live generated agent file in this repo.
 
 ### Contents
 
@@ -623,7 +623,28 @@ It contains ready-to-use templates for wiring neurodivergent-memory into any age
 | `templates/explore_memory_city.prompt.md` | Prompt for guided exploration of memory districts and graph structure. |
 | `templates/memory-driven-issue-execution.prompt.md` | Prompt for executing a tracked issue with full memory-driven context (pull → plan → act → update). |
 
-### How to use these templates
+### Install the kit into a project
+
+Install the current packaged kit into the repo you are standing in:
+
+```bash
+npx neurodivergent-memory init-agent-kit
+```
+
+Useful options:
+
+- `--target <path>` installs into a different repository root.
+- `--dry-run` shows what would be copied without writing files.
+- `--force` overwrites existing destination files.
+- `--mode prompt-first|auto-setup` records the intended install policy in command output while leaving template wording unchanged.
+
+The installer copies templates into standard customization locations such as `.github/agents/`, `.github/instructions/`, `.github/prompts/`, and `.github/copilot-instructions.md`.
+
+### Authoring source and generated files
+
+The source of truth remains under [`.github/agent-kit/templates/`](.github/agent-kit/templates/). The installed live agent file `.github/agents/neurodivergent-agent.agent.md` is intentionally treated as generated consumer state rather than a tracked repo artifact, so remote Copilot updates cannot keep wiping it out in this repository.
+
+### Manual copy fallback
 
 **Copy** the files you need into your project's standard customization locations — do not move them, so the originals remain available as a reference for future agents or contributors.
 
