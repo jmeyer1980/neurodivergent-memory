@@ -141,26 +141,27 @@ function resolveAgentKitSourceRoot(): string {
   );
 }
 
-function resolveAgentKitTargetRelativePaths(fileName: string): string[] {
-  const relativeTargetPaths = [path.join(".github", "agent-kit", "templates", fileName)];
+function resolveAgentKitTargetRelativePaths(templateFileName: string): string[] {
+  // Always install to .github/agent-kit/templates/ so post-install references remain valid.
+  const relativeTargetPaths = [path.join(".github", "agent-kit", "templates", templateFileName)];
 
-  if (fileName === "copilot-instructions.md") {
+  if (templateFileName === "copilot-instructions.md") {
     relativeTargetPaths.push(path.join(".github", "copilot-instructions.md"));
     return relativeTargetPaths;
   }
 
-  if (fileName.endsWith(".agent.md")) {
-    relativeTargetPaths.push(path.join(".github", "agents", fileName));
+  if (templateFileName.endsWith(".agent.md")) {
+    relativeTargetPaths.push(path.join(".github", "agents", templateFileName));
     return relativeTargetPaths;
   }
 
-  if (fileName.endsWith(".instructions.md")) {
-    relativeTargetPaths.push(path.join(".github", "instructions", fileName));
+  if (templateFileName.endsWith(".instructions.md")) {
+    relativeTargetPaths.push(path.join(".github", "instructions", templateFileName));
     return relativeTargetPaths;
   }
 
-  if (fileName.endsWith(".prompt.md")) {
-    relativeTargetPaths.push(path.join(".github", "prompts", fileName));
+  if (templateFileName.endsWith(".prompt.md")) {
+    relativeTargetPaths.push(path.join(".github", "prompts", templateFileName));
     return relativeTargetPaths;
   }
 
@@ -168,6 +169,7 @@ function resolveAgentKitTargetRelativePaths(fileName: string): string[] {
 }
 
 function buildAgentKitInstallEntries(sourceRoot: string, targetRoot: string): AgentKitInstallEntry[] {
+  // Each source template maps to one or more target paths (agent-kit/templates/ plus its standard location).
   const entries = fs
     .readdirSync(sourceRoot, { withFileTypes: true })
     .filter(entry => entry.isFile())
