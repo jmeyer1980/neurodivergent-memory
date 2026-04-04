@@ -33,6 +33,49 @@
   </tr>
 </table>
 
+## Quick-start
+
+### Windows
+
+```powershell
+# Download and install Chocolatey:
+powershell -c "irm https://community.chocolatey.org/install.ps1|iex"
+
+# Download and install Node.js:
+choco install nodejs --version="24.14.1"
+
+# Verify the Node.js version:
+node -v # Should print a Node.js 24.x version.
+
+# Verify npm version:
+npm -v # Should print an npm 11.x version.
+
+# Run the packaged neurodivergent-memory CLI without a global install
+npx neurodivergent-memory@latest init-agent-kit
+```
+
+### Linux/macOS
+
+```bash
+# Download and install nvm:
+curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.4/install.sh | bash
+
+# in lieu of restarting the shell
+. "$HOME/.nvm/nvm.sh"
+
+# Download and install Node.js:
+nvm install 24
+
+# Verify the Node.js version:
+node -v # Should print a Node.js 24.x version.
+
+# Verify npm version:
+npm -v # Should print an npm 11.x version.
+
+# Run the packaged neurodivergent-memory CLI without a global install
+npx neurodivergent-memory@latest init-agent-kit
+```
+
 ## Model Flow
 
 ```mermaid
