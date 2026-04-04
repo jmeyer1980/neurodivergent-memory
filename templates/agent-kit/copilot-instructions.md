@@ -101,17 +101,11 @@ The graph is restored on server startup — no data is lost between restarts.
 
 ## Reusable Agent Customization Kit
 
-This repository includes a project-agnostic customization pack at `.github/agent-kit/`.
-
-Future agents should import templates from `.github/agent-kit/templates/` into the target project's standard locations:
+In repositories initialized with `npx neurodivergent-memory init-agent-kit`, the customization kit is installed directly into the target project's standard locations:
 
 1. `.github/agents/<agent-name>.agent.md`
 2. `.github/instructions/nd-memory-workflow.instructions.md`
 3. `.github/prompts/setup-nd-memory.prompt.md`
+4. `.github/copilot-instructions.md`
 
-Before configuring installation behavior, ask the user to choose one policy:
-
-- `prompt-first` (default)
-- `auto-setup`
-
-Do not silently install neurodivergent-memory MCP unless the user confirms `auto-setup`.
+If any of these files are missing or need to be refreshed, re-run `npx neurodivergent-memory init-agent-kit` instead of assuming `.github/agent-kit/templates/` exists in the target repository.

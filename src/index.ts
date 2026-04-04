@@ -126,8 +126,8 @@ function parseAgentKitCliOptions(argv: string[]): AgentKitCliOptions {
 
 function resolveAgentKitSourceRoot(): string {
   const candidates = [
-    fileURLToPath(new URL("../templates/agent-kit", import.meta.url)),
     fileURLToPath(new URL("../.github/agent-kit/templates", import.meta.url)),
+    fileURLToPath(new URL("../templates/agent-kit", import.meta.url)),
   ];
 
   for (const candidate of candidates) {
@@ -141,42 +141,42 @@ function resolveAgentKitSourceRoot(): string {
   );
 }
 
-function resolveAgentKitTargetRelativePath(fileName: string): string | null {
+function resolveAgentKitTargetRelativePaths(fileName: string): string[] {
+  const relativeTargetPaths = [path.join(".github", "agent-kit", "templates", fileName)];
+
   if (fileName === "copilot-instructions.md") {
-    return path.join(".github", "copilot-instructions.md");
+    relativeTargetPaths.push(path.join(".github", "copilot-instructions.md"));
+    return relativeTargetPaths;
   }
 
   if (fileName.endsWith(".agent.md")) {
-    return path.join(".github", "agents", fileName);
+    relativeTargetPaths.push(path.join(".github", "agents", fileName));
+    return relativeTargetPaths;
   }
 
   if (fileName.endsWith(".instructions.md")) {
-    return path.join(".github", "instructions", fileName);
+    relativeTargetPaths.push(path.join(".github", "instructions", fileName));
+    return relativeTargetPaths;
   }
 
   if (fileName.endsWith(".prompt.md")) {
-    return path.join(".github", "prompts", fileName);
+    relativeTargetPaths.push(path.join(".github", "prompts", fileName));
+    return relativeTargetPaths;
   }
 
-  return null;
+  return relativeTargetPaths;
 }
 
 function buildAgentKitInstallEntries(sourceRoot: string, targetRoot: string): AgentKitInstallEntry[] {
   const entries = fs
     .readdirSync(sourceRoot, { withFileTypes: true })
     .filter(entry => entry.isFile())
-    .map((entry) => {
-      const relativeTargetPath = resolveAgentKitTargetRelativePath(entry.name);
-      if (!relativeTargetPath) {
-        return null;
-      }
-
-      return {
+    .flatMap((entry) =>
+      resolveAgentKitTargetRelativePaths(entry.name).map((relativeTargetPath) => ({
         sourcePath: path.join(sourceRoot, entry.name),
         targetPath: path.join(targetRoot, relativeTargetPath),
-      } satisfies AgentKitInstallEntry;
-    })
-    .filter((entry): entry is AgentKitInstallEntry => entry !== null);
+      }) satisfies AgentKitInstallEntry),
+    );
 
   entries.sort((left, right) => left.targetPath.localeCompare(right.targetPath));
   return entries;
