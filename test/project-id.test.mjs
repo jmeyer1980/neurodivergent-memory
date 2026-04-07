@@ -102,7 +102,7 @@ function resultText(response) {
   return response.result?.content?.[0]?.text ?? "";
 }
 
-test("project_id supports scoped list/search/stats and mixed import entries", async () => {
+test("project_id is normalized on write and filters are case-insensitive across list/search/stats", async () => {
   const server = startServer();
 
   try {
@@ -110,14 +110,14 @@ test("project_id supports scoped list/search/stats and mixed import entries", as
       content: "alpha scoped memory",
       district: "practical_execution",
       tags: ["topic:test", "scope:session", "kind:task", "layer:implementation"],
-      project_id: "alpha",
+      project_id: "Alpha",
     });
 
     await server.callTool(2, "store_memory", {
       content: "beta scoped memory",
       district: "practical_execution",
       tags: ["topic:test", "scope:session", "kind:task", "layer:implementation"],
-      project_id: "beta",
+      project_id: "BETA",
     });
 
     const imported = await server.callTool(3, "import_memories", {
@@ -126,7 +126,7 @@ test("project_id supports scoped list/search/stats and mixed import entries", as
           content: "alpha import memory",
           district: "logical_analysis",
           tags: ["topic:test", "scope:session", "kind:reference", "layer:research"],
-          project_id: "alpha",
+          project_id: "ALPHA",
         },
         {
           content: "unset import memory",
@@ -137,22 +137,23 @@ test("project_id supports scoped list/search/stats and mixed import entries", as
     });
     assert.match(resultText(imported), /Imported 2 memories/);
 
-    const listAlpha = await server.callTool(4, "list_memories", { project_id: "alpha", page_size: 20 });
+    const listAlpha = await server.callTool(4, "list_memories", { project_id: "aLpHa", page_size: 20 });
     const listAlphaText = resultText(listAlpha);
     assert.match(listAlphaText, /project: alpha/);
     assert.doesNotMatch(listAlphaText, /project: beta/);
+    assert.doesNotMatch(listAlphaText, /project: Alpha|project: ALPHA/);
 
     const searchAlpha = await server.callTool(5, "search_memories", {
       query: "scoped memory",
-      project_id: "alpha",
+      project_id: "ALPHA",
     });
     const searchAlphaText = resultText(searchAlpha);
     assert.match(searchAlphaText, /Found/);
     assert.match(searchAlphaText, /alpha scoped memory|alpha import memory/);
 
-    const statsAlpha = await server.callTool(6, "memory_stats", { project_id: "alpha" });
+    const statsAlpha = await server.callTool(6, "memory_stats", { project_id: "AlPhA" });
     const statsAlphaText = resultText(statsAlpha);
-    assert.match(statsAlphaText, /Scope project_id: alpha/);
+    assert.match(statsAlphaText, /Scope project_id: AlPhA/);
     assert.match(statsAlphaText, /Per project:\n  alpha: 2/);
   } finally {
     server.stop();
@@ -257,8 +258,14 @@ test("update_memory accepts project_id null to clear project attribution", async
       content: "clearable project memory",
       district: "practical_execution",
       tags: ["topic:test", "scope:session", "kind:task", "layer:implementation"],
-      project_id: "alpha",
+      project_id: "Alpha",
     });
+
+    const updateProject = await server.callTool(305, "update_memory", {
+      memory_id: "memory_1",
+      project_id: "BeTa",
+    });
+    assert.match(resultText(updateProject), /Project: beta/);
 
     const clearProject = await server.callTool(31, "update_memory", {
       memory_id: "memory_1",
@@ -271,6 +278,29 @@ test("update_memory accepts project_id null to clear project attribution", async
 
     const listAll = await server.callTool(33, "list_memories", { page_size: 20 });
     assert.match(resultText(listAll), /project: unset/);
+  } finally {
+    server.stop();
+  }
+});
+
+test("search_memories surfaces did_you_mean for near-miss project_id queries", async () => {
+  const server = startServer();
+
+  try {
+    await server.callTool(90, "store_memory", {
+      content: "alpha suggestion target",
+      district: "logical_analysis",
+      tags: ["topic:test", "scope:session", "kind:reference", "layer:research"],
+      project_id: "Alpha",
+    });
+
+    const noMatch = await server.callTool(91, "search_memories", {
+      query: "alpha",
+      project_id: "alpah",
+    });
+
+    assert.match(resultText(noMatch), /No memories found matching query: "alpha"/);
+    assert.match(resultText(noMatch), /Did you mean project_id: alpha\?/);
   } finally {
     server.stop();
   }

@@ -263,6 +263,11 @@ interface ScoredMemory {
   score: number;
 }
 
+interface SearchMemoriesResult {
+  results: ScoredMemory[];
+  did_you_mean?: string;
+}
+
 interface StoreMemoryResult {
   memory: MemoryNPC;
   repeat_detected: boolean;
@@ -902,6 +907,7 @@ class NeurodivergentMemory {
     const repeatWriteCount = rawMem.repeat_write_count ?? rawMem.repeat_count;
     return {
       ...rawMem,
+      project_id: normalizeProjectId(rawMem.project_id),
       created: safeCreated,
       last_accessed: safeLastAccessed,
       repeat_write_count: repeatWriteCount,
@@ -990,8 +996,7 @@ class NeurodivergentMemory {
 
   private insertMemory(memory: MemoryNPC): boolean {
     if (!this.districts[memory.district]) {
-      const valid = Object.keys(this.districts).join(", ");
-      logger.warn({ memoryId: memory.id, district: memory.district, validDistricts: valid }, "Skipping memory with unknown district during load");
+      logger.warn({ memoryId: memory.id, district: memory.district }, "Skipping memory with unknown district during load");
       return false;
     }
     // If the memory ID already exists in a different district, remove it from the old
@@ -1052,6 +1057,55 @@ class NeurodivergentMemory {
     return new Map(
       candidates.map(memory => [memory.id, (memory.created.getTime() - oldest) / range]),
     );
+  }
+
+  private matchesProjectId(memory: Pick<MemoryNPC, "project_id">, projectId: string): boolean {
+    return normalizeProjectId(memory.project_id) === normalizeProjectId(projectId);
+  }
+
+  private knownProjectIds(): string[] {
+    return Array.from(
+      new Set(
+        Object.values(this.memories)
+          .map(memory => normalizeProjectId(memory.project_id))
+          .filter((candidate): candidate is string => Boolean(candidate)),
+      ),
+    );
+  }
+
+  private suggestProjectId(projectId: string): string | undefined {
+    const normalizedQuery = normalizeProjectId(projectId);
+    if (!normalizedQuery) {
+      return undefined;
+    }
+
+    const projectIds = this.knownProjectIds();
+    if (projectIds.length === 0) {
+      return undefined;
+    }
+
+    const heuristicMatch = projectIds.find(candidate =>
+      candidate.startsWith(normalizedQuery) ||
+      normalizedQuery.startsWith(candidate) ||
+      candidate.includes(normalizedQuery) ||
+      normalizedQuery.includes(candidate),
+    );
+    if (heuristicMatch) {
+      return heuristicMatch;
+    }
+
+    let bestMatch: string | undefined;
+    let bestDistance = 3;
+
+    for (const candidate of projectIds) {
+      const distance = boundedLevenshteinDistance(normalizedQuery, candidate, 2);
+      if (distance !== undefined && distance < bestDistance) {
+        bestDistance = distance;
+        bestMatch = candidate;
+      }
+    }
+
+    return bestMatch;
   }
 
   storageDiagnostics(): StorageDiagnostics {
@@ -1368,7 +1422,7 @@ class NeurodivergentMemory {
           name: candidate.name ?? this.generateMemoryName(candidate.archetype ?? districtArchetype, candidate.content),
           archetype: candidate.archetype ?? districtArchetype,
           agent_id: candidate.agent_id ?? default_agent_id,
-          project_id: candidate.project_id,
+          project_id: normalizeProjectId(candidate.project_id),
           district: candidate.district,
           content: candidate.content,
           traits: candidate.traits ? [...candidate.traits] : this.generateTraits(candidate.archetype ?? districtArchetype),
@@ -1865,10 +1919,12 @@ class NeurodivergentMemory {
     epistemic_status?: EpistemicStatus
   ): StoreMemoryResult {
     if (!this.districts[district]) {
+      const valid = Object.keys(this.districts).join(", ");
+      logger.warn({ district, validDistricts: valid }, "Rejecting storeMemory with unknown district");
       throw createNMError(
         NM_ERRORS.UNKNOWN_DISTRICT,
         `Unknown district: ${district}`,
-        `Use one of the configured districts: ${Object.keys(this.districts).join(", ")}.`,
+        `Use one of the configured districts: ${valid}.`,
       );
     }
     if (project_id !== undefined) {
@@ -1930,13 +1986,14 @@ class NeurodivergentMemory {
     }
 
     const resolvedEpistemicStatus = resolveDefaultEpistemicStatus(district, tags, epistemic_status);
+    const normalizedProjectId = normalizeProjectId(project_id);
 
     const memory: MemoryNPC = {
       id,
       name,
       archetype,
       agent_id,
-      project_id,
+      project_id: normalizedProjectId,
       district,
       content,
       traits: this.generateTraits(archetype),
@@ -2132,7 +2189,7 @@ class NeurodivergentMemory {
       if (updates.project_id === null) {
         delete memory.project_id;
       } else if (updates.project_id !== undefined) {
-        memory.project_id = updates.project_id;
+        memory.project_id = normalizeProjectId(updates.project_id);
       }
     }
 
@@ -2179,7 +2236,7 @@ class NeurodivergentMemory {
     intensity_max?: number,
     context?: string,
     recency_weight = 0,
-  ): ScoredMemory[] {
+  ): SearchMemoriesResult {
     if (recency_weight < 0 || recency_weight > 1) {
       throw createNMError(
         NM_ERRORS.INPUT_VALIDATION_FAILED,
@@ -2194,8 +2251,12 @@ class NeurodivergentMemory {
       candidates = candidates.filter(m => m.district === district);
     }
 
+    let didYouMean: string | undefined;
     if (project_id) {
-      candidates = candidates.filter(m => m.project_id === project_id);
+      candidates = candidates.filter(memory => this.matchesProjectId(memory, project_id));
+      if (candidates.length === 0) {
+        didYouMean = this.suggestProjectId(project_id);
+      }
     }
 
     if (tags && tags.length > 0) {
@@ -2250,12 +2311,12 @@ class NeurodivergentMemory {
     });
 
     if (scored.reduce((mx, candidate) => Math.max(mx, candidate.semanticScore), 0) === 0) {
-      return [];
+      return { results: [], did_you_mean: didYouMean };
     }
 
     const maxScore = scored.reduce((mx, candidate) => Math.max(mx, candidate.score), 0);
     if (maxScore === 0) {
-      return [];
+      return { results: [], did_you_mean: didYouMean };
     }
 
     const normalized: ScoredMemory[] = scored.map(candidate => ({
@@ -2270,7 +2331,7 @@ class NeurodivergentMemory {
     // Sort descending by score
     filtered.sort((a, b) => b.score - a.score);
 
-    return filtered;
+    return { results: filtered, did_you_mean: didYouMean };
   }
 
   // ── Graph traversal ────────────────────────────────────────────────────────
@@ -2410,7 +2471,7 @@ class NeurodivergentMemory {
     let all = Object.values(this.memories);
     if (district) all = all.filter(m => m.district === district);
     if (archetype) all = all.filter(m => m.archetype === archetype);
-    if (project_id) all = all.filter(m => m.project_id === project_id);
+    if (project_id) all = all.filter(m => this.matchesProjectId(m, project_id));
     if (epistemic_statuses && epistemic_statuses.length > 0) {
       all = all.filter(m => {
         const status = m.epistemic_status ?? "unset";
@@ -2430,7 +2491,7 @@ class NeurodivergentMemory {
 
   memoryStats(project_id?: string): object {
     const allMems = project_id
-      ? Object.values(this.memories).filter(m => m.project_id === project_id)
+      ? Object.values(this.memories).filter(m => this.matchesProjectId(m, project_id))
       : Object.values(this.memories);
     const totalMemories = allMems.length;
     const perAgent: { [key: string]: number } = {};
@@ -2837,7 +2898,7 @@ class NeurodivergentMemory {
         name,
         archetype,
         agent_id: entry.agent_id ?? default_agent_id,
-        project_id: entry.project_id,
+        project_id: normalizeProjectId(entry.project_id),
         district: entry.district,
         content: entry.content,
         traits: this.generateTraits(archetype),
@@ -3314,6 +3375,45 @@ function validateProjectId(projectId: string, fieldPath = "project_id"): void {
       `Use letters/numbers and . _ : - only, starting with an alphanumeric character.`,
     );
   }
+}
+
+function normalizeProjectId(projectId: string | undefined | null): string | undefined {
+  if (typeof projectId !== "string") {
+    return undefined;
+  }
+
+  return projectId.toLowerCase();
+}
+
+function boundedLevenshteinDistance(left: string, right: string, maxDistance: number): number | undefined {
+  if (Math.abs(left.length - right.length) > maxDistance) {
+    return undefined;
+  }
+
+  let previous = Array.from({ length: right.length + 1 }, (_, index) => index);
+  for (let leftIndex = 1; leftIndex <= left.length; leftIndex += 1) {
+    const current = [leftIndex];
+    let rowMin = current[0];
+
+    for (let rightIndex = 1; rightIndex <= right.length; rightIndex += 1) {
+      const substitutionCost = left[leftIndex - 1] === right[rightIndex - 1] ? 0 : 1;
+      const value = Math.min(
+        previous[rightIndex] + 1,
+        current[rightIndex - 1] + 1,
+        previous[rightIndex - 1] + substitutionCost,
+      );
+      current.push(value);
+      rowMin = Math.min(rowMin, value);
+    }
+
+    if (rowMin > maxDistance) {
+      return undefined;
+    }
+
+    previous = current;
+  }
+
+  return previous[right.length] <= maxDistance ? previous[right.length] : undefined;
 }
 
 function normalizeTag(tag: string): string {
@@ -4337,19 +4437,23 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         const resolvedIntensityMin = min_intensity ?? intensity_min;
         const resolvedIntensityMax = max_intensity ?? intensity_max;
 
-        const results = memorySystem.searchMemories(
+        const searchResult = memorySystem.searchMemories(
           query, district, project_id, tags, epistemic_statuses,
           min_score,
           emotional_valence_min, emotional_valence_max,
           resolvedIntensityMin, resolvedIntensityMax,
           context, recency_weight,
         );
+        const results = searchResult.results;
+        const didYouMeanLine = searchResult.did_you_mean
+          ? `\nDid you mean project_id: ${searchResult.did_you_mean}?`
+          : "";
 
         if (results.length === 0) {
           return {
             content: [{
               type: "text",
-              text: `🔍 No memories found matching query: "${query}"`
+              text: `🔍 No memories found matching query: "${query}"${didYouMeanLine}`
             }]
           };
         }
@@ -4361,7 +4465,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         return {
           content: [{
             type: "text",
-            text: `🔍 Found ${results.length} memories (ranked by BM25 relevance):\n${resultText}`
+            text: `🔍 Found ${results.length} memories (ranked by BM25 relevance):\n${resultText}${didYouMeanLine}`
           }]
         };
       } catch (error) {

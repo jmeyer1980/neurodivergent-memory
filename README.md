@@ -33,6 +33,16 @@
   </tr>
 </table>
 
+## Citation And Attribution
+
+Use [CITATION.cff](CITATION.cff) for software citation metadata.
+
+Use [ATTRIBUTIONS.md](ATTRIBUTIONS.md) for the curated list of third-party
+standards, research, and runtime libraries referenced by this project. Internal
+design-history references such as FractalStat, FractalSemantics, Warbler-CDA,
+and related lore artifacts are intentionally excluded from that third-party
+attribution list.
+
 ## Quick-start
 
 ### Windows
@@ -206,6 +216,12 @@ Memories can optionally include a first-class `project_id` for attribution and s
 - `list_memories` includes a `project: ...` segment in each line (`unset` when no project attribution exists).
 - Validation contract: `project_id` must match `^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$` (max length 64).
 - Invalid values return stable error code `NM_E020` with recovery guidance.
+
+### Project ID Case Normalization and Did-You-Mean Assist
+
+- All project_id filters and storage are now case-insensitive. Project IDs are normalized to lower case for matching and storage, preventing false zero-memory results due to casing mismatches.
+- When a project_id query returns zero results, the server suggests a near-miss project_id (Levenshtein distance ≤ 2) as a did_you_mean assist in the response, improving recovery from typos and casing errors.
+- All project_id validation, import, and update operations are covered by tests for mixed-case and near-miss scenarios.
 
 ### Import Diagnostics and Migration Semantics
 
