@@ -3381,8 +3381,11 @@ function normalizeProjectId(projectId: string | undefined | null): string | unde
   if (typeof projectId !== "string") {
     return undefined;
   }
-
-  return projectId.toLowerCase();
+  // Unicode normalization (NFKC), trim, and lower-case for robust matching
+  return projectId
+    .normalize("NFKC")
+    .trim()
+    .toLocaleLowerCase("en");
 }
 
 function boundedLevenshteinDistance(left: string, right: string, maxDistance: number): number | undefined {
