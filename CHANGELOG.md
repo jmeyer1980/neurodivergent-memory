@@ -12,6 +12,9 @@
 - Active loop guardrails on top of existing telemetry: `No net-new info` warnings for repeated stores, `distill_memory` suggestions after repeated logical reads of emotional memories, and optional cross-district cooldown enforcement via `NEURODIVERGENT_MEMORY_DISTILL_SUGGEST_THRESHOLD` and `NEURODIVERGENT_MEMORY_CROSS_DISTRICT_COOLDOWN_MS` (`NM_E012`)
 - Tool mirrors for prompt-derived context (`prepare_memory_city_context`, `prepare_synthesis_context`, and `prepare_packetized_synthesis_context`) so prompt content remains accessible in MCP clients that support tools but not prompts
 - Richer prompt descriptors with explicit empty `arguments` arrays to improve compatibility with stricter MCP prompt clients
+- Project ID filters and storage are now case-insensitive. All project_id values are normalized to lower case for matching and storage, preventing false zero-memory results due to casing mismatches.
+- When a project_id query returns zero results, the server suggests a near-miss project_id (Levenshtein distance ≤ 2) as a did_you_mean assist in the response, improving recovery from typos and casing errors.
+- All project_id validation, import, and update operations are covered by tests for mixed-case and near-miss scenarios.
 
 ## [0.2.0] - 2026-04-01
 

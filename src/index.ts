@@ -990,9 +990,8 @@ class NeurodivergentMemory {
 
   private insertMemory(memory: MemoryNPC): boolean {
     if (!this.districts[memory.district]) {
-      const valid = Object.keys(this.districts).join(", ");
-      logger.warn({ memoryId: memory.id, district: memory.district, validDistricts: valid }, "Skipping memory with unknown district during load");
-      return false;
+        logger.warn({ memoryId: memory.id, district: memory.district }, "Skipping memory with unknown district during load");
+        return false;
     }
     // If the memory ID already exists in a different district, remove it from the old
     // district array first to avoid duplicate district membership during WAL replay.
@@ -1865,10 +1864,12 @@ class NeurodivergentMemory {
     epistemic_status?: EpistemicStatus
   ): StoreMemoryResult {
     if (!this.districts[district]) {
+      const valid = Object.keys(this.districts).join(", ");
+      logger.warn({ district, validDistricts: valid }, "Skipping memory with unknown district during storeMemory");
       throw createNMError(
         NM_ERRORS.UNKNOWN_DISTRICT,
         `Unknown district: ${district}`,
-        `Use one of the configured districts: ${Object.keys(this.districts).join(", ")}.`,
+        `Use one of the configured districts: ${valid}.`,
       );
     }
     if (project_id !== undefined) {
@@ -2196,6 +2197,42 @@ class NeurodivergentMemory {
 
     if (project_id) {
       candidates = candidates.filter(m => m.project_id === project_id);
+        let didYouMean: string | undefined;
+        const normProjectId = project_id.toLowerCase();
+        candidates = candidates.filter(m => (m.project_id?.toLowerCase() ?? "") === normProjectId);
+        if (candidates.length === 0) {
+          // Suggest similar project_ids if no exact match
+          const allProjectIds = Array.from(new Set(Object.values(this.memories)
+            .map(m => m.project_id)
+            .filter(pid => pid && typeof pid === "string")
+            .map(pid => pid!.toLowerCase())));
+          // Levenshtein distance helper
+          function levenshtein(a: string, b: string): number {
+            const dp = Array.from({ length: a.length + 1 }, (_, i) => Array(b.length + 1).fill(0));
+            for (let i = 0; i <= a.length; i++) dp[i][0] = i;
+            for (let j = 0; j <= b.length; j++) dp[0][j] = j;
+            for (let i = 1; i <= a.length; i++) {
+              for (let j = 1; j <= b.length; j++) {
+                if (a[i - 1] === b[j - 1]) {
+                  dp[i][j] = dp[i - 1][j - 1];
+                } else {
+                  dp[i][j] = 1 + Math.min(dp[i - 1][j], dp[i][j - 1], dp[i - 1][j - 1]);
+                }
+              }
+            }
+            return dp[a.length][b.length];
+          }
+          let best: string | undefined;
+          let bestDist = 3;
+          for (const pid of allProjectIds) {
+            const dist = levenshtein(normProjectId, pid);
+            if (dist < bestDist) {
+              bestDist = dist;
+              best = pid;
+            }
+          }
+          if (best) didYouMean = best;
+        }
     }
 
     if (tags && tags.length > 0) {
