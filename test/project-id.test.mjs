@@ -306,6 +306,29 @@ test("search_memories surfaces did_you_mean for near-miss project_id queries", a
   }
 });
 
+test("search_memories surfaces partial matches for single-token typo misses", async () => {
+  const server = startServer();
+
+  try {
+    await server.callTool(92, "store_memory", {
+      content: "Yorkz planning board for weak-client workflow hardening",
+      district: "practical_execution",
+      tags: ["topic:yorkz", "scope:session", "kind:task", "layer:implementation"],
+      project_id: "Yorkz",
+    });
+
+    const noMatch = await server.callTool(93, "search_memories", {
+      query: "yorks",
+    });
+
+    assert.match(resultText(noMatch), /No memories found matching query: "yorks"/);
+    assert.match(resultText(noMatch), /Partial matches:/);
+    assert.match(resultText(noMatch), /yorkz \(similarity=0\.800, field=project_id, memories=memory_1, projects=yorkz\)/);
+  } finally {
+    server.stop();
+  }
+});
+
 test("startup tolerates WAL updates targeting unknown districts", async () => {
   const snapshot = {
     nextMemoryId: 2,

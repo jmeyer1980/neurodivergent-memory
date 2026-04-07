@@ -266,6 +266,27 @@ interface ScoredMemory {
 interface SearchMemoriesResult {
   results: ScoredMemory[];
   did_you_mean?: string;
+  partial_matches?: SearchPartialMatch[];
+}
+
+interface SearchPartialMatch {
+  candidate: string;
+  similarity_score: number;
+  matched_field: "project_id" | "tag" | "name" | "district";
+  memory_ids: string[];
+  project_ids: string[];
+}
+
+interface ToolDescriptor {
+  name: string;
+  description: string;
+  inputSchema: Record<string, unknown>;
+}
+
+interface ToolParameterSummary {
+  required: string[];
+  optional: string[];
+  alternative_required_params?: string[][];
 }
 
 interface StoreMemoryResult {
@@ -1108,6 +1129,125 @@ class NeurodivergentMemory {
     }
 
     return bestMatch;
+  }
+
+  private normalizeSearchAssistToken(value: string | undefined): string | undefined {
+    if (typeof value !== "string") {
+      return undefined;
+    }
+
+    const normalized = value
+      .normalize("NFKC")
+      .trim()
+      .toLocaleLowerCase("en")
+      .replace(/[^a-z0-9]+/g, "_")
+      .replace(/^_+|_+$/g, "");
+
+    return normalized.length > 0 ? normalized : undefined;
+  }
+
+  private tokenizeSearchAssistValue(value: string | undefined): string[] {
+    if (typeof value !== "string") {
+      return [];
+    }
+
+    return value
+      .normalize("NFKC")
+      .toLocaleLowerCase("en")
+      .split(/[^a-z0-9]+/)
+      .filter(token => token.length > 0);
+  }
+
+  private scoreSearchAssistCandidate(query: string, candidate: string): number | undefined {
+    const normalizedQuery = this.normalizeSearchAssistToken(query);
+    const normalizedCandidate = this.normalizeSearchAssistToken(candidate);
+    if (!normalizedQuery || !normalizedCandidate || normalizedQuery === normalizedCandidate) {
+      return undefined;
+    }
+
+    const maxDistance = Math.max(normalizedQuery.length, normalizedCandidate.length) <= 4 ? 1 : 2;
+    const distance = boundedLevenshteinDistance(normalizedQuery, normalizedCandidate, maxDistance);
+    if (distance === undefined) {
+      return undefined;
+    }
+
+    const similarity = 1 - (distance / Math.max(normalizedQuery.length, normalizedCandidate.length));
+    return similarity >= 0.8 ? similarity : undefined;
+  }
+
+  private collectSingleTokenPartialMatches(query: string, candidates: MemoryNPC[]): SearchPartialMatch[] {
+    const normalizedQuery = this.normalizeSearchAssistToken(query);
+    if (!normalizedQuery || normalizedQuery.includes("_")) {
+      return [];
+    }
+
+    const matches = new Map<string, {
+      candidate: string;
+      similarity_score: number;
+      matched_field: SearchPartialMatch["matched_field"];
+      memory_ids: Set<string>;
+      project_ids: Set<string>;
+    }>();
+
+    const recordMatch = (
+      candidate: string | undefined,
+      matchedField: SearchPartialMatch["matched_field"],
+      memory: MemoryNPC,
+    ) => {
+      if (!candidate) {
+        return;
+      }
+
+      const similarity = this.scoreSearchAssistCandidate(normalizedQuery, candidate);
+      if (similarity === undefined) {
+        return;
+      }
+
+      const key = `${matchedField}:${candidate}`;
+      const existing = matches.get(key);
+      if (existing) {
+        existing.similarity_score = Math.max(existing.similarity_score, similarity);
+        existing.memory_ids.add(memory.id);
+        if (memory.project_id) {
+          existing.project_ids.add(memory.project_id);
+        }
+        return;
+      }
+
+      matches.set(key, {
+        candidate,
+        similarity_score: similarity,
+        matched_field: matchedField,
+        memory_ids: new Set([memory.id]),
+        project_ids: new Set(memory.project_id ? [memory.project_id] : []),
+      });
+    };
+
+    for (const memory of candidates) {
+      recordMatch(normalizeProjectId(memory.project_id), "project_id", memory);
+      recordMatch(this.normalizeSearchAssistToken(memory.district), "district", memory);
+
+      for (const tag of memory.tags) {
+        for (const token of this.tokenizeSearchAssistValue(tag)) {
+          recordMatch(token, "tag", memory);
+        }
+      }
+
+      for (const token of this.tokenizeSearchAssistValue(memory.name)) {
+        recordMatch(token, "name", memory);
+      }
+    }
+
+    return Array.from(matches.values())
+      .sort((left, right) => right.similarity_score - left.similarity_score || left.candidate.localeCompare(right.candidate))
+      .slice(0, 5)
+      .map(match => ({
+        candidate: match.candidate,
+        similarity_score: match.similarity_score,
+        matched_field: match.matched_field,
+        memory_ids: Array.from(match.memory_ids).sort(),
+        project_ids: Array.from(match.project_ids).sort(),
+      }));
   }
 
   storageDiagnostics(): StorageDiagnostics {
@@ -2442,12 +2582,20 @@ class NeurodivergentMemory {
     });
 
     if (scored.reduce((mx, candidate) => Math.max(mx, candidate.semanticScore), 0) === 0) {
-      return { results: [], did_you_mean: didYouMean };
+      return {
+        results: [],
+        did_you_mean: didYouMean,
+        partial_matches: this.collectSingleTokenPartialMatches(query, candidates),
+      };
     }
 
     const maxScore = scored.reduce((mx, candidate) => Math.max(mx, candidate.score), 0);
     if (maxScore === 0) {
-      return { results: [], did_you_mean: didYouMean };
+      return {
+        results: [],
+        did_you_mean: didYouMean,
+        partial_matches: this.collectSingleTokenPartialMatches(query, candidates),
+      };
     }
 
     const normalized: ScoredMemory[] = scored.map(candidate => ({
@@ -2462,7 +2610,13 @@ class NeurodivergentMemory {
     // Sort descending by score
     filtered.sort((a, b) => b.score - a.score);
 
-    return { results: filtered, did_you_mean: didYouMean };
+    return {
+      results: filtered,
+      did_you_mean: didYouMean,
+      partial_matches: filtered.length === 0
+        ? this.collectSingleTokenPartialMatches(query, candidates)
+        : undefined,
+    };
   }
 
   // ── Graph traversal ────────────────────────────────────────────────────────
@@ -3860,13 +4014,16 @@ server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
   );
 });
 
-/**
- * Handler that lists available memory tools.
- * Exposes tools for storing, retrieving, connecting, searching, traversing, and managing memories.
- */
-server.setRequestHandler(ListToolsRequestSchema, async () => {
-  return {
-    tools: [
+function buildRegisteredToolDescriptors(): ToolDescriptor[] {
+  return [
+      {
+        name: "list_tools",
+        description: "Return a callable mirror of the server tool catalog for clients that cannot reliably use native MCP tool discovery.",
+        inputSchema: {
+          type: "object",
+          properties: {}
+        }
+      },
       {
         name: "store_memory",
         description: "Store a new memory in a specific district of the neurodivergent mind",
@@ -4379,7 +4536,92 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           required: ["key", "name", "description", "luca_parent"]
         }
       }
-    ]
+    ];
+}
+
+function summarizeToolParameters(inputSchema: Record<string, unknown>): ToolParameterSummary {
+  const properties = inputSchema.properties && typeof inputSchema.properties === "object"
+    ? Object.keys(inputSchema.properties as Record<string, unknown>)
+    : [];
+  const required = Array.isArray(inputSchema.required)
+    ? (inputSchema.required as string[]).slice().sort()
+    : [];
+  const alternativeRequired = Array.isArray(inputSchema.anyOf)
+    ? (inputSchema.anyOf as Array<Record<string, unknown>>)
+        .map(option => Array.isArray(option.required) ? (option.required as string[]).slice().sort() : [])
+        .filter(option => option.length > 0)
+    : [];
+  const conditionallyRequired = new Set(alternativeRequired.flat());
+  const optional = properties
+    .filter(name => !required.includes(name) && !conditionallyRequired.has(name))
+    .sort();
+
+  return {
+    required,
+    optional,
+    alternative_required_params: alternativeRequired.length > 0 ? alternativeRequired : undefined,
+  };
+}
+
+function toolWhenToUseHint(toolName: string): string {
+  switch (toolName) {
+    case "list_tools":
+      return "Use when a client cannot access or reason over native MCP tools/list discovery.";
+    case "search_memories":
+      return "Use to find relevant memories by query, filters, goal context, or recency bias.";
+    case "retrieve_memory":
+    case "related_to":
+    case "traverse_from":
+      return "Use when you already have a memory ID and need direct retrieval or graph navigation.";
+    case "store_memory":
+    case "update_memory":
+    case "delete_memory":
+    case "connect_memories":
+      return "Use to create, modify, remove, or connect memory nodes in the graph.";
+    case "list_memories":
+    case "memory_stats":
+      return "Use for broad inventory, pagination, or aggregate status checks across the graph.";
+    case "import_memories":
+      return "Use for bulk import from inline entries or a snapshot file, with optional dry-run validation.";
+    case "storage_diagnostics":
+    case "server_handshake":
+      return "Use to verify the active server build, runtime, or storage configuration.";
+    case "distill_memory":
+      return "Use to translate an emotional_processing memory into a lower-intensity logical artifact.";
+    case "prepare_memory_city_context":
+    case "prepare_synthesis_context":
+    case "prepare_packetized_synthesis_context":
+      return "Use when the client can call tools but cannot consume the equivalent MCP prompt directly.";
+    case "register_district":
+      return "Use when adding a custom district that must inherit from a LUCA-traceable canonical parent.";
+    default:
+      return "Use when the tool description matches the task you need to complete.";
+  }
+}
+
+function buildListToolsMirror(): { tools: Array<Record<string, unknown>> } {
+  return {
+    tools: buildRegisteredToolDescriptors().map((tool) => {
+      const parameterSummary = summarizeToolParameters(tool.inputSchema);
+      return {
+        name: tool.name,
+        short_purpose: tool.description,
+        required_params: parameterSummary.required,
+        optional_params: parameterSummary.optional,
+        alternative_required_params: parameterSummary.alternative_required_params,
+        when_to_use: toolWhenToUseHint(tool.name),
+      };
+    }),
+  };
+}
+
+/**
+ * Handler that lists available memory tools.
+ * Exposes tools for storing, retrieving, connecting, searching, traversing, and managing memories.
+ */
+server.setRequestHandler(ListToolsRequestSchema, async () => {
+  return {
+    tools: buildRegisteredToolDescriptors()
   };
 });
 
@@ -4616,12 +4858,18 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         const didYouMeanLine = searchResult.did_you_mean
           ? `\nDid you mean project_id: ${searchResult.did_you_mean}?`
           : "";
+        const partialMatchesLine = searchResult.partial_matches && searchResult.partial_matches.length > 0
+          ? `\n\nPartial matches:\n${searchResult.partial_matches.map((match) => {
+              const projectIds = match.project_ids.length > 0 ? match.project_ids.join(", ") : "(none)";
+              return `• ${match.candidate} (similarity=${match.similarity_score.toFixed(3)}, field=${match.matched_field}, memories=${match.memory_ids.join(", ")}, projects=${projectIds})`;
+            }).join("\n")}`
+          : "";
 
         if (results.length === 0) {
           return {
             content: [{
               type: "text",
-              text: `🔍 No memories found matching query: "${query}"${didYouMeanLine}`
+              text: `🔍 No memories found matching query: "${query}"${didYouMeanLine}${partialMatchesLine}`
             }]
           };
         }
@@ -4914,6 +5162,15 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           ),
         );
       }
+    }
+
+    case "list_tools": {
+      return {
+        content: [{
+          type: "text",
+          text: JSON.stringify(buildListToolsMirror(), null, 2),
+        }],
+      };
     }
 
     case "prepare_memory_city_context": {

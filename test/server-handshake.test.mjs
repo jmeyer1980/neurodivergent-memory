@@ -125,3 +125,25 @@ test("server_handshake returns runtime version details", async () => {
     server.stop();
   }
 });
+
+test("list_tools mirrors the native tool catalog with parameter guidance", async () => {
+  const server = startServer();
+
+  try {
+    const listed = await server.listTools(3);
+    const nativeNames = (listed.result?.tools ?? []).map((tool) => tool.name).sort();
+
+    const response = await server.callTool(4, "list_tools", {});
+    const payload = JSON.parse(resultText(response));
+    const mirroredNames = payload.tools.map((tool) => tool.name).sort();
+    const searchEntry = payload.tools.find((tool) => tool.name === "search_memories");
+    const importEntry = payload.tools.find((tool) => tool.name === "import_memories");
+
+    assert.deepEqual(mirroredNames, nativeNames);
+    assert.deepEqual(searchEntry.required_params, ["query"]);
+    assert.match(searchEntry.when_to_use, /goal context|recency/i);
+    assert.deepEqual(importEntry.alternative_required_params, [["entries"], ["file_path"]]);
+  } finally {
+    server.stop();
+  }
+});
