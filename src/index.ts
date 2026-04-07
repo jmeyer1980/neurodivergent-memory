@@ -1098,6 +1098,8 @@ class NeurodivergentMemory {
   private validateImportFilePath(filePath: string): string {
     const resolvedPath = path.resolve(filePath);
     const resolvedPersistenceDir = path.resolve(PERSISTENCE_DIR);
+    const canonicalResolvedPath = this.canonicalizePathForComparison(resolvedPath);
+    const canonicalPersistenceDir = this.canonicalizePathForComparison(resolvedPersistenceDir);
     const hasJsonExtension = path.extname(resolvedPath).toLowerCase() === ".json";
     if (!hasJsonExtension) {
       throw createNMError(
@@ -1108,8 +1110,8 @@ class NeurodivergentMemory {
     }
 
     const isWithinPersistenceDir =
-      resolvedPath === resolvedPersistenceDir ||
-      resolvedPath.startsWith(`${resolvedPersistenceDir}${path.sep}`);
+      canonicalResolvedPath === canonicalPersistenceDir ||
+      canonicalResolvedPath.startsWith(`${canonicalPersistenceDir}${path.sep}`);
 
     if (!this.allowExternalImportFiles && !isWithinPersistenceDir) {
       throw createNMError(
@@ -1120,6 +1122,22 @@ class NeurodivergentMemory {
     }
 
     return resolvedPath;
+  }
+
+  private canonicalizePathForComparison(filePath: string): string {
+    if (process.platform !== "win32") {
+      return filePath;
+    }
+
+    let normalizedPath = path.win32.normalize(filePath);
+
+    if (normalizedPath.startsWith("\\\\?\\UNC\\")) {
+      normalizedPath = `\\\\${normalizedPath.slice("\\\\?\\UNC\\".length)}`;
+    } else if (normalizedPath.startsWith("\\\\?\\")) {
+      normalizedPath = normalizedPath.slice("\\\\?\\".length);
+    }
+
+    return normalizedPath.toLowerCase();
   }
 
   private readImportSnapshotFile(filePath: string): ImportCandidate[] {
