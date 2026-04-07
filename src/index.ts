@@ -2290,8 +2290,9 @@ class NeurodivergentMemory {
       const nextDistrict = this.districts[updates.district];
       if (!nextDistrict) {
         throw createNMError(
-          NM_ERRORS.INVALID_ARGUMENT,
+          NM_ERRORS.UNKNOWN_DISTRICT,
           `Unknown district: ${updates.district}`,
+          "Verify that the district name is correct and that any custom districts have been registered.",
         );
       }
       this.districts[memory.district].memories = this.districts[memory.district].memories.filter(mid => mid !== id);
@@ -4404,7 +4405,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         const storeResult = await runMutatingTool(
           "store_memory",
           () => {
-            if (shouldCheckWipLimit) {
+            if (shouldCheckWipLimit && typeof normalizedAgentId === "string") {
               const existingInProgressTasks = findExistingInProgressTasks(normalizedAgentId);
               if (existingInProgressTasks.length >= configuredWipLimit) {
                 wipWarning = buildWipGuardrailWarning(normalizedAgentId, existingInProgressTasks);
