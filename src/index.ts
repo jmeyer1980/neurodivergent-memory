@@ -990,8 +990,8 @@ class NeurodivergentMemory {
 
   private insertMemory(memory: MemoryNPC): boolean {
     if (!this.districts[memory.district]) {
-        logger.warn({ memoryId: memory.id, district: memory.district }, "Skipping memory with unknown district during load");
-        return false;
+      logger.warn({ memoryId: memory.id, district: memory.district }, "Skipping memory with unknown district during load");
+      return false;
     }
     // If the memory ID already exists in a different district, remove it from the old
     // district array first to avoid duplicate district membership during WAL replay.
