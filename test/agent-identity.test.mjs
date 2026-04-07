@@ -121,6 +121,23 @@ test("store_memory without agent_id shows unassigned in retrieve_memory output",
   }
 });
 
+test("store_memory rejects blank agent_id values", async () => {
+  const server = startServer();
+
+  try {
+    const response = await server.callTool(1, "store_memory", {
+      content: "blank agent should fail",
+      district: "logical_analysis",
+      tags: ["topic:test", "scope:session", "kind:reference", "layer:research"],
+      agent_id: "   ",
+    });
+
+    assert.match(resultText(response), /Invalid agent_id: must be a non-empty string/);
+  } finally {
+    server.stop();
+  }
+});
+
 test("memory_stats reports per-agent contribution breakdown", async () => {
   const server = startServer();
 
@@ -239,6 +256,27 @@ test("import_memories applies default agent_id to entries without one", async ()
   }
 });
 
+test("import_memories rejects blank default agent_id", async () => {
+  const server = startServer();
+
+  try {
+    const response = await server.callTool(1, "import_memories", {
+      entries: [
+        {
+          content: "imported memory with blank default agent",
+          district: "logical_analysis",
+          tags: ["topic:test", "scope:session", "kind:reference", "layer:research"],
+        },
+      ],
+      agent_id: "   ",
+    });
+
+    assert.match(resultText(response), /Invalid agent_id: must be a non-empty string/);
+  } finally {
+    server.stop();
+  }
+});
+
 test("connect_memories remains backward-compatible without agent_id", async () => {
   const server = startServer();
 
@@ -291,6 +329,64 @@ test("connect_memories accepts agent_id without error and confirms connection", 
 
     assert.match(resultText(connected), /Connected memories memory_1 and memory_2/);
     assert.match(resultText(connected), /Agent: connector-agent/);
+  } finally {
+    server.stop();
+  }
+});
+
+test("connect_memories rejects blank agent_id values", async () => {
+  const server = startServer();
+
+  try {
+    await server.callTool(1, "store_memory", {
+      content: "first node",
+      district: "logical_analysis",
+      tags: ["topic:test", "scope:session", "kind:reference", "layer:research"],
+    });
+
+    await server.callTool(2, "store_memory", {
+      content: "second node",
+      district: "practical_execution",
+      tags: ["topic:test", "scope:session", "kind:task", "layer:implementation"],
+    });
+
+    const response = await server.callTool(3, "connect_memories", {
+      memory_id_1: "memory_1",
+      memory_id_2: "memory_2",
+      agent_id: "   ",
+    });
+
+    assert.match(resultText(response), /Invalid agent_id: must be a non-empty string/);
+  } finally {
+    server.stop();
+  }
+});
+
+test("update_memory can repair unassigned agent attribution exactly once", async () => {
+  const server = startServer();
+
+  try {
+    await server.callTool(1, "store_memory", {
+      content: "legacy unattributed memory",
+      district: "logical_analysis",
+      tags: ["topic:test", "scope:session", "kind:reference", "layer:research"],
+    });
+
+    const repaired = await server.callTool(2, "update_memory", {
+      memory_id: "memory_1",
+      memory_agent_id: "repair-agent",
+      agent_id: "repair-operator",
+    });
+
+    assert.match(resultText(repaired), /Agent: repair-agent/);
+
+    const overwrite = await server.callTool(3, "update_memory", {
+      memory_id: "memory_1",
+      memory_agent_id: "different-agent",
+      agent_id: "repair-operator",
+    });
+
+    assert.match(resultText(overwrite), /Cannot overwrite existing agent_id/);
   } finally {
     server.stop();
   }

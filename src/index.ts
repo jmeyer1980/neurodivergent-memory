@@ -443,10 +443,12 @@ type WalOperation = "store" | "update" | "delete" | "connect" | "import" | "regi
 
 const PROJECT_ID_MAX_LENGTH = 64;
 const PROJECT_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$/;
+const DEFAULT_AGENT_ID = "unassigned";
 
 const VALID_EPISTEMIC_STATUSES: EpistemicStatus[] = ["draft", "validated", "outdated"];
 
 type MemoryUpdatePayload = Partial<Pick<MemoryNPC, "content" | "tags" | "emotional_valence" | "intensity" | "district" | "epistemic_status" | "project_id" | "repeat_write_count" | "repeat_count" | "last_similarity_score" | "ping_pong_counter">> & {
+  memory_agent_id?: string;
   project_id?: string | null;
 };
 
@@ -1313,6 +1315,16 @@ class NeurodivergentMemory {
     return `entries[${index}].project_id`;
   }
 
+  private agentIdFieldPathForImport(planSource: "entries" | "file_path", index: number, candidate: ImportCandidate): string {
+    if (planSource === "file_path") {
+      return candidate.source_memory_id
+        ? `snapshot[${candidate.source_memory_id}].agent_id`
+        : `snapshot[${index}].agent_id`;
+    }
+
+    return `entries[${index}].agent_id`;
+  }
+
   private buildImportPlan(
     entries: ImportMemoryEntry[] | undefined,
     default_agent_id: string | undefined,
@@ -1360,6 +1372,7 @@ class NeurodivergentMemory {
     const idMap = new Map<string, string>();
     const reservedIds = new Set<string>(Object.keys(this.memories));
     let nextId = this.nextMemoryId;
+    const normalizedDefaultAgentId = normalizeOptionalAgentId(default_agent_id, "agent_id");
 
     for (const [index, candidate] of resolved.candidates.entries()) {
       try {
@@ -1376,6 +1389,10 @@ class NeurodivergentMemory {
         if (candidate.project_id !== undefined) {
           validateProjectId(candidate.project_id, this.projectIdFieldPathForImport(plan.source, index, candidate));
         }
+        const candidateAgentId = normalizeOptionalAgentId(
+          candidate.agent_id,
+          this.agentIdFieldPathForImport(plan.source, index, candidate),
+        );
 
         const fingerprint = this.fingerprintForImportCandidate(candidate, dedupe);
         if (fingerprint && seenFingerprints.has(fingerprint)) {
@@ -1421,7 +1438,7 @@ class NeurodivergentMemory {
           id: targetId,
           name: candidate.name ?? this.generateMemoryName(candidate.archetype ?? districtArchetype, candidate.content),
           archetype: candidate.archetype ?? districtArchetype,
-          agent_id: candidate.agent_id ?? default_agent_id,
+          agent_id: candidateAgentId ?? normalizedDefaultAgentId ?? DEFAULT_AGENT_ID,
           project_id: normalizeProjectId(candidate.project_id),
           district: candidate.district,
           content: candidate.content,
@@ -2000,6 +2017,21 @@ class NeurodivergentMemory {
     return chain;
   }
 
+  private getRegisteredDistrict(district: string): MemoryDistrict {
+    const registeredDistrict = this.districts[district];
+    if (!registeredDistrict) {
+      const valid = Object.keys(this.districts).join(", ");
+      logger.warn({ district, validDistricts: valid }, "Rejecting write with unknown district");
+      throw createNMError(
+        NM_ERRORS.UNKNOWN_DISTRICT,
+        `Unknown district: ${district}`,
+        `Use one of the configured districts: ${valid}.`,
+      );
+    }
+
+    return registeredDistrict;
+  }
+
   // ── Core CRUD ──────────────────────────────────────────────────────────────
 
   storeMemory(
@@ -2012,15 +2044,7 @@ class NeurodivergentMemory {
     project_id?: string,
     epistemic_status?: EpistemicStatus
   ): StoreMemoryResult {
-    if (!this.districts[district]) {
-      const valid = Object.keys(this.districts).join(", ");
-      logger.warn({ district, validDistricts: valid }, "Rejecting storeMemory with unknown district");
-      throw createNMError(
-        NM_ERRORS.UNKNOWN_DISTRICT,
-        `Unknown district: ${district}`,
-        `Use one of the configured districts: ${valid}.`,
-      );
-    }
+    const registeredDistrict = this.getRegisteredDistrict(district);
     let normalizedProjectId: string | undefined = undefined;
     if (project_id !== undefined) {
       normalizedProjectId = normalizeProjectId(project_id);
@@ -2033,12 +2057,13 @@ class NeurodivergentMemory {
       }
       validateProjectId(normalizedProjectId);
     }
+    const storedAgentId = resolveStoredAgentId(agent_id);
 
     const id = `memory_${this.nextMemoryId++}`;
-    const archetype = this.districts[district].archetype;
+    const archetype = registeredDistrict.archetype;
     const name = this.generateMemoryName(archetype, content);
     const now = new Date();
-    const repeatCandidate = this.detectRepeatCandidate(content, agent_id);
+    const repeatCandidate = this.detectRepeatCandidate(content, storedAgentId);
 
     let repeatDetected = false;
     let matchedMemoryId: string | undefined;
@@ -2050,7 +2075,7 @@ class NeurodivergentMemory {
 
     if (repeatCandidate && repeatCandidate.similarityScore >= this.loopTelemetry.getRepeatThreshold()) {
       const matchedMemory = repeatCandidate.memory;
-      this.enforceCrossDistrictCooldown(matchedMemory, { district, agent_id });
+      this.enforceCrossDistrictCooldown(matchedMemory, { district, agent_id: storedAgentId });
       const nextRepeatCount = (matchedMemory.repeat_write_count ?? matchedMemory.repeat_count ?? 0) + 1;
       matchedMemory.repeat_write_count = nextRepeatCount;
       matchedMemory.repeat_count = nextRepeatCount;
@@ -2067,7 +2092,7 @@ class NeurodivergentMemory {
 
       const pingPongResult = this.applyPingPongTelemetry(matchedMemory, {
         district,
-        agent_id,
+        agent_id: storedAgentId,
       });
       pingPongDetected = pingPongResult.detected;
       pingPongCount = pingPongResult.count;
@@ -2079,7 +2104,7 @@ class NeurodivergentMemory {
         similarity_score: repeatCandidate.similarityScore,
         timestamp: now.toISOString(),
         district,
-        agent_id,
+        agent_id: storedAgentId,
       });
 
       repeatDetected = true;
@@ -2094,7 +2119,7 @@ class NeurodivergentMemory {
       id,
       name,
       archetype,
-      agent_id,
+      agent_id: storedAgentId,
       project_id: normalizedProjectId,
       district,
       content,
@@ -2121,7 +2146,7 @@ class NeurodivergentMemory {
         operation: "store",
         memoryId: memory.id,
         district,
-        agentId: agent_id ?? "unassigned",
+        agentId: storedAgentId,
         repeat_detected: repeatDetected,
         matched_memory_id: matchedMemoryId,
         similarity_score: similarityScore,
@@ -2178,14 +2203,21 @@ class NeurodivergentMemory {
     }
 
     if (updates.district !== undefined && !this.districts[updates.district]) {
-      throw createNMError(
-        NM_ERRORS.UNKNOWN_DISTRICT,
-        `Unknown district: ${updates.district}`,
-        `Use one of the configured districts: ${Object.keys(this.districts).join(", ")}.`,
-      );
+      this.getRegisteredDistrict(updates.district);
     }
     if (updates.project_id !== undefined && updates.project_id !== null) {
       validateProjectId(updates.project_id);
+    }
+    if (updates.memory_agent_id !== undefined) {
+      const nextAgentId = normalizeOptionalAgentId(updates.memory_agent_id, "memory_agent_id");
+      if (memory.agent_id !== undefined && memory.agent_id !== DEFAULT_AGENT_ID) {
+        throw createNMError(
+          NM_ERRORS.INPUT_VALIDATION_FAILED,
+          `Cannot overwrite existing agent_id for ${id}.`,
+          "memory_agent_id may only backfill memories whose agent_id is missing or unassigned.",
+        );
+      }
+      updates.memory_agent_id = nextAgentId;
     }
 
     this.enforceCrossDistrictCooldown(memory, actor);
@@ -2256,20 +2288,9 @@ class NeurodivergentMemory {
 
     if (updates.district !== undefined && updates.district !== memory.district) {
       const nextDistrict = this.districts[updates.district];
-      if (!nextDistrict) {
-        logger.warn(
-          {
-            code: NM_ERRORS.UNKNOWN_DISTRICT,
-            memoryId: id,
-            attemptedDistrict: updates.district,
-          },
-          "Skipping district update with unknown district",
-        );
-      } else {
-        this.districts[memory.district].memories = this.districts[memory.district].memories.filter(mid => mid !== id);
-        nextDistrict.memories.push(id);
-        memory.district = updates.district;
-      }
+      this.districts[memory.district].memories = this.districts[memory.district].memories.filter(mid => mid !== id);
+      nextDistrict.memories.push(id);
+      memory.district = updates.district;
     }
 
     if (updates.content !== undefined) memory.content = updates.content;
@@ -2287,6 +2308,7 @@ class NeurodivergentMemory {
     }
     if (updates.last_similarity_score !== undefined) memory.last_similarity_score = updates.last_similarity_score;
     if (updates.ping_pong_counter !== undefined) memory.ping_pong_counter = updates.ping_pong_counter;
+    if (updates.memory_agent_id !== undefined) memory.agent_id = updates.memory_agent_id;
     if (Object.prototype.hasOwnProperty.call(updates, "project_id")) {
       if (updates.project_id === null) {
         delete memory.project_id;
@@ -2864,6 +2886,7 @@ class NeurodivergentMemory {
     // Create distilled memory in logical_analysis district
     const id = `memory_${this.nextMemoryId++}`;
     const now = new Date();
+    const storedAgentId = resolveStoredAgentId(agent_id);
     const distilledContent = `Distilled artifact from ${sourceMemoryId}: signals=[${signals.join(", ")}], triggers=[${triggers.join(", ")}], constraints=[${constraints.join(", ")}], actions=[${next_actions.join(", ")}], risks=[${risk_flags.join(", ")}]`;
 
     // Compute updated connections before WAL write to preserve "append before mutate" invariant
@@ -2873,7 +2896,7 @@ class NeurodivergentMemory {
       id,
       name: `distilled_${sourceMemoryId}_${now.toISOString()}`,
       archetype: "scholar",
-      agent_id,
+      agent_id: storedAgentId,
       project_id: sourceMemory.project_id,
       district: "logical_analysis",
       content: distilledContent,
@@ -2979,19 +3002,15 @@ class NeurodivergentMemory {
   ): MemoryNPC[] {
     let nextId = this.nextMemoryId;
     const memories: MemoryNPC[] = [];
+    const normalizedDefaultAgentId = normalizeOptionalAgentId(default_agent_id, "agent_id");
     for (const entry of entries) {
-      if (!this.districts[entry.district]) {
-        throw createNMError(
-          NM_ERRORS.UNKNOWN_DISTRICT,
-          `Unknown district: ${entry.district}`,
-          `Use one of the configured districts: ${Object.keys(this.districts).join(", ")}.`,
-        );
-      }
+      this.getRegisteredDistrict(entry.district);
 
       const id = `memory_${nextId++}`;
       const archetype = this.districts[entry.district].archetype;
       const name = this.generateMemoryName(archetype, entry.content);
       const now = new Date();
+      const entryAgentId = normalizeOptionalAgentId(entry.agent_id, "entries[].agent_id");
       if (entry.project_id !== undefined) {
         validateProjectId(entry.project_id, "entries[].project_id");
       }
@@ -2999,7 +3018,7 @@ class NeurodivergentMemory {
         id,
         name,
         archetype,
-        agent_id: entry.agent_id ?? default_agent_id,
+        agent_id: entryAgentId ?? normalizedDefaultAgentId ?? DEFAULT_AGENT_ID,
         project_id: normalizeProjectId(entry.project_id),
         district: entry.district,
         content: entry.content,
@@ -3479,6 +3498,35 @@ function validateProjectId(projectId: string, fieldPath = "project_id"): void {
   }
 }
 
+function normalizeOptionalAgentId(agentId: string | undefined | null, fieldPath = "agent_id"): string | undefined {
+  if (agentId === undefined || agentId === null) {
+    return undefined;
+  }
+
+  if (typeof agentId !== "string") {
+    throw createNMError(
+      NM_ERRORS.INPUT_VALIDATION_FAILED,
+      `Invalid ${fieldPath}: must be a string.`,
+      `Provide a non-empty string value for ${fieldPath}.`,
+    );
+  }
+
+  const normalizedAgentId = agentId.trim();
+  if (!normalizedAgentId) {
+    throw createNMError(
+      NM_ERRORS.INPUT_VALIDATION_FAILED,
+      `Invalid ${fieldPath}: must be a non-empty string.`,
+      `Provide a non-empty string value for ${fieldPath}, or omit it to use the explicit ${DEFAULT_AGENT_ID} default.`,
+    );
+  }
+
+  return normalizedAgentId;
+}
+
+function resolveStoredAgentId(agentId: string | undefined | null, fieldPath = "agent_id"): string {
+  return normalizeOptionalAgentId(agentId, fieldPath) ?? DEFAULT_AGENT_ID;
+}
+
 function normalizeProjectId(projectId: string | undefined | null): string | undefined {
   if (typeof projectId !== "string") {
     return undefined;
@@ -3846,7 +3894,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             },
             agent_id: {
               type: "string",
-              description: "Optional creator agent identifier"
+              description: `Optional creator agent identifier. Omit to store the explicit ${DEFAULT_AGENT_ID} default.`
             },
             project_id: {
               type: "string",
@@ -3886,7 +3934,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: "update_memory",
-        description: "Update an existing memory's content, tags, district, emotional_valence, intensity, or epistemic_status",
+        description: "Update an existing memory's content, tags, district, emotional_valence, intensity, epistemic_status, or legacy agent attribution",
         inputSchema: {
           type: "object",
           properties: {
@@ -3928,6 +3976,10 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             agent_id: {
               type: "string",
               description: "Optional caller agent identifier for loop telemetry attribution"
+            },
+            memory_agent_id: {
+              type: "string",
+              description: `Optional repair-only agent identifier used to backfill memories currently storing ${DEFAULT_AGENT_ID} or no attribution.`
             },
             project_id: {
               type: ["string", "null"],
@@ -4238,7 +4290,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             },
             agent_id: {
               type: "string",
-              description: "Optional default agent identifier applied to entries without agent_id"
+              description: `Optional default agent identifier applied to entries without agent_id. If omitted, imported memories store ${DEFAULT_AGENT_ID} explicitly.`
             }
           },
           anyOf: [
@@ -4334,10 +4386,11 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       const { content, district, tags = [], emotional_valence, intensity = 0.5, agent_id, project_id, epistemic_status } = request.params.arguments as any;
 
       try {
+        const normalizedAgentId = normalizeOptionalAgentId(agent_id);
         const shouldCheckWipLimit =
           configuredWipLimit > 0 &&
           district === "practical_execution" &&
-          typeof agent_id === "string" &&
+          typeof normalizedAgentId === "string" &&
           hasTaskInProgressTags(tags);
 
         let wipWarning: string | undefined;
@@ -4346,14 +4399,14 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           "store_memory",
           () => {
             if (shouldCheckWipLimit) {
-              const existingInProgressTasks = findExistingInProgressTasks(agent_id);
+              const existingInProgressTasks = findExistingInProgressTasks(normalizedAgentId);
               if (existingInProgressTasks.length >= configuredWipLimit) {
-                wipWarning = buildWipGuardrailWarning(agent_id, existingInProgressTasks);
+                wipWarning = buildWipGuardrailWarning(normalizedAgentId, existingInProgressTasks);
                 logger.warn(
                   {
                     toolName: "store_memory",
                     code: NM_ERRORS.WIP_LIMIT_EXCEEDED,
-                    agentId: agent_id,
+                    agentId: normalizedAgentId,
                     limit: configuredWipLimit,
                     currentInProgressCount: existingInProgressTasks.length,
                   },
@@ -4368,7 +4421,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
               tags,
               emotional_valence,
               intensity,
-              agent_id,
+              normalizedAgentId,
               project_id,
               epistemic_status,
             );
@@ -4437,8 +4490,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     }
 
     case "update_memory": {
-      const { memory_id, content, district, tags, emotional_valence, intensity, epistemic_status, project_id, actor_district, agent_id } = request.params.arguments as any;
+      const { memory_id, content, district, tags, emotional_valence, intensity, epistemic_status, project_id, actor_district, agent_id, memory_agent_id } = request.params.arguments as any;
       try {
+        const normalizedActorAgentId = normalizeOptionalAgentId(agent_id);
         const updates: MemoryUpdatePayload = {};
         if (content !== undefined) updates.content = content;
         if (district !== undefined) updates.district = district;
@@ -4446,11 +4500,12 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         if (emotional_valence !== undefined) updates.emotional_valence = emotional_valence;
         if (intensity !== undefined) updates.intensity = intensity;
         if (epistemic_status !== undefined) updates.epistemic_status = epistemic_status;
+        if (memory_agent_id !== undefined) updates.memory_agent_id = memory_agent_id;
         if (project_id !== undefined) updates.project_id = project_id;
 
         const updateResult = await runMutatingTool(
           "update_memory",
-          () => memorySystem.updateMemory(memory_id, updates, { district: actor_district, agent_id }),
+          () => memorySystem.updateMemory(memory_id, updates, { district: actor_district, agent_id: normalizedActorAgentId }),
         );
         const memory = updateResult.memory;
         const cooldownLine = updateResult.cooldown_duration_ms
@@ -4459,7 +4514,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         return {
           content: [{
             type: "text",
-            text: `✏️ Updated memory "${memory.name}" (${memory_id})\nDistrict: ${memory.district}\nProject: ${memory.project_id ?? 'unset'}\nEpistemic status: ${memory.epistemic_status ?? 'unset'}\nTags: ${memory.tags.join(', ')}${cooldownLine}`
+            text: `✏️ Updated memory "${memory.name}" (${memory_id})\nDistrict: ${memory.district}\nAgent: ${memory.agent_id ?? DEFAULT_AGENT_ID}\nProject: ${memory.project_id ?? 'unset'}\nEpistemic status: ${memory.epistemic_status ?? 'unset'}\nTags: ${memory.tags.join(', ')}${cooldownLine}`
           }]
         };
       } catch (error) {
@@ -4501,14 +4556,15 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       const { memory_id_1, memory_id_2, bidirectional = true, agent_id } = request.params.arguments as any;
 
       try {
+        const normalizedAgentId = normalizeOptionalAgentId(agent_id);
         await runMutatingTool(
           "connect_memories",
-          () => memorySystem.connectMemories(memory_id_1, memory_id_2, bidirectional, agent_id),
+          () => memorySystem.connectMemories(memory_id_1, memory_id_2, bidirectional, normalizedAgentId),
         );
         return {
           content: [{
             type: "text",
-            text: `🔗 Connected memories ${memory_id_1} and ${memory_id_2}${bidirectional ? ' (bidirectional)' : ' (unidirectional)'}\nAgent: ${agent_id ?? 'unassigned'}`
+            text: `🔗 Connected memories ${memory_id_1} and ${memory_id_2}${bidirectional ? ' (bidirectional)' : ' (unidirectional)'}\nAgent: ${normalizedAgentId ?? DEFAULT_AGENT_ID}`
           }]
         };
       } catch (error) {
@@ -4774,7 +4830,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     case "import_memories": {
       const { entries, file_path, dry_run = false, dedupe = "none", preserve_ids = false, merge_connections = false, agent_id } = request.params.arguments as any;
       try {
-        const executeImport = () => memorySystem.importMemories(entries, agent_id, {
+        const normalizedAgentId = normalizeOptionalAgentId(agent_id);
+        const executeImport = () => memorySystem.importMemories(entries, normalizedAgentId, {
           file_path,
           dry_run,
           dedupe,
@@ -4817,9 +4874,10 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     case "distill_memory": {
       const { memory_id, agent_id } = request.params.arguments as any;
       try {
+        const normalizedAgentId = normalizeOptionalAgentId(agent_id);
         const result = await runMutatingTool(
           "distill_memory",
-          () => memorySystem.distillMemory(memory_id, agent_id),
+          () => memorySystem.distillMemory(memory_id, normalizedAgentId),
         );
         const artifact = result.artifact;
         const distilled = result.distilled;
