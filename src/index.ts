@@ -1176,11 +1176,15 @@ class NeurodivergentMemory {
   }
 
   private collectSingleTokenPartialMatches(query: string, candidates: MemoryNPC[]): SearchPartialMatch[] {
-    const normalizedQuery = this.normalizeSearchAssistToken(query);
-    if (!normalizedQuery || normalizedQuery.includes("_")) {
+    const trimmedQuery = query.trim();
+    if (trimmedQuery.length === 0 || /\s/.test(trimmedQuery)) {
       return [];
     }
 
+    const normalizedQuery = this.normalizeSearchAssistToken(trimmedQuery);
+    if (!normalizedQuery) {
+      return [];
+    }
     const matches = new Map<string, {
       candidate: string;
       similarity_score: number;
