@@ -577,7 +577,17 @@ test("import_memories accepts Windows snapshot paths when only the drive-letter 
     },
   });
 
-  const mixedCaseDrivePath = `${snapshotPath[0].toLowerCase()}${snapshotPath.slice(1)}`;
+  const origDriveLetter = snapshotPath[0];
+  const toggledDriveLetter =
+    origDriveLetter === origDriveLetter.toUpperCase()
+      ? origDriveLetter.toLowerCase()
+      : origDriveLetter.toUpperCase();
+  const mixedCaseDrivePath = `${toggledDriveLetter}${snapshotPath.slice(1)}`;
+  assert.notEqual(
+    mixedCaseDrivePath,
+    snapshotPath,
+    "mixed-case drive path must differ from original to exercise the regression",
+  );
 
   try {
     const response = await server.callTool(75, "import_memories", {
