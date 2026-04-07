@@ -1125,11 +1125,19 @@ class NeurodivergentMemory {
   }
 
   private canonicalizePathForComparison(filePath: string): string {
-    if (process.platform !== "win32" || !/^[A-Za-z]:/.test(filePath)) {
+    if (process.platform !== "win32") {
       return filePath;
     }
 
-    return `${filePath[0].toUpperCase()}${filePath.slice(1)}`;
+    let normalizedPath = path.win32.normalize(filePath);
+
+    if (normalizedPath.startsWith("\\\\?\\UNC\\")) {
+      normalizedPath = `\\\\${normalizedPath.slice("\\\\?\\UNC\\".length)}`;
+    } else if (normalizedPath.startsWith("\\\\?\\")) {
+      normalizedPath = normalizedPath.slice("\\\\?\\".length);
+    }
+
+    return normalizedPath.toLowerCase();
   }
 
   private readImportSnapshotFile(filePath: string): ImportCandidate[] {
