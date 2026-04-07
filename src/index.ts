@@ -2288,6 +2288,12 @@ class NeurodivergentMemory {
 
     if (updates.district !== undefined && updates.district !== memory.district) {
       const nextDistrict = this.districts[updates.district];
+      if (!nextDistrict) {
+        throw createNMError(
+          NM_ERRORS.INVALID_ARGUMENT,
+          `Unknown district: ${updates.district}`,
+        );
+      }
       this.districts[memory.district].memories = this.districts[memory.district].memories.filter(mid => mid !== id);
       nextDistrict.memories.push(id);
       memory.district = updates.district;
