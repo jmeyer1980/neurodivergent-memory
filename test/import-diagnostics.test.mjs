@@ -548,3 +548,46 @@ test("snapshot import rejects external file paths unless explicitly enabled", as
     fs.rmSync(externalDir, { recursive: true, force: true });
   }
 });
+
+test("import_memories accepts Windows snapshot paths when only the drive-letter casing differs", async (t) => {
+  if (process.platform !== "win32") {
+    t.skip("Windows-specific path normalization regression");
+    return;
+  }
+
+  const server = startServer();
+  const snapshotPath = writeSnapshotFile(server.tempDir, "mixed-drive-letter.json", {
+    nextMemoryId: 2,
+    memories: {
+      memory_1: {
+        id: "memory_1",
+        name: "Mixed Drive Letter",
+        archetype: "scholar",
+        district: "logical_analysis",
+        content: "mixed drive letter import",
+        traits: ["analytical"],
+        concerns: ["accuracy"],
+        connections: [],
+        tags: ["topic:test", "scope:project", "kind:reference", "layer:architecture"],
+        created: "2026-04-01T00:00:00.000Z",
+        last_accessed: "2026-04-01T00:00:00.000Z",
+        access_count: 1,
+        intensity: 0.5,
+      },
+    },
+  });
+
+  const mixedCaseDrivePath = `${snapshotPath[0].toLowerCase()}${snapshotPath.slice(1)}`;
+
+  try {
+    const response = await server.callTool(75, "import_memories", {
+      file_path: mixedCaseDrivePath,
+      dry_run: true,
+    });
+
+    assert.equal(isToolError(response), false, resultText(response));
+    assert.match(resultText(response), /Would import: 1/);
+  } finally {
+    server.stop();
+  }
+});
