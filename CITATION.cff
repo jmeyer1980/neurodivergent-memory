@@ -1,0 +1,26 @@
+cff-version: 1.2.0
+title: neurodivergent-memory MCP Server
+message: >-
+  If you use this software, please cite it using the metadata from this file.
+type: software
+authors:
+  - name: "jmeyer1980"
+    orcid: "https://orcid.org/0009-0000-8815-0844"
+repository-code: "https://github.com/jmeyer1980/neurodivergent-memory"
+url: "https://github.com/jmeyer1980/neurodivergent-memory"
+abstract: >-
+  A Model Context Protocol server for persistent knowledge graphs designed around
+  neurodivergent thinking patterns. It organizes memories into five districts,
+  ranks retrieval with Okapi BM25, and supports graph traversal, scoped
+  retrieval, import diagnostics, and agent-oriented memory workflows.
+keywords:
+  - model context protocol
+  - mcp
+  - knowledge graph
+  - memory
+  - neurodivergent
+  - bm25
+  - agent workflows
+license: MIT
+version: 0.3.0
+date-released: "2026-04-03"
