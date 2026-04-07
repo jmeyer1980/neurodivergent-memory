@@ -1927,8 +1927,17 @@ class NeurodivergentMemory {
         `Use one of the configured districts: ${valid}.`,
       );
     }
+    let normalizedProjectId: string | undefined = undefined;
     if (project_id !== undefined) {
-      validateProjectId(project_id);
+      normalizedProjectId = normalizeProjectId(project_id);
+      if (!normalizedProjectId) {
+        throw createNMError(
+          NM_ERRORS.INPUT_VALIDATION_FAILED,
+          `Invalid project_id after normalization: ${project_id}`,
+          "project_id must normalize to a non-empty canonical value."
+        );
+      }
+      validateProjectId(normalizedProjectId);
     }
 
     const id = `memory_${this.nextMemoryId++}`;
@@ -1986,7 +1995,6 @@ class NeurodivergentMemory {
     }
 
     const resolvedEpistemicStatus = resolveDefaultEpistemicStatus(district, tags, epistemic_status);
-    const normalizedProjectId = normalizeProjectId(project_id);
 
     const memory: MemoryNPC = {
       id,
