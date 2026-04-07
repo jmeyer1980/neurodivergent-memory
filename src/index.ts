@@ -1566,6 +1566,100 @@ class NeurodivergentMemory {
     return recentCandidates;
   }
 
+  private getTopKRecentlyTouchedMemories(memories: MemoryNPC[], limit: number): MemoryNPC[] {
+    if (limit <= 0 || memories.length === 0) {
+      return [];
+    }
+
+    return memories
+      .slice()
+      .sort((left, right) => {
+        const leftTouched = Math.max(left.created.getTime(), left.last_accessed.getTime());
+        const rightTouched = Math.max(right.created.getTime(), right.last_accessed.getTime());
+        if (rightTouched !== leftTouched) {
+          return rightTouched - leftTouched;
+        }
+
+        const lastAccessedDifference = right.last_accessed.getTime() - left.last_accessed.getTime();
+        if (lastAccessedDifference !== 0) {
+          return lastAccessedDifference;
+        }
+
+        const createdDifference = right.created.getTime() - left.created.getTime();
+        if (createdDifference !== 0) {
+          return createdDifference;
+        }
+
+        return left.id.localeCompare(right.id);
+      })
+      .slice(0, limit);
+  }
+
+  private compactRecoveryLabel(memory: MemoryNPC): string {
+    const primaryTokens = (memory.name.match(/[A-Za-z0-9_#-]+/g) ?? []).slice(0, 3);
+    if (primaryTokens.length > 0) {
+      return primaryTokens.join(" ");
+    }
+
+    const fallbackTokens = (memory.content.match(/[A-Za-z0-9_#-]+/g) ?? []).slice(0, 3);
+    if (fallbackTokens.length > 0) {
+      return fallbackTokens.join(" ");
+    }
+
+    return memory.id;
+  }
+
+  private buildConnectMemoriesRecovery(missingMemoryId: string, role: "source" | "target", requestedIds: string[]): string {
+    const roleLabel = role === "source" ? "source" : "target";
+    const baseRecovery = `List or search memories first, then retry with a valid ${roleLabel} memory ID.`;
+    const excludeIds = new Set(requestedIds);
+    const limit = 3;
+    const survivingMemory = requestedIds
+      .map((memoryId) => this.memories[memoryId])
+      .find((memory): memory is MemoryNPC => Boolean(memory));
+
+    let scopeUsed = "global";
+    let hintMemories: MemoryNPC[] = [];
+
+    if (survivingMemory?.project_id) {
+      const projectRecent = this.getTopKRecentlyTouchedMemories(
+        Object.values(this.memories).filter(
+          (memory) => memory.project_id === survivingMemory.project_id && !excludeIds.has(memory.id),
+        ),
+        limit,
+      );
+
+      hintMemories = projectRecent;
+      scopeUsed = `project:${survivingMemory.project_id}`;
+
+      if (hintMemories.length < limit) {
+        const seenIds = new Set(hintMemories.map((memory) => memory.id));
+        const globalFallback = this.getTopKRecentlyTouchedMemories(
+          Object.values(this.memories).filter(
+            (memory) => !excludeIds.has(memory.id) && !seenIds.has(memory.id),
+          ),
+          limit - hintMemories.length,
+        );
+
+        if (globalFallback.length > 0) {
+          hintMemories = hintMemories.concat(globalFallback);
+          scopeUsed = `${scopeUsed}+global_fallback`;
+        }
+      }
+    } else {
+      hintMemories = this.getTopKRecentlyTouchedMemories(
+        Object.values(this.memories).filter((memory) => !excludeIds.has(memory.id)),
+        limit,
+      );
+    }
+
+    const hintLines = hintMemories.length > 0
+      ? hintMemories.map((memory) => `- ${memory.id} — ${this.compactRecoveryLabel(memory)}`).join("\n")
+      : "- none available";
+
+    return `${baseRecovery}\nrecent_memory_hints:\n${hintLines}\nscope_used: ${scopeUsed}\ntip: connect_memories requires exact memory_id strings; retry with one of the hinted IDs if it matches your intended memory.\nmissing_id: ${missingMemoryId}`;
+  }
+
   private exactTokenSequenceMatch(leftTokens: string[], rightTokens: string[]): boolean {
     if (leftTokens.length !== rightTokens.length) {
       return false;
@@ -2131,14 +2225,14 @@ class NeurodivergentMemory {
       throw createNMError(
         NM_ERRORS.MEMORY_NOT_FOUND,
         `Memory not found: ${memoryId1}`,
-        "List or search memories first, then retry with a valid source memory ID.",
+        this.buildConnectMemoriesRecovery(memoryId1, "source", [memoryId1, memoryId2]),
       );
     }
     if (!this.memories[memoryId2]) {
       throw createNMError(
         NM_ERRORS.MEMORY_NOT_FOUND,
         `Memory not found: ${memoryId2}`,
-        "List or search memories first, then retry with a valid target memory ID.",
+        this.buildConnectMemoriesRecovery(memoryId2, "target", [memoryId1, memoryId2]),
       );
     }
 
