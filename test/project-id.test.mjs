@@ -329,6 +329,29 @@ test("search_memories surfaces partial matches for single-token typo misses", as
   }
 });
 
+test("search_memories truncates partial match ID lists for high-fanout candidates", async () => {
+  const server = startServer();
+
+  try {
+    for (let index = 0; index < 6; index += 1) {
+      await server.callTool(100 + index, "store_memory", {
+        content: `Shared topic memory ${index + 1}`,
+        district: "practical_execution",
+        tags: ["topic:shared", "scope:session", "kind:task", "layer:implementation"],
+      });
+    }
+
+    const noMatch = await server.callTool(110, "search_memories", {
+      query: "topik",
+    });
+
+    assert.match(resultText(noMatch), /Partial matches:/);
+    assert.match(resultText(noMatch), /topic \(similarity=0\.800, field=tag, memories=memory_1, memory_2, memory_3, memory_4, memory_5 \(\+1 more\), projects=\(none\)\)/);
+  } finally {
+    server.stop();
+  }
+});
+
 test("startup tolerates WAL updates targeting unknown districts", async () => {
   const snapshot = {
     nextMemoryId: 2,

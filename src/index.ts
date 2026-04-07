@@ -274,7 +274,9 @@ interface SearchPartialMatch {
   similarity_score: number;
   matched_field: "project_id" | "tag" | "name" | "district";
   memory_ids: string[];
+  memory_ids_total: number;
   project_ids: string[];
+  project_ids_total: number;
 }
 
 interface ToolDescriptor {
@@ -1160,8 +1162,16 @@ class NeurodivergentMemory {
 
   private scoreSearchAssistCandidate(query: string, candidate: string): number | undefined {
     const normalizedQuery = this.normalizeSearchAssistToken(query);
+    if (!normalizedQuery) {
+      return undefined;
+    }
+
+    return this.scoreSearchAssistCandidateNormalized(normalizedQuery, candidate);
+  }
+
+  private scoreSearchAssistCandidateNormalized(normalizedQuery: string, candidate: string): number | undefined {
     const normalizedCandidate = this.normalizeSearchAssistToken(candidate);
-    if (!normalizedQuery || !normalizedCandidate || normalizedQuery === normalizedCandidate) {
+    if (!normalizedCandidate || normalizedQuery === normalizedCandidate) {
       return undefined;
     }
 
@@ -1176,6 +1186,7 @@ class NeurodivergentMemory {
   }
 
   private collectSingleTokenPartialMatches(query: string, candidates: MemoryNPC[]): SearchPartialMatch[] {
+    const maxIdsPerMatch = 5;
     const trimmedQuery = query.trim();
     if (trimmedQuery.length === 0 || /\s/.test(trimmedQuery)) {
       return [];
@@ -1245,13 +1256,20 @@ class NeurodivergentMemory {
     return Array.from(matches.values())
       .sort((left, right) => right.similarity_score - left.similarity_score || left.candidate.localeCompare(right.candidate))
       .slice(0, 5)
-      .map(match => ({
-        candidate: match.candidate,
-        similarity_score: match.similarity_score,
-        matched_field: match.matched_field,
-        memory_ids: Array.from(match.memory_ids).sort(),
-        project_ids: Array.from(match.project_ids).sort(),
-      }));
+      .map((match) => {
+        const memoryIds = Array.from(match.memory_ids).sort();
+        const projectIds = Array.from(match.project_ids).sort();
+
+        return {
+          candidate: match.candidate,
+          similarity_score: match.similarity_score,
+          matched_field: match.matched_field,
+          memory_ids: memoryIds.slice(0, maxIdsPerMatch),
+          memory_ids_total: memoryIds.length,
+          project_ids: projectIds.slice(0, maxIdsPerMatch),
+          project_ids_total: projectIds.length,
+        };
+      });
   }
 
   storageDiagnostics(): StorageDiagnostics {
@@ -4864,8 +4882,12 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           : "";
         const partialMatchesLine = searchResult.partial_matches && searchResult.partial_matches.length > 0
           ? `\n\nPartial matches:\n${searchResult.partial_matches.map((match) => {
+              const memoryOverflow = match.memory_ids_total - match.memory_ids.length;
+              const projectOverflow = match.project_ids_total - match.project_ids.length;
+              const memorySuffix = memoryOverflow > 0 ? ` (+${memoryOverflow} more)` : "";
+              const projectSuffix = projectOverflow > 0 ? ` (+${projectOverflow} more)` : "";
               const projectIds = match.project_ids.length > 0 ? match.project_ids.join(", ") : "(none)";
-              return `• ${match.candidate} (similarity=${match.similarity_score.toFixed(3)}, field=${match.matched_field}, memories=${match.memory_ids.join(", ")}, projects=${projectIds})`;
+              return `• ${match.candidate} (similarity=${match.similarity_score.toFixed(3)}, field=${match.matched_field}, memories=${match.memory_ids.join(", ")}${memorySuffix}, projects=${projectIds}${projectSuffix})`;
             }).join("\n")}`
           : "";
 
