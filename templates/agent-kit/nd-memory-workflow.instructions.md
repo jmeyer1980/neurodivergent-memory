@@ -14,7 +14,7 @@ Use neurodivergent-memory MCP as a persistent memory layer for development sessi
 
 ## Cadence
 
-- Ensure you claim, or add your moniker to, the author-role for memories you create or update to build a clear personal memory graph.
+- For every `store_memory` and `update_memory` call, set or preserve `agent_id` as the authorship field so memory ownership stays consistent across agents and sessions.
 - Store key decisions, constraints, and blockers during work.
 - Store the why behind decisions, not just the fact that a decision happened.
 - Store the task plan in MCP memory before implementation, even when the plan is simple or already present in the prompt.
