@@ -1576,7 +1576,21 @@ class NeurodivergentMemory {
       .sort((left, right) => {
         const leftTouched = Math.max(left.created.getTime(), left.last_accessed.getTime());
         const rightTouched = Math.max(right.created.getTime(), right.last_accessed.getTime());
-        return rightTouched - leftTouched;
+        if (rightTouched !== leftTouched) {
+          return rightTouched - leftTouched;
+        }
+
+        const lastAccessedDifference = right.last_accessed.getTime() - left.last_accessed.getTime();
+        if (lastAccessedDifference !== 0) {
+          return lastAccessedDifference;
+        }
+
+        const createdDifference = right.created.getTime() - left.created.getTime();
+        if (createdDifference !== 0) {
+          return createdDifference;
+        }
+
+        return left.id.localeCompare(right.id);
       })
       .slice(0, limit);
   }
