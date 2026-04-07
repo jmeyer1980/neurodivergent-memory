@@ -1202,7 +1202,7 @@ class NeurodivergentMemory {
         return;
       }
 
-      const similarity = this.scoreSearchAssistCandidate(normalizedQuery, candidate);
+      const similarity = this.scoreSearchAssistCandidateNormalized(normalizedQuery, candidate);
       if (similarity === undefined) {
         return;
       }
