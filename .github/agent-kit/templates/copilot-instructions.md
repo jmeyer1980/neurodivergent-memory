@@ -92,26 +92,29 @@ The graph is restored on server startup — no data is lost between restarts.
 1. Call `memory_stats` to see how many memories exist.
 2. Use `search_memories` with a broad query to locate relevant prior context.
 3. Check whether recent memories already explain the rationale or durable principle behind the task, not just the last execution step.
-4. Apply the canonical tag schema when calling `store_memory`.
-5. Connect new memories to related existing ones with `connect_memories`.
-6. Use `traverse_from` or `related_to` for associative retrieval rather than repeated searches.
-7. **No execution-only memory exemption**: if a memory says what changed, it should also say why it changed or link to a memory that does.
+4. Create or update an MCP-backed plan memory before substantial implementation begins.
+5. Apply the canonical tag schema when calling `store_memory`.
+6. Connect new plan, task-thread, and reasoning memories to related existing ones with `connect_memories`.
+7. Prefer `update_memory` when continuing an active slice instead of writing duplicate high-similarity task logs.
+8. Use `traverse_from` or `related_to` for associative retrieval rather than repeated searches.
+9. Record validation and final hand-off updates on the active task thread before ending the session.
+10. **No execution-only memory exemption**: if a memory says what changed, it should also say why it changed or link to a memory that does.
+11. **Repo notes are not a substitute**: local notes, scratch docs, or TODO files do not replace MCP plan/progress/validation/handoff writes.
+
+## Sub-agent coordination
+
+- Delegate bounded work such as issue scanning, codebase exploration, plan drafting, focused validation, or self-review to sub-agents when available and clearly scoped.
+- If sub-agents are unavailable, unsupported, or not worth the overhead, continue locally rather than blocking the core workflow.
 
 ---
 
 ## Reusable Agent Customization Kit
 
-This repository includes a project-agnostic customization pack at `.github/agent-kit/`.
-
-Future agents should import templates from `.github/agent-kit/templates/` into the target project's standard locations:
+In repositories initialized with `npx neurodivergent-memory init-agent-kit`, the customization kit is installed directly into the target project's standard locations:
 
 1. `.github/agents/<agent-name>.agent.md`
 2. `.github/instructions/nd-memory-workflow.instructions.md`
 3. `.github/prompts/setup-nd-memory.prompt.md`
+4. `.github/copilot-instructions.md`
 
-Before configuring installation behavior, ask the user to choose one policy:
-
-- `prompt-first` (default)
-- `auto-setup`
-
-Do not silently install neurodivergent-memory MCP unless the user confirms `auto-setup`.
+If any of these files are missing or need to be refreshed, re-run `npx neurodivergent-memory init-agent-kit` instead of assuming `.github/agent-kit/templates/` exists in the target repository.

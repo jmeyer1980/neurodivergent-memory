@@ -10,6 +10,7 @@ Use neurodivergent-memory MCP as a persistent memory layer for development sessi
 1. Start with `memory_stats`.
 2. Run `search_memories` for the active task.
 3. Use retrieved context before proposing or changing code.
+4. Create or update the MCP-backed plan memory before substantial execution.
 
 ## Cadence
 
@@ -17,11 +18,19 @@ Use neurodivergent-memory MCP as a persistent memory layer for development sessi
 - Store key decisions, constraints, and blockers during work.
 - Store the why behind decisions, not just the fact that a decision happened.
 - Store the task plan in MCP memory before implementation, even when the plan is simple or already present in the prompt.
+- Prefer `update_memory` when continuing an active slice instead of emitting duplicate high-similarity task logs.
+- Record progress, validation, and hand-off writes on the active task thread.
+- Require `connect_memories` whenever you create a new plan or task-thread node.
 - For substantial implementation work, pair `practical_execution` updates with a `logical_analysis` or `creative_synthesis` memory when the durable principle should outlive the task log.
 - If the source memory is noisy, distill it so the stable reasoning survives separately from the implementation detail.
 - Connect related memories to reduce future rediscovery.
 - Keep tags canonical: `topic:X`, `scope:X`, `kind:X`, `layer:X`.
 - Do not treat repo memory files or local notes as substitutes for MCP memory writes.
+
+## Sub-agent guidance
+
+- Delegate bounded work such as issue scanning, repo exploration, plan drafting, focused validation, or self-review to sub-agents when they are available and the task boundary is clear.
+- If sub-agents are unavailable, unsupported, or not worth the overhead, continue locally and do not treat their absence as a blocker.
 
 ## Minimum MCP sequence
 
