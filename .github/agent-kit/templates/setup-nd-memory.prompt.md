@@ -13,10 +13,13 @@ Inputs:
 
 Execution steps:
 
-1. Copy templates from `.github/agent-kit/templates/` into project customization locations:
-- Agent template -> `.github/agents/<target-name>.agent.md`
-- Instructions template -> `.github/instructions/nd-memory-workflow.instructions.md`
-- Prompt template (this file) -> `.github/prompts/setup-nd-memory.prompt.md`
+1. Confirm that the agent kit has been installed via `npx neurodivergent-memory init-agent-kit`. The following files should be present in the target repository:
+- `.github/agents/<target-name>.agent.md`
+- `.github/instructions/nd-memory-workflow.instructions.md`
+- `.github/prompts/setup-nd-memory.prompt.md`
+- `.github/copilot-instructions.md`
+
+   If any are missing, instruct the user to run `npx neurodivergent-memory init-agent-kit` (or `npx neurodivergent-memory init-agent-kit --force` to overwrite).
 
 2. Ask the user which installation policy to use for neurodivergent-memory MCP:
 - `prompt-first`
