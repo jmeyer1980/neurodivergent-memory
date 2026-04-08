@@ -694,14 +694,23 @@ Useful options:
 
 - `--target <path>` installs into a different repository root.
 - `--brand auto|copilot|claude` chooses the target platform layout. `auto` detects an existing Claude project (`CLAUDE.md` or `.claude/`) and otherwise defaults to Copilot-compatible `.github/...` installation.
+- `--import-dir auto|copilot|claude|cline|zendesk|<repo-relative-path>` chooses where the mirrored raw agent-kit bundle is written inside the target repo. `auto` keeps the brand-native default.
 - `--dry-run` shows what would be copied without writing files.
 - `--force` overwrites existing destination files.
 - `--mode prompt-first|auto-setup` records the intended install policy in command output while leaving template wording unchanged.
 
 Brand-specific install targets:
 
-- `copilot`: installs into standard GitHub Copilot repository locations such as `.github/agents/`, `.github/instructions/`, `.github/prompts/`, `.github/copilot-instructions.md`, plus `.github/agent-kit/templates/`.
-- `claude`: installs a Claude-native project layout with `CLAUDE.md`, `.claude/rules/`, `.claude/agents/`, plus a mirrored source bundle under `.claude/agent-kit/templates/`.
+- `copilot`: installs into standard GitHub Copilot repository locations such as `.github/agents/`, `.github/instructions/`, `.github/prompts/`, `.github/copilot-instructions.md`, plus a mirrored source bundle in the selected import directory. The default import directory is `.github/agent-kit/templates/`.
+- `claude`: installs a Claude-native project layout with `CLAUDE.md`, `.claude/rules/`, `.claude/agents/`, plus a mirrored source bundle in the selected import directory. The default import directory is `.claude/agent-kit/templates/`.
+
+Common import-directory presets:
+
+- `copilot` → `.github/agent-kit/templates/`
+- `claude` → `.claude/agent-kit/templates/`
+- `cline` → `.clinerules/agent-kit/templates/`
+- `zendesk` → `.zendesk/agent-kit/templates/`
+- any other repo-relative path is accepted as long as it stays inside the target repository
 
 If you accidentally pass `.github` or `.claude` as the target path, the installer normalizes that selection back to the repository root and then creates the correct nested structure for the chosen brand.
 

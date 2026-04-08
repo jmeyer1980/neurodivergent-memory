@@ -24,6 +24,8 @@ npx neurodivergent-memory@latest init-agent-kit
 
 This copies the packaged templates into the target repository's `.github/...` locations. Use `--dry-run` to preview and `--force` to overwrite existing files.
 
+To change where the mirrored raw kit is placed, pass `--import-dir auto|copilot|claude|cline|zendesk|<repo-relative-path>`. The generated live files still install in their native brand locations.
+
 The authoring source in this repository stays under `.github/agent-kit/templates/`. The live destination `.github/agents/neurodivergent-agent.agent.md` should be treated as generated consumer state, not as a tracked source file.
 
 ## Import Targets
@@ -34,6 +36,7 @@ The authoring source in this repository stays under `.github/agent-kit/templates
 - Shared instructions: `.github/instructions/nd-memory-workflow.instructions.md`
 - Prompts: `.github/prompts/<prompt-name>.prompt.md`
 - Copilot bootstrap: `.github/copilot-instructions.md`
+- Optional mirrored kit bundle: `.github/agent-kit/templates/`, `.claude/agent-kit/templates/`, `.clinerules/agent-kit/templates/`, `.zendesk/agent-kit/templates/`, or another repo-local import path chosen during `init-agent-kit`
 
 ## Required Setup Handshake
 

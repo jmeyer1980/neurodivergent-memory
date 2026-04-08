@@ -15,7 +15,7 @@ Select one actionable issue and complete it end-to-end using the neurodivergent-
 Workflow (execute in order):
 1. Discover context:
 - Open the provided issues URL/scope.
-- Call memory tools to list existing memories.
+- Start with `memory_stats`, then use `search_memories` or equivalent retrieval to find relevant context.
 - Read relevant memories before choosing work.
 
 2. Choose issue:
@@ -27,18 +27,23 @@ Workflow (execute in order):
 3. Research and plan:
 - Inspect the codebase and related files.
 - Create a concise implementation plan.
+- Before substantial execution, create or update an MCP-backed plan memory on the active task thread.
+- If you create a new plan or task-thread node, connect it with `connect_memories`.
+- Prefer `update_memory` when continuing an active slice instead of creating duplicate high-similarity task logs.
 - Store your reasoning, plan, assumptions, and the durable principle behind the work as memories throughout the process.
-- Memory cadence is as needed, but frequent enough to maintain clarity and continuity.
 
 4. Implement:
 - Make the required code changes.
-- Keep storing progress notes and decisions to memory while working.
+- Keep storing progress notes and decisions on the same active task thread while working.
 - Do not leave execution-only logs; each substantial implementation memory should explain why the change exists or connect to a reasoning memory that does.
+- Do not treat repo-local notes, scratch docs, or TODO files as substitutes for MCP plan, progress, validation, or handoff writes.
+- If sub-agents are available and the work is bounded, delegate deliberately scoped tasks such as issue scanning, repo exploration, focused validation, or self-review. If sub-agents are unavailable or not worth the overhead, continue locally.
 - Run available validation (tests/lint/build) relevant to the change.
 
 5. Self-review:
 - Review your own diff for correctness, regressions, and style consistency.
 - If issues are found, fix them before proceeding.
+- Record validation results on the active task thread before concluding.
 
 6. Finalize:
 - Create a draft pull request first with a concise summary, testing notes, and issue linkage.
@@ -62,6 +67,7 @@ Output format:
 Rules:
 - Use the neurodivergent-memory MCP server continuously for memories (decisions, progress, blockers, outcomes).
 - Favor connective synthesis over raw task logging: link implementation memories back to reusable reasoning whenever possible.
+- Use `connect_memories` for new plan or task-thread nodes and prefer `update_memory` when continuing an existing slice.
 - Include a final handoff memory at the end of the run.
 - Do not claim completion if tests fail or required checks are not run.
 - If blocked by permissions (push/PR/review), report the blocker and provide exact next commands/actions.

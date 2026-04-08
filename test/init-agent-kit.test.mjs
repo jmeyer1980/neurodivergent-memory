@@ -161,3 +161,37 @@ test("init-agent-kit packaged install excludes non-template files like README.md
     fs.rmSync(tempRepo, { recursive: true, force: true });
   }
 });
+
+test("init-agent-kit mirrors the raw kit into a custom import directory", () => {
+  const tempRepo = makeTempRepo();
+
+  try {
+    const result = runInitAgentKit([
+      "--target",
+      tempRepo,
+      "--import-dir",
+      ".clinerules/agent-kit/templates",
+    ]);
+
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(result.stdout, /Kit import directory: \.clinerules\/agent-kit\/templates/);
+    assert.equal(fs.existsSync(path.join(tempRepo, ".clinerules", "agent-kit", "templates", "neurodivergent-agent.agent.md")), true);
+    assert.equal(fs.existsSync(path.join(tempRepo, ".github", "agents", "neurodivergent-agent.agent.md")), true);
+    assert.equal(fs.existsSync(path.join(tempRepo, ".github", "agent-kit", "templates", "neurodivergent-agent.agent.md")), false);
+  } finally {
+    fs.rmSync(tempRepo, { recursive: true, force: true });
+  }
+});
+
+test("init-agent-kit rejects import directories outside the target repository", () => {
+  const tempRepo = makeTempRepo();
+
+  try {
+    const result = runInitAgentKit(["--target", tempRepo, "--import-dir", "..\\outside"]);
+
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /--import-dir must resolve to a directory inside the target repository/i);
+  } finally {
+    fs.rmSync(tempRepo, { recursive: true, force: true });
+  }
+});

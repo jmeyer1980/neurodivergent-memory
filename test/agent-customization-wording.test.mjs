@@ -41,6 +41,9 @@ test("workflow instruction and issue prompt require explicit why capture", () =>
   assert.match(workflow, /durable principle/i);
   assert.match(prompt, /durable principle behind the work/i);
   assert.match(prompt, /Do not leave execution-only logs/i);
+  assert.match(prompt, /Prefer `update_memory` when continuing an active slice/i);
+  assert.match(prompt, /Do not treat repo-local notes, scratch docs, or TODO files as substitutes/i);
+  assert.match(prompt, /If sub-agents are available and the work is bounded/i);
 });
 
 test("source templates stay aligned with packaged agent-kit copies", () => {

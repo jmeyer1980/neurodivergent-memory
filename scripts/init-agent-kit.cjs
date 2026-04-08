@@ -32,6 +32,14 @@ async function promptBrand() {
   throw new Error("Unsupported brand. Use auto, copilot, or claude.");
 }
 
+async function promptImportDir() {
+  const answer = await promptUser(
+    "Preferred kit import directory? [auto/copilot/claude/cline/zendesk/<repo-relative-path>] (default: auto): "
+  );
+
+  return answer.trim() || "auto";
+}
+
 async function main() {
   if (!fs.existsSync(cliEntrypoint)) {
     console.error(
@@ -44,6 +52,7 @@ async function main() {
   const passthroughArgs = process.argv.slice(2);
   let targetDir = null;
   let brand = null;
+  let importDir = null;
 
   for (let index = 0; index < passthroughArgs.length; index += 1) {
     const arg = passthroughArgs[index];
@@ -54,6 +63,11 @@ async function main() {
     }
     if (arg === "--brand") {
       brand = passthroughArgs[index + 1] ?? null;
+      index += 1;
+      continue;
+    }
+    if (arg === "--import-dir") {
+      importDir = passthroughArgs[index + 1] ?? null;
       index += 1;
     }
   }
@@ -69,6 +83,10 @@ async function main() {
     if (!targetDir) targetDir = defaultTarget;
   }
 
+  if (!importDir) {
+    importDir = await promptImportDir();
+  }
+
   const normalizedArgs = [];
   let skipNext = false;
   for (let index = 0; index < passthroughArgs.length; index += 1) {
@@ -77,14 +95,14 @@ async function main() {
       continue;
     }
     const arg = passthroughArgs[index];
-    if (arg === "--target" || arg === "--brand") {
+    if (arg === "--target" || arg === "--brand" || arg === "--import-dir") {
       skipNext = true;
       continue;
     }
     normalizedArgs.push(arg);
   }
 
-  normalizedArgs.push("--brand", brand, "--target", targetDir);
+  normalizedArgs.push("--brand", brand, "--target", targetDir, "--import-dir", importDir);
 
   const result = spawnSync(process.execPath, [cliEntrypoint, "init-agent-kit", ...normalizedArgs], {
     cwd: repoRoot,

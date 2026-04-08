@@ -62,12 +62,20 @@ const SERVER_START_TIME_ISO = new Date().toISOString();
 type AgentKitInstallMode = "prompt-first" | "auto-setup";
 type AgentKitBrand = "auto" | "copilot" | "claude";
 
+const AGENT_KIT_IMPORT_DIR_PRESETS = {
+  copilot: path.join(".github", "agent-kit", "templates"),
+  claude: path.join(".claude", "agent-kit", "templates"),
+  cline: path.join(".clinerules", "agent-kit", "templates"),
+  zendesk: path.join(".zendesk", "agent-kit", "templates"),
+} as const;
+
 interface AgentKitCliOptions {
   targetRoot: string;
   dryRun: boolean;
   force: boolean;
   mode: AgentKitInstallMode;
   brand: AgentKitBrand;
+  importDir?: string;
 }
 
 interface AgentKitInstallEntry {
@@ -80,6 +88,7 @@ interface ResolvedAgentKitInstall {
   brand: Exclude<AgentKitBrand, "auto">;
   targetRoot: string;
   installEntries: AgentKitInstallEntry[];
+  importDirectoryDisplayPath: string;
   normalizationNote?: string;
 }
 
@@ -89,6 +98,7 @@ function parseAgentKitCliOptions(argv: string[]): AgentKitCliOptions {
   let force = false;
   let mode: AgentKitInstallMode = "prompt-first";
   let brand: AgentKitBrand = "auto";
+  let importDir: string | undefined;
 
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
@@ -132,6 +142,16 @@ function parseAgentKitCliOptions(argv: string[]): AgentKitCliOptions {
         break;
       }
 
+      case "--import-dir": {
+        const value = argv[index + 1];
+        if (!value) {
+          throw new Error("Missing value for --import-dir");
+        }
+        importDir = value;
+        index += 1;
+        break;
+      }
+
       default:
         throw new Error(`Unknown argument: ${arg}`);
     }
@@ -143,6 +163,7 @@ function parseAgentKitCliOptions(argv: string[]): AgentKitCliOptions {
     force,
     mode,
     brand,
+    importDir,
   };
 }
 
@@ -197,7 +218,42 @@ function stripMarkdownFrontmatter(content: string): string {
   return content.slice(closingMarkerIndex + 5).replace(/^\s+/, "");
 }
 
-function buildClaudeRootInstructions(): string {
+function getDefaultAgentKitImportDirectory(brand: Exclude<AgentKitBrand, "auto">): string {
+  return brand === "claude"
+    ? AGENT_KIT_IMPORT_DIR_PRESETS.claude
+    : AGENT_KIT_IMPORT_DIR_PRESETS.copilot;
+}
+
+function resolveAgentKitImportDirectory(
+  targetRoot: string,
+  brand: Exclude<AgentKitBrand, "auto">,
+  requestedImportDir?: string,
+): { absolutePath: string; displayPath: string } {
+  const trimmedInput = requestedImportDir?.trim() ?? "";
+  let relativeImportDir = trimmedInput;
+
+  if (!relativeImportDir || relativeImportDir.toLowerCase() === "auto") {
+    relativeImportDir = getDefaultAgentKitImportDirectory(brand);
+  } else {
+    const presetKey = relativeImportDir.toLowerCase() as keyof typeof AGENT_KIT_IMPORT_DIR_PRESETS;
+    if (presetKey in AGENT_KIT_IMPORT_DIR_PRESETS) {
+      relativeImportDir = AGENT_KIT_IMPORT_DIR_PRESETS[presetKey];
+    }
+  }
+
+  const absolutePath = path.resolve(targetRoot, relativeImportDir);
+  const relativePath = path.relative(targetRoot, absolutePath);
+  if (relativePath.startsWith("..") || path.isAbsolute(relativePath)) {
+    throw new Error("--import-dir must resolve to a directory inside the target repository.");
+  }
+
+  return {
+    absolutePath,
+    displayPath: relativePath === "" ? "." : relativePath.split(path.sep).join("/"),
+  };
+}
+
+function buildClaudeRootInstructions(importDirectoryDisplayPath: string): string {
   return [
     "# neurodivergent-memory Agent Kit for Claude Code",
     "",
@@ -211,7 +267,7 @@ function buildClaudeRootInstructions(): string {
     "",
     "- Project subagents live in `.claude/agents/`.",
     "- Shared project rules live in `.claude/rules/`.",
-    "- The packaged source kit is mirrored under `.claude/agent-kit/templates/`.",
+    `- The packaged source kit is mirrored under \`${importDirectoryDisplayPath}\`.`,
     "",
     "If you need to refresh these files, rerun `npx neurodivergent-memory@latest init-agent-kit --brand claude` from the repository root.",
   ].join("\n");
@@ -328,7 +384,7 @@ function normalizeAgentKitTargetRoot(targetRoot: string, brand: AgentKitBrand): 
 }
 
 function resolveCopilotAgentKitTargetRelativePaths(templateFileName: string): string[] {
-  const relativeTargetPaths = [path.join(".github", "agent-kit", "templates", templateFileName)];
+  const relativeTargetPaths: string[] = [];
 
   if (templateFileName === "copilot-instructions.md") {
     relativeTargetPaths.push(path.join(".github", "copilot-instructions.md"));
@@ -353,24 +409,39 @@ function resolveCopilotAgentKitTargetRelativePaths(templateFileName: string): st
   return relativeTargetPaths;
 }
 
-function buildCopilotAgentKitInstallEntries(sourceRoot: string, targetRoot: string): AgentKitInstallEntry[] {
-  const entries = resolveAgentKitSourceFileNames(sourceRoot)
-    .flatMap((fileName) =>
-      resolveCopilotAgentKitTargetRelativePaths(fileName).map((relativeTargetPath) => ({
-        sourcePath: path.join(sourceRoot, fileName),
-        targetPath: path.join(targetRoot, relativeTargetPath),
-      }) satisfies AgentKitInstallEntry),
-    );
+function buildCopilotAgentKitInstallEntries(
+  sourceRoot: string,
+  targetRoot: string,
+  importDirectoryAbsolutePath: string,
+): AgentKitInstallEntry[] {
+  const entriesByPath = new Map<string, AgentKitInstallEntry>();
 
-  entries.sort((left, right) => left.targetPath.localeCompare(right.targetPath));
-  return entries;
+  for (const fileName of resolveAgentKitSourceFileNames(sourceRoot)) {
+    const sourcePath = path.join(sourceRoot, fileName);
+    entriesByPath.set(path.join(importDirectoryAbsolutePath, fileName), {
+      sourcePath,
+      targetPath: path.join(importDirectoryAbsolutePath, fileName),
+    });
+
+    for (const relativeTargetPath of resolveCopilotAgentKitTargetRelativePaths(fileName)) {
+      const targetPath = path.join(targetRoot, relativeTargetPath);
+      entriesByPath.set(targetPath, { sourcePath, targetPath });
+    }
+  }
+
+  return [...entriesByPath.values()].sort((left, right) => left.targetPath.localeCompare(right.targetPath));
 }
 
-function buildClaudeAgentKitInstallEntries(sourceRoot: string, targetRoot: string): AgentKitInstallEntry[] {
+function buildClaudeAgentKitInstallEntries(
+  sourceRoot: string,
+  targetRoot: string,
+  importDirectoryAbsolutePath: string,
+  importDirectoryDisplayPath: string,
+): AgentKitInstallEntry[] {
   const templateFileNames = resolveAgentKitSourceFileNames(sourceRoot);
   const entries: AgentKitInstallEntry[] = templateFileNames.map((fileName) => ({
     sourcePath: path.join(sourceRoot, fileName),
-    targetPath: path.join(targetRoot, ".claude", "agent-kit", "templates", fileName),
+    targetPath: path.join(importDirectoryAbsolutePath, fileName),
   }));
 
   const workflowSource = readAgentKitTemplate(sourceRoot, "nd-memory-workflow.instructions.md");
@@ -379,7 +450,7 @@ function buildClaudeAgentKitInstallEntries(sourceRoot: string, targetRoot: strin
   entries.push(
     {
       targetPath: path.join(targetRoot, "CLAUDE.md"),
-      content: buildClaudeRootInstructions(),
+      content: buildClaudeRootInstructions(importDirectoryDisplayPath),
     },
     {
       targetPath: path.join(targetRoot, ".claude", "rules", "nd-memory-workflow.md"),
@@ -405,14 +476,29 @@ function buildClaudeAgentKitInstallEntries(sourceRoot: string, targetRoot: strin
 
 function resolveAgentKitInstall(sourceRoot: string, options: AgentKitCliOptions): ResolvedAgentKitInstall {
   const normalized = normalizeAgentKitTargetRoot(options.targetRoot, options.brand);
+  const importDirectory = resolveAgentKitImportDirectory(
+    normalized.targetRoot,
+    normalized.brand,
+    options.importDir,
+  );
   const installEntries = normalized.brand === "claude"
-    ? buildClaudeAgentKitInstallEntries(sourceRoot, normalized.targetRoot)
-    : buildCopilotAgentKitInstallEntries(sourceRoot, normalized.targetRoot);
+    ? buildClaudeAgentKitInstallEntries(
+      sourceRoot,
+      normalized.targetRoot,
+      importDirectory.absolutePath,
+      importDirectory.displayPath,
+    )
+    : buildCopilotAgentKitInstallEntries(
+      sourceRoot,
+      normalized.targetRoot,
+      importDirectory.absolutePath,
+    );
 
   return {
     brand: normalized.brand,
     targetRoot: normalized.targetRoot,
     installEntries,
+    importDirectoryDisplayPath: importDirectory.displayPath,
     normalizationNote: normalized.normalizationNote,
   };
 }
@@ -429,12 +515,16 @@ function runInitAgentKit(argv: string[]): number {
 
   console.log(`Installing neurodivergent-memory agent kit into ${resolvedInstall.targetRoot}`);
   console.log(`Agent brand: ${resolvedInstall.brand}`);
+  console.log(`Kit import directory: ${resolvedInstall.importDirectoryDisplayPath}`);
   console.log(`Install policy: ${options.mode}`);
   console.log(`Dry run: ${options.dryRun ? "yes" : "no"}`);
   console.log(`Overwrite existing files: ${options.force ? "yes" : "no"}`);
   if (resolvedInstall.normalizationNote) {
     console.log(resolvedInstall.normalizationNote);
   }
+  console.log(
+    "Import directory presets: auto, copilot, claude, cline, zendesk, or any repo-relative path.",
+  );
 
   let copiedCount = 0;
   let skippedCount = 0;
