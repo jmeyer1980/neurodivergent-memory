@@ -24,6 +24,14 @@ npx neurodivergent-memory@latest init-agent-kit
 
 This copies the packaged templates into the target repository's `.github/...` locations. Use `--dry-run` to preview and `--force` to overwrite existing files.
 
+To install into a Claude Code project layout instead, use:
+
+```bash
+npx neurodivergent-memory@latest init-agent-kit --brand claude
+```
+
+That writes Claude-native entrypoints such as `CLAUDE.md`, `.claude/rules/`, and `.claude/agents/`, while still mirroring the raw source templates under `.claude/agent-kit/templates/`.
+
 The authoring source in this repository stays under `.github/agent-kit/templates/`. The live destination `.github/agents/neurodivergent-agent.agent.md` should be treated as generated consumer state, not as a tracked source file.
 
 ## Import Targets
@@ -34,6 +42,9 @@ The authoring source in this repository stays under `.github/agent-kit/templates
 - Shared instructions: `.github/instructions/nd-memory-workflow.instructions.md`
 - Prompts: `.github/prompts/<prompt-name>.prompt.md`
 - Copilot bootstrap: `.github/copilot-instructions.md`
+- Claude project instructions: `CLAUDE.md` or `.claude/CLAUDE.md`
+- Claude project rules: `.claude/rules/*.md`
+- Claude project subagents: `.claude/agents/*.md`
 
 ## Required Setup Handshake
 
