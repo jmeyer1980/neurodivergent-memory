@@ -4039,6 +4039,14 @@ server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
 function buildRegisteredToolDescriptors(): ToolDescriptor[] {
   return [
       {
+        name: "mirror_list_tools",
+        description: "Mirror of list_tools for weak-client recovery. Returns available tools for discovery even if native MCP tools/list discovery is unavailable.",
+        inputSchema: {
+          type: "object",
+          properties: {}
+        }
+      },
+      {
         name: "list_tools",
         description: "Return a callable mirror of the server tool catalog for clients that cannot reliably use native MCP tool discovery.",
         inputSchema: {
@@ -4587,6 +4595,7 @@ function summarizeToolParameters(inputSchema: Record<string, unknown>): ToolPara
 
 function toolWhenToUseHint(toolName: string): string {
   switch (toolName) {
+    case "mirror_list_tools":
     case "list_tools":
       return "Use when a client cannot access or reason over native MCP tools/list discovery.";
     case "search_memories":
@@ -4637,6 +4646,15 @@ function buildListToolsMirror(): { tools: Array<Record<string, unknown>> } {
   };
 }
 
+function buildListToolsResult() {
+  return {
+    content: [{
+      type: "text" as const,
+      text: JSON.stringify(buildListToolsMirror(), null, 2),
+    }],
+  };
+}
+
 /**
  * Handler that lists available memory tools.
  * Exposes tools for storing, retrieving, connecting, searching, traversing, and managing memories.
@@ -4653,6 +4671,9 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
  */
 server.setRequestHandler(CallToolRequestSchema, async (request) => {
   switch (request.params.name) {
+    case "mirror_list_tools": {
+      return buildListToolsResult();
+    }
     case "store_memory": {
       const { content, district, tags = [], emotional_valence, intensity = 0.5, agent_id, project_id, epistemic_status } = request.params.arguments as any;
 
@@ -5191,12 +5212,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     }
 
     case "list_tools": {
-      return {
-        content: [{
-          type: "text",
-          text: JSON.stringify(buildListToolsMirror(), null, 2),
-        }],
-      };
+      return buildListToolsResult();
     }
 
     case "prepare_memory_city_context": {
@@ -5335,7 +5351,18 @@ async function main() {
   await server.connect(transport);
 }
 
-main().catch((error) => {
-  logger.fatal({ err: error }, "Server failed to start");
-  process.exit(1);
-});
+function isDirectExecution(): boolean {
+  const entryPoint = process.argv[1];
+  if (!entryPoint) {
+    return false;
+  }
+
+  return path.resolve(entryPoint) === fileURLToPath(import.meta.url);
+}
+
+if (isDirectExecution()) {
+  main().catch((error) => {
+    logger.fatal({ err: error }, "Server failed to start");
+    process.exit(1);
+  });
+}
