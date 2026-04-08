@@ -125,3 +125,39 @@ test("init-agent-kit skips existing files unless --force is used", () => {
     fs.rmSync(tempRepo, { recursive: true, force: true });
   }
 });
+
+// Additional tests for normalization and template filtering
+
+test("init-agent-kit normalizes a .github target and keeps auto brand detection on Claude", () => {
+  const tempRepo = makeTempRepo();
+  const githubDir = path.join(tempRepo, ".github");
+  fs.mkdirSync(path.join(tempRepo, ".claude"), { recursive: true });
+  fs.mkdirSync(githubDir, { recursive: true });
+
+  try {
+    const result = runInitAgentKit(["--target", githubDir, "--brand", "auto"]);
+
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(result.stdout, /Normalized .*\.github .* repository root/i);
+    assert.match(result.stdout, /Agent brand: claude/);
+    assert.equal(fs.existsSync(path.join(tempRepo, "CLAUDE.md")), true);
+    assert.equal(fs.existsSync(path.join(tempRepo, ".claude", "agents", "neurodivergent-memory-coordinator.md")), true);
+    assert.equal(fs.existsSync(path.join(tempRepo, ".github", "agents", "neurodivergent-agent.agent.md")), false);
+  } finally {
+    fs.rmSync(tempRepo, { recursive: true, force: true });
+  }
+});
+
+test("init-agent-kit packaged install excludes non-template files like README.md", () => {
+  const tempRepo = makeTempRepo();
+
+  try {
+    const result = runInitAgentKit(["--target", tempRepo]);
+
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(fs.existsSync(path.join(tempRepo, ".github", "agents", "neurodivergent-agent.agent.md")), true);
+    assert.equal(fs.existsSync(path.join(tempRepo, "README.md")), false);
+  } finally {
+    fs.rmSync(tempRepo, { recursive: true, force: true });
+  }
+});
