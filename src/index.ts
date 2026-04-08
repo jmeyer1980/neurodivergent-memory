@@ -163,10 +163,19 @@ function resolveAgentKitSourceRoot(): string {
   );
 }
 
+function isAgentKitTemplateFileName(fileName: string): boolean {
+  return (
+    fileName === "copilot-instructions.md" ||
+    fileName.endsWith(".agent.md") ||
+    fileName.endsWith(".instructions.md") ||
+    fileName.endsWith(".prompt.md")
+  );
+}
+
 function resolveAgentKitSourceFileNames(sourceRoot: string): string[] {
   return fs
     .readdirSync(sourceRoot, { withFileTypes: true })
-    .filter(entry => entry.isFile())
+    .filter(entry => entry.isFile() && isAgentKitTemplateFileName(entry.name))
     .map(entry => entry.name)
     .sort((left, right) => left.localeCompare(right));
 }
@@ -212,7 +221,6 @@ function buildClaudeBootstrapRule(sharedBootstrap: string): string {
   return [
     "# neurodivergent-memory bootstrap for Claude Code",
     "",
-    "Claude Code reads `CLAUDE.md` and `.claude/rules/*.md` rather than `.github/copilot-instructions.md`.",
     "This rule preserves the shared memory-server bootstrap guidance from the packaged agent kit while installing it into Claude Code's native project layout.",
     "",
     "---",
@@ -277,13 +285,16 @@ function buildClaudeTemplateAgent(): string {
 }
 
 function detectAgentKitBrand(targetRoot: string): Exclude<AgentKitBrand, "auto"> {
-  if (
-    fs.existsSync(path.join(targetRoot, "CLAUDE.md")) ||
-    fs.existsSync(path.join(targetRoot, ".claude"))
-  ) {
-    return "claude";
+  // Check for CLAUDE.md or .claude in the targetRoot or its parent (for normalized .github/.claude)
+  const candidates = [targetRoot, path.dirname(targetRoot)];
+  for (const dir of candidates) {
+    if (
+      fs.existsSync(path.join(dir, "CLAUDE.md")) ||
+      fs.existsSync(path.join(dir, ".claude"))
+    ) {
+      return "claude";
+    }
   }
-
   return "copilot";
 }
 
@@ -292,18 +303,20 @@ function normalizeAgentKitTargetRoot(targetRoot: string, brand: AgentKitBrand): 
   const basename = path.basename(resolvedTargetRoot).toLowerCase();
 
   if (basename === ".claude") {
+    const resolvedBrand = brand === "auto" ? detectAgentKitBrand(resolvedTargetRoot) : brand;
     return {
       targetRoot: path.dirname(resolvedTargetRoot),
-      brand: brand === "copilot" ? "copilot" : "claude",
-      normalizationNote: `Normalized ${resolvedTargetRoot} to repository root ${path.dirname(resolvedTargetRoot)} for Claude-style installation.`,
+      brand: resolvedBrand,
+      normalizationNote: `Normalized ${resolvedTargetRoot} to repository root ${path.dirname(resolvedTargetRoot)} for ${resolvedBrand === "claude" ? "Claude-style" : "Copilot-style"} installation.`,
     };
   }
 
   if (basename === ".github") {
+    const resolvedBrand = brand === "auto" ? detectAgentKitBrand(resolvedTargetRoot) : (brand === "claude" ? "claude" : "copilot");
     return {
       targetRoot: path.dirname(resolvedTargetRoot),
-      brand: brand === "claude" ? "claude" : "copilot",
-      normalizationNote: `Normalized ${resolvedTargetRoot} to repository root ${path.dirname(resolvedTargetRoot)} for Copilot-style installation.`,
+      brand: resolvedBrand,
+      normalizationNote: `Normalized ${resolvedTargetRoot} to repository root ${path.dirname(resolvedTargetRoot)} for ${resolvedBrand === "claude" ? "Claude-style" : "Copilot-style"} installation.`,
     };
   }
 
