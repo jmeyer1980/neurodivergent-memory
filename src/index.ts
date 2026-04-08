@@ -221,6 +221,7 @@ function buildClaudeBootstrapRule(sharedBootstrap: string): string {
   return [
     "# neurodivergent-memory bootstrap for Claude Code",
     "",
+    "Claude Code reads `CLAUDE.md` and `.claude/rules/*.md` rather than `.github/copilot-instructions.md`.",
     "This rule preserves the shared memory-server bootstrap guidance from the packaged agent kit while installing it into Claude Code's native project layout.",
     "",
     "---",
