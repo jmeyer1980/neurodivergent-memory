@@ -693,11 +693,17 @@ npx neurodivergent-memory@latest init-agent-kit
 Useful options:
 
 - `--target <path>` installs into a different repository root.
+- `--brand auto|copilot|claude` chooses the target platform layout. `auto` detects an existing Claude project (`CLAUDE.md` or `.claude/`) and otherwise defaults to Copilot-compatible `.github/...` installation.
 - `--dry-run` shows what would be copied without writing files.
 - `--force` overwrites existing destination files.
 - `--mode prompt-first|auto-setup` records the intended install policy in command output while leaving template wording unchanged.
 
-The installer copies templates into standard customization locations such as `.github/agents/`, `.github/instructions/`, `.github/prompts/`, and `.github/copilot-instructions.md`.
+Brand-specific install targets:
+
+- `copilot`: installs into standard GitHub Copilot repository locations such as `.github/agents/`, `.github/instructions/`, `.github/prompts/`, `.github/copilot-instructions.md`, plus `.github/agent-kit/templates/`.
+- `claude`: installs a Claude-native project layout with `CLAUDE.md`, `.claude/rules/`, `.claude/agents/`, plus a mirrored source bundle under `.claude/agent-kit/templates/`.
+
+If you accidentally pass `.github` or `.claude` as the target path, the installer normalizes that selection back to the repository root and then creates the correct nested structure for the chosen brand.
 
 ### Authoring source and generated files
 
@@ -713,6 +719,9 @@ The right target directories vary by agent platform. Use whatever location your 
 - `.github/instructions/` for shared instructions
 - `.github/prompts/` for prompts
 - `.github/` root for `copilot-instructions.md`
+- `CLAUDE.md` or `.claude/CLAUDE.md` for Claude Code project instructions
+- `.claude/rules/` for Claude Code shared project rules
+- `.claude/agents/` for Claude Code project subagents
 
 ### Install policy handshake
 

@@ -60,17 +60,27 @@ const SERVER_PACKAGE_INFO = resolveServerPackageInfo();
 const SERVER_START_TIME_ISO = new Date().toISOString();
 
 type AgentKitInstallMode = "prompt-first" | "auto-setup";
+type AgentKitBrand = "auto" | "copilot" | "claude";
 
 interface AgentKitCliOptions {
   targetRoot: string;
   dryRun: boolean;
   force: boolean;
   mode: AgentKitInstallMode;
+  brand: AgentKitBrand;
 }
 
 interface AgentKitInstallEntry {
-  sourcePath: string;
   targetPath: string;
+  sourcePath?: string;
+  content?: string;
+}
+
+interface ResolvedAgentKitInstall {
+  brand: Exclude<AgentKitBrand, "auto">;
+  targetRoot: string;
+  installEntries: AgentKitInstallEntry[];
+  normalizationNote?: string;
 }
 
 function parseAgentKitCliOptions(argv: string[]): AgentKitCliOptions {
@@ -78,6 +88,7 @@ function parseAgentKitCliOptions(argv: string[]): AgentKitCliOptions {
   let dryRun = false;
   let force = false;
   let mode: AgentKitInstallMode = "prompt-first";
+  let brand: AgentKitBrand = "auto";
 
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
@@ -111,6 +122,16 @@ function parseAgentKitCliOptions(argv: string[]): AgentKitCliOptions {
         break;
       }
 
+      case "--brand": {
+        const value = argv[index + 1];
+        if (value !== "auto" && value !== "copilot" && value !== "claude") {
+          throw new Error("Invalid value for --brand. Use auto, copilot, or claude.");
+        }
+        brand = value;
+        index += 1;
+        break;
+      }
+
       default:
         throw new Error(`Unknown argument: ${arg}`);
     }
@@ -121,6 +142,7 @@ function parseAgentKitCliOptions(argv: string[]): AgentKitCliOptions {
     dryRun,
     force,
     mode,
+    brand,
   };
 }
 
@@ -141,8 +163,170 @@ function resolveAgentKitSourceRoot(): string {
   );
 }
 
-function resolveAgentKitTargetRelativePaths(templateFileName: string): string[] {
-  // Always install to .github/agent-kit/templates/ so post-install references remain valid.
+function isAgentKitTemplateFileName(fileName: string): boolean {
+  return (
+    fileName === "copilot-instructions.md" ||
+    fileName.endsWith(".agent.md") ||
+    fileName.endsWith(".instructions.md") ||
+    fileName.endsWith(".prompt.md")
+  );
+}
+
+function resolveAgentKitSourceFileNames(sourceRoot: string): string[] {
+  return fs
+    .readdirSync(sourceRoot, { withFileTypes: true })
+    .filter(entry => entry.isFile() && isAgentKitTemplateFileName(entry.name))
+    .map(entry => entry.name)
+    .sort((left, right) => left.localeCompare(right));
+}
+
+function readAgentKitTemplate(sourceRoot: string, fileName: string): string {
+  return fs.readFileSync(path.join(sourceRoot, fileName), "utf8");
+}
+
+function stripMarkdownFrontmatter(content: string): string {
+  if (!content.startsWith("---\n")) {
+    return content;
+  }
+
+  const closingMarkerIndex = content.indexOf("\n---\n", 4);
+  if (closingMarkerIndex === -1) {
+    return content;
+  }
+
+  return content.slice(closingMarkerIndex + 5).replace(/^\s+/, "");
+}
+
+function buildClaudeRootInstructions(): string {
+  return [
+    "# neurodivergent-memory Agent Kit for Claude Code",
+    "",
+    "This project was initialized with the neurodivergent-memory agent kit for Claude Code.",
+    "Claude Code loads `CLAUDE.md` at session start, so this file imports the installed workflow rules that replace the Copilot-specific `.github/...` discovery model.",
+    "",
+    "@.claude/rules/neurodivergent-memory-bootstrap.md",
+    "@.claude/rules/nd-memory-workflow.md",
+    "",
+    "## Installed Claude assets",
+    "",
+    "- Project subagents live in `.claude/agents/`.",
+    "- Shared project rules live in `.claude/rules/`.",
+    "- The packaged source kit is mirrored under `.claude/agent-kit/templates/`.",
+    "",
+    "If you need to refresh these files, rerun `npx neurodivergent-memory@latest init-agent-kit --brand claude` from the repository root.",
+  ].join("\n");
+}
+
+function buildClaudeBootstrapRule(sharedBootstrap: string): string {
+  return [
+    "# neurodivergent-memory bootstrap for Claude Code",
+    "",
+    "This rule preserves the shared memory-server bootstrap guidance from the packaged agent kit while installing it into Claude Code's native project layout.",
+    "",
+    "---",
+    "",
+    sharedBootstrap,
+  ].join("\n");
+}
+
+function buildClaudeWorkflowRule(sharedWorkflow: string): string {
+  return [
+    "# Memory-driven workflow defaults",
+    "",
+    "This rule adapts the packaged workflow instructions to Claude Code's project rule system.",
+    "",
+    stripMarkdownFrontmatter(sharedWorkflow),
+  ].join("\n");
+}
+
+function buildClaudeCoordinatorAgent(): string {
+  return [
+    "---",
+    "name: neurodivergent-memory-coordinator",
+    "description: Memory-driven development coordinator for repositories using neurodivergent-memory MCP. Use for issue execution, validation, implementation, and handoffs.",
+    "tools: Agent, Bash, Read, Grep, Glob, Edit, Write",
+    "model: inherit",
+    "memory: project",
+    "---",
+    "",
+    "You are a Memory-Driven Development Coordinator for this repository.",
+    "",
+    "Follow the project guidance loaded from `CLAUDE.md` and `.claude/rules/` before acting.",
+    "",
+    "When invoked:",
+    "1. Start with `memory_stats` and `search_memories`.",
+    "2. Build or update an MCP-backed plan before substantial execution.",
+    "3. Preserve rationale-first memory capture: record what changed, why it changed, and any durable principle learned.",
+    "4. Treat validation and handoff as required completion steps, not optional cleanup.",
+    "5. If the task is bounded and benefits from isolation, use a subagent deliberately rather than drifting scope in the main thread.",
+    "",
+    "Keep changes minimal, validate them, and update memory before concluding.",
+  ].join("\n");
+}
+
+function buildClaudeTemplateAgent(): string {
+  return [
+    "---",
+    "name: memory-driven-template",
+    "description: Lightweight memory-driven Claude subagent template for focused execution with neurodivergent-memory MCP.",
+    "tools: Bash, Read, Grep, Glob, Edit, Write",
+    "model: inherit",
+    "memory: project",
+    "---",
+    "",
+    "You are a focused implementation subagent working in a repository that uses neurodivergent-memory MCP.",
+    "",
+    "Baseline expectations:",
+    "- Pull relevant memory context before changing code.",
+    "- Keep the active task thread updated with plan, progress, validation, and handoff.",
+    "- Do not leave execution-only logs; capture the why or link back to a reasoning memory.",
+    "- Validate your changes before returning control.",
+  ].join("\n");
+}
+
+function detectAgentKitBrand(targetRoot: string): Exclude<AgentKitBrand, "auto"> {
+  // Check for CLAUDE.md or .claude in the targetRoot or its parent (for normalized .github/.claude)
+  const candidates = [targetRoot, path.dirname(targetRoot)];
+  for (const dir of candidates) {
+    if (
+      fs.existsSync(path.join(dir, "CLAUDE.md")) ||
+      fs.existsSync(path.join(dir, ".claude"))
+    ) {
+      return "claude";
+    }
+  }
+  return "copilot";
+}
+
+function normalizeAgentKitTargetRoot(targetRoot: string, brand: AgentKitBrand): { targetRoot: string; brand: Exclude<AgentKitBrand, "auto">; normalizationNote?: string } {
+  const resolvedTargetRoot = path.resolve(targetRoot);
+  const basename = path.basename(resolvedTargetRoot).toLowerCase();
+
+  if (basename === ".claude") {
+    const resolvedBrand = brand === "auto" ? detectAgentKitBrand(resolvedTargetRoot) : brand;
+    return {
+      targetRoot: path.dirname(resolvedTargetRoot),
+      brand: resolvedBrand,
+      normalizationNote: `Normalized ${resolvedTargetRoot} to repository root ${path.dirname(resolvedTargetRoot)} for ${resolvedBrand === "claude" ? "Claude-style" : "Copilot-style"} installation.`,
+    };
+  }
+
+  if (basename === ".github") {
+    const resolvedBrand = brand === "auto" ? detectAgentKitBrand(resolvedTargetRoot) : (brand === "claude" ? "claude" : "copilot");
+    return {
+      targetRoot: path.dirname(resolvedTargetRoot),
+      brand: resolvedBrand,
+      normalizationNote: `Normalized ${resolvedTargetRoot} to repository root ${path.dirname(resolvedTargetRoot)} for ${resolvedBrand === "claude" ? "Claude-style" : "Copilot-style"} installation.`,
+    };
+  }
+
+  return {
+    targetRoot: resolvedTargetRoot,
+    brand: brand === "auto" ? detectAgentKitBrand(resolvedTargetRoot) : brand,
+  };
+}
+
+function resolveCopilotAgentKitTargetRelativePaths(templateFileName: string): string[] {
   const relativeTargetPaths = [path.join(".github", "agent-kit", "templates", templateFileName)];
 
   if (templateFileName === "copilot-instructions.md") {
@@ -168,14 +352,11 @@ function resolveAgentKitTargetRelativePaths(templateFileName: string): string[] 
   return relativeTargetPaths;
 }
 
-function buildAgentKitInstallEntries(sourceRoot: string, targetRoot: string): AgentKitInstallEntry[] {
-  // Each source template maps to one or more target paths (agent-kit/templates/ plus its standard location).
-  const entries = fs
-    .readdirSync(sourceRoot, { withFileTypes: true })
-    .filter(entry => entry.isFile())
-    .flatMap((entry) =>
-      resolveAgentKitTargetRelativePaths(entry.name).map((relativeTargetPath) => ({
-        sourcePath: path.join(sourceRoot, entry.name),
+function buildCopilotAgentKitInstallEntries(sourceRoot: string, targetRoot: string): AgentKitInstallEntry[] {
+  const entries = resolveAgentKitSourceFileNames(sourceRoot)
+    .flatMap((fileName) =>
+      resolveCopilotAgentKitTargetRelativePaths(fileName).map((relativeTargetPath) => ({
+        sourcePath: path.join(sourceRoot, fileName),
         targetPath: path.join(targetRoot, relativeTargetPath),
       }) satisfies AgentKitInstallEntry),
     );
@@ -184,19 +365,75 @@ function buildAgentKitInstallEntries(sourceRoot: string, targetRoot: string): Ag
   return entries;
 }
 
+function buildClaudeAgentKitInstallEntries(sourceRoot: string, targetRoot: string): AgentKitInstallEntry[] {
+  const templateFileNames = resolveAgentKitSourceFileNames(sourceRoot);
+  const entries: AgentKitInstallEntry[] = templateFileNames.map((fileName) => ({
+    sourcePath: path.join(sourceRoot, fileName),
+    targetPath: path.join(targetRoot, ".claude", "agent-kit", "templates", fileName),
+  }));
+
+  const workflowSource = readAgentKitTemplate(sourceRoot, "nd-memory-workflow.instructions.md");
+  const bootstrapSource = readAgentKitTemplate(sourceRoot, "copilot-instructions.md");
+
+  entries.push(
+    {
+      targetPath: path.join(targetRoot, "CLAUDE.md"),
+      content: buildClaudeRootInstructions(),
+    },
+    {
+      targetPath: path.join(targetRoot, ".claude", "rules", "nd-memory-workflow.md"),
+      content: buildClaudeWorkflowRule(workflowSource),
+    },
+    {
+      targetPath: path.join(targetRoot, ".claude", "rules", "neurodivergent-memory-bootstrap.md"),
+      content: buildClaudeBootstrapRule(bootstrapSource),
+    },
+    {
+      targetPath: path.join(targetRoot, ".claude", "agents", "neurodivergent-memory-coordinator.md"),
+      content: buildClaudeCoordinatorAgent(),
+    },
+    {
+      targetPath: path.join(targetRoot, ".claude", "agents", "memory-driven-template.md"),
+      content: buildClaudeTemplateAgent(),
+    },
+  );
+
+  entries.sort((left, right) => left.targetPath.localeCompare(right.targetPath));
+  return entries;
+}
+
+function resolveAgentKitInstall(sourceRoot: string, options: AgentKitCliOptions): ResolvedAgentKitInstall {
+  const normalized = normalizeAgentKitTargetRoot(options.targetRoot, options.brand);
+  const installEntries = normalized.brand === "claude"
+    ? buildClaudeAgentKitInstallEntries(sourceRoot, normalized.targetRoot)
+    : buildCopilotAgentKitInstallEntries(sourceRoot, normalized.targetRoot);
+
+  return {
+    brand: normalized.brand,
+    targetRoot: normalized.targetRoot,
+    installEntries,
+    normalizationNote: normalized.normalizationNote,
+  };
+}
+
 function runInitAgentKit(argv: string[]): number {
   const options = parseAgentKitCliOptions(argv);
   const sourceRoot = resolveAgentKitSourceRoot();
-  const installEntries = buildAgentKitInstallEntries(sourceRoot, options.targetRoot);
+  const resolvedInstall = resolveAgentKitInstall(sourceRoot, options);
+  const installEntries = resolvedInstall.installEntries;
 
   if (installEntries.length === 0) {
     throw new Error(`No installable templates were found in ${sourceRoot}`);
   }
 
-  console.log(`Installing neurodivergent-memory agent kit into ${options.targetRoot}`);
+  console.log(`Installing neurodivergent-memory agent kit into ${resolvedInstall.targetRoot}`);
+  console.log(`Agent brand: ${resolvedInstall.brand}`);
   console.log(`Install policy: ${options.mode}`);
   console.log(`Dry run: ${options.dryRun ? "yes" : "no"}`);
   console.log(`Overwrite existing files: ${options.force ? "yes" : "no"}`);
+  if (resolvedInstall.normalizationNote) {
+    console.log(resolvedInstall.normalizationNote);
+  }
 
   let copiedCount = 0;
   let skippedCount = 0;
@@ -212,7 +449,13 @@ function runInitAgentKit(argv: string[]): number {
 
     if (!options.dryRun) {
       fs.mkdirSync(path.dirname(entry.targetPath), { recursive: true });
-      fs.copyFileSync(entry.sourcePath, entry.targetPath);
+      if (typeof entry.content === "string") {
+        fs.writeFileSync(entry.targetPath, entry.content, "utf8");
+      } else if (typeof entry.sourcePath === "string") {
+        fs.copyFileSync(entry.sourcePath, entry.targetPath);
+      } else {
+        throw new Error(`Install entry for ${entry.targetPath} had neither sourcePath nor content.`);
+      }
     }
 
     copiedCount += 1;
