@@ -1,16 +1,10 @@
-// Ensure all async resources are closed after tests
-import process from "node:process";
-// Last-resort: force exit after all tests complete
-test("cleanup", async () => {
-  setTimeout(() => process.exit(0), 100);
-});
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { spawn } from "node:child_process";
-import { suggestToolName } from "../build/index.js";
+import { suggestToolName } from "../build/core/tool-suggest.js";
 
 function startServer(options = {}) {
   const tempDir = options.tempDir ?? fs.mkdtempSync(path.join(os.tmpdir(), "ndm-mirror-list-tools-test-"));
@@ -28,6 +22,7 @@ function startServer(options = {}) {
   child.stdout.setEncoding("utf8");
   let buffer = "";
   const pending = new Map();
+  let stopped = false;
   child.stdout.on("data", (chunk) => {
     buffer += chunk;
     let newline = buffer.indexOf("\n");
@@ -67,28 +62,37 @@ function startServer(options = {}) {
       })}\n`);
     });
   }
-  function stop() {
+  async function stop() {
+    if (stopped) {
+      return;
+    }
+
+    stopped = true;
     child.kill();
+    if (child.exitCode === null && child.signalCode === null) {
+      await new Promise((resolve) => {
+        child.once("exit", resolve);
+      });
+    }
     fs.rmSync(tempDir, { recursive: true, force: true });
   }
   return { callTool, stop };
 }
 
-test("mirror_list_tools returns available tools for weak-client recovery", async () => {
+function mirrorPayload(response) {
+  return JSON.parse(response.result?.content?.[0]?.text ?? "{}");
+}
+
+test("mirror_list_tools returns available tools for weak-client recovery", { timeout: 10000 }, async () => {
   const server = startServer();
-  const timeout = setTimeout(() => {
-    server.stop();
-    throw new Error("Test timed out: mirror_list_tools did not respond in time");
-  }, 10000); // 10 seconds
   try {
     const response = await server.callTool(1, "mirror_list_tools", {});
-    clearTimeout(timeout);
-    assert.ok(response.result);
-    assert.ok(Array.isArray(response.result.tools));
-    assert.ok(response.result.tools.length > 0);
-    assert.ok(response.result.tools.some(t => t.name === "mirror_list_tools"));
+    const payload = mirrorPayload(response);
+    assert.ok(Array.isArray(payload.tools));
+    assert.ok(payload.tools.length > 0);
+    assert.ok(payload.tools.some((tool) => tool.name === "mirror_list_tools"));
   } finally {
-    server.stop();
+    await server.stop();
   }
 });
 

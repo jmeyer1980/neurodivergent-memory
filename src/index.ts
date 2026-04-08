@@ -21,57 +21,6 @@ import {
   ListPromptsRequestSchema,
   GetPromptRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
-
-
-// Tool mirror for weak-client recovery
-const MIRROR_TOOL_LIST = [
-  {
-    name: "mirror_list_tools",
-    description: "Mirror of list_tools for weak-client recovery. Returns available tools for discovery even if the main tool is unavailable.",
-    inputSchema: {},
-  },
-];
-
-
-// Typo-tolerant tool name search assist (exported for test)
-export function suggestToolName(tools: { name: string }[], query: string): string | undefined {
-  const normalizedQuery = query
-    .normalize("NFKC")
-    .trim()
-    .toLocaleLowerCase("en")
-    .replace(/[^a-z0-9]+/g, "_")
-    .replace(/^_+|_+$/g, "");
-  let bestMatch: string | undefined;
-  let bestDistance = 3;
-  for (const tool of tools) {
-    const normalizedTool = tool.name
-      .normalize("NFKC")
-      .trim()
-      .toLocaleLowerCase("en")
-      .replace(/[^a-z0-9]+/g, "_")
-      .replace(/^_+|_+$/g, "");
-    if (normalizedTool === normalizedQuery) return tool.name;
-    const maxDistance = Math.max(normalizedQuery.length, normalizedTool.length) <= 4 ? 1 : 2;
-    const distance = boundedLevenshteinDistance(normalizedQuery, normalizedTool, maxDistance);
-    if (distance !== undefined && distance < bestDistance) {
-      bestDistance = distance;
-      bestMatch = tool.name;
-    }
-  }
-  return bestMatch;
-}
-
-
-// Example: Add to tool registration logic in your server setup (pseudo-code):
-// server.registerTool({
-//   name: "mirror_list_tools",
-//   description: "Mirror of list_tools for weak-client recovery. Returns available tools for discovery even if the main tool is unavailable.",
-//   inputSchema: {},
-//   handler: async () => {
-//     return { tools: [...MIRROR_TOOL_LIST] };
-//   },
-// });
-// Typo-tolerant tool name search assist
 import * as crypto from "crypto";
 import * as fs from "fs";
 import * as path from "path";
@@ -4090,6 +4039,14 @@ server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
 function buildRegisteredToolDescriptors(): ToolDescriptor[] {
   return [
       {
+        name: "mirror_list_tools",
+        description: "Mirror of list_tools for weak-client recovery. Returns available tools for discovery even if native MCP tools/list discovery is unavailable.",
+        inputSchema: {
+          type: "object",
+          properties: {}
+        }
+      },
+      {
         name: "list_tools",
         description: "Return a callable mirror of the server tool catalog for clients that cannot reliably use native MCP tool discovery.",
         inputSchema: {
@@ -4638,6 +4595,7 @@ function summarizeToolParameters(inputSchema: Record<string, unknown>): ToolPara
 
 function toolWhenToUseHint(toolName: string): string {
   switch (toolName) {
+    case "mirror_list_tools":
     case "list_tools":
       return "Use when a client cannot access or reason over native MCP tools/list discovery.";
     case "search_memories":
@@ -4673,27 +4631,28 @@ function toolWhenToUseHint(toolName: string): string {
 }
 
 function buildListToolsMirror(): { tools: Array<Record<string, unknown>> } {
-  const toolList = buildRegisteredToolDescriptors().map((tool) => {
-    const parameterSummary = summarizeToolParameters(tool.inputSchema);
-    return {
-      name: tool.name,
-      short_purpose: tool.description,
-      required_params: parameterSummary.required,
-      optional_params: parameterSummary.optional,
-      alternative_required_params: parameterSummary.alternative_required_params,
-      when_to_use: toolWhenToUseHint(tool.name),
-    };
-  });
-  // Ensure the mirror tool is included
-  toolList.push({
-    name: "mirror_list_tools",
-    short_purpose: "Mirror of list_tools for weak-client recovery. Returns available tools for discovery even if the main tool is unavailable.",
-    required_params: [],
-    optional_params: [],
-    alternative_required_params: undefined,
-    when_to_use: toolWhenToUseHint("mirror_list_tools"),
-  });
-  return { tools: toolList };
+  return {
+    tools: buildRegisteredToolDescriptors().map((tool) => {
+      const parameterSummary = summarizeToolParameters(tool.inputSchema);
+      return {
+        name: tool.name,
+        short_purpose: tool.description,
+        required_params: parameterSummary.required,
+        optional_params: parameterSummary.optional,
+        alternative_required_params: parameterSummary.alternative_required_params,
+        when_to_use: toolWhenToUseHint(tool.name),
+      };
+    }),
+  };
+}
+
+function buildListToolsResult() {
+  return {
+    content: [{
+      type: "text" as const,
+      text: JSON.stringify(buildListToolsMirror(), null, 2),
+    }],
+  };
 }
 
 /**
@@ -4712,10 +4671,9 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
  */
 server.setRequestHandler(CallToolRequestSchema, async (request) => {
   switch (request.params.name) {
-        case "mirror_list_tools": {
-          // Return the tool mirror for weak-client recovery
-          return buildListToolsMirror();
-        }
+    case "mirror_list_tools": {
+      return buildListToolsResult();
+    }
     case "store_memory": {
       const { content, district, tags = [], emotional_valence, intensity = 0.5, agent_id, project_id, epistemic_status } = request.params.arguments as any;
 
@@ -5254,12 +5212,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     }
 
     case "list_tools": {
-      return {
-        content: [{
-          type: "text",
-          text: JSON.stringify(buildListToolsMirror(), null, 2),
-        }],
-      };
+      return buildListToolsResult();
     }
 
     case "prepare_memory_city_context": {
@@ -5398,7 +5351,18 @@ async function main() {
   await server.connect(transport);
 }
 
-main().catch((error) => {
-  logger.fatal({ err: error }, "Server failed to start");
-  process.exit(1);
-});
+function isDirectExecution(): boolean {
+  const entryPoint = process.argv[1];
+  if (!entryPoint) {
+    return false;
+  }
+
+  return path.resolve(entryPoint) === fileURLToPath(import.meta.url);
+}
+
+if (isDirectExecution()) {
+  main().catch((error) => {
+    logger.fatal({ err: error }, "Server failed to start");
+    process.exit(1);
+  });
+}
