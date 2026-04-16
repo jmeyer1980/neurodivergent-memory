@@ -168,8 +168,101 @@ jobs:
           echo "rc_version=$rc_version" >> "$GITHUB_OUTPUT"
           echo "release_tag=$release_tag" >> "$GITHUB_OUTPUT"
 
+      - name: Validate Azure DevOps extension manifest (RC gate)
+        id: validate_azdo_manifest_rc
+        run: |
+          manifest_globs="${AZDO_EXTENSION_MANIFEST_GLOBS:-vss-extension.json}"
+
+          if ! compgen -G "$manifest_globs" > /dev/null; then
+            echo "No extension manifest matched '$manifest_globs'; skipping RC Marketplace validation."
+            echo "found=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "found=true" >> "$GITHUB_OUTPUT"
+
+          node <<'NODE'
+          const fs = require('node:fs');
+          const path = require('node:path');
+
+          const manifestPath = 'vss-extension.json';
+          const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
+          const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+
+          manifest.version = pkg.version;
+          manifest.publisher = process.env.AZDO_MARKETPLACE_PUBLISHER_ID || manifest.publisher;
+
+          const allowedCategories = new Set([
+            'Azure Repos',
+            'Azure Boards',
+            'Azure Pipelines',
+            'Azure Test Plans',
+            'Azure Artifacts'
+          ]);
+
+          const errors = [];
+
+          if (!Array.isArray(manifest.categories) || manifest.categories.length === 0) {
+            errors.push('Manifest must include at least one category.');
+          } else {
+            for (const category of manifest.categories) {
+              if (!allowedCategories.has(category)) {
+                errors.push(`Unsupported category '${category}'. Allowed: ${Array.from(allowedCategories).join(', ')}`);
+              }
+            }
+          }
+
+          const iconRelativePath = manifest.icons && manifest.icons.default;
+          if (!iconRelativePath) {
+            errors.push('Manifest must define icons.default for Marketplace publication.');
+          } else {
+            const iconAbsolutePath = path.resolve(iconRelativePath);
+            if (!fs.existsSync(iconAbsolutePath)) {
+              errors.push(`icons.default file not found: ${iconRelativePath}`);
+            } else {
+              if (path.extname(iconRelativePath).toLowerCase() !== '.png') {
+                errors.push('icons.default should be a PNG file for predictable validation.');
+              } else {
+                const buffer = fs.readFileSync(iconAbsolutePath);
+                const isPng = buffer.length >= 24 && buffer[0] === 0x89 && buffer.toString('ascii', 1, 4) === 'PNG';
+                if (!isPng) {
+                  errors.push(`icons.default is not a valid PNG: ${iconRelativePath}`);
+                } else {
+                  const width = buffer.readUInt32BE(16);
+                  const height = buffer.readUInt32BE(20);
+                  if (width < 128 || height < 128) {
+                    errors.push(`icons.default must be at least 128x128. Found ${width}x${height}.`);
+                  }
+                }
+              }
+            }
+          }
+
+          fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+
+          if (errors.length > 0) {
+            for (const error of errors) {
+              console.error(`::error::${error}`);
+            }
+            process.exit(1);
+          }
+
+          console.log('Azure DevOps extension manifest validation passed.');
+          NODE
+
       - name: Build package
         run: npm run build
+
+      - name: Validate Azure DevOps extension VSIX packaging (RC gate)
+        if: steps.validate_azdo_manifest_rc.outputs.found == 'true'
+        run: |
+          npm exec --yes -- tfx-cli extension create --manifest-globs "${AZDO_EXTENSION_MANIFEST_GLOBS:-vss-extension.json}" --output-path .
+          vsix_path="$(ls -1 *.vsix | head -n 1)"
+          if [ -z "$vsix_path" ]; then
+            echo "VSIX validation packaging did not produce an artifact."
+            exit 1
+          fi
+          echo "RC gate produced VSIX: $vsix_path"
 
       - name: Pack npm artifact
         id: pack
@@ -346,6 +439,88 @@ jobs:
 
       - name: Build package
         run: npm run build
+
+      - name: Validate Azure DevOps extension manifest
+        id: validate_azdo_manifest_release
+        run: |
+          manifest_globs="${AZDO_EXTENSION_MANIFEST_GLOBS:-vss-extension.json}"
+
+          if ! compgen -G "$manifest_globs" > /dev/null; then
+            echo "No extension manifest matched '$manifest_globs'; skipping manifest validation."
+            echo "found=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "found=true" >> "$GITHUB_OUTPUT"
+
+          node <<'NODE'
+          const fs = require('node:fs');
+          const path = require('node:path');
+
+          const manifestPath = 'vss-extension.json';
+          const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
+          const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+
+          manifest.version = pkg.version;
+          manifest.publisher = process.env.AZDO_MARKETPLACE_PUBLISHER_ID || manifest.publisher;
+
+          const allowedCategories = new Set([
+            'Azure Repos',
+            'Azure Boards',
+            'Azure Pipelines',
+            'Azure Test Plans',
+            'Azure Artifacts'
+          ]);
+
+          const errors = [];
+
+          if (!Array.isArray(manifest.categories) || manifest.categories.length === 0) {
+            errors.push('Manifest must include at least one category.');
+          } else {
+            for (const category of manifest.categories) {
+              if (!allowedCategories.has(category)) {
+                errors.push(`Unsupported category '${category}'. Allowed: ${Array.from(allowedCategories).join(', ')}`);
+              }
+            }
+          }
+
+          const iconRelativePath = manifest.icons && manifest.icons.default;
+          if (!iconRelativePath) {
+            errors.push('Manifest must define icons.default for Marketplace publication.');
+          } else {
+            const iconAbsolutePath = path.resolve(iconRelativePath);
+            if (!fs.existsSync(iconAbsolutePath)) {
+              errors.push(`icons.default file not found: ${iconRelativePath}`);
+            } else {
+              if (path.extname(iconRelativePath).toLowerCase() !== '.png') {
+                errors.push('icons.default should be a PNG file for predictable validation.');
+              } else {
+                const buffer = fs.readFileSync(iconAbsolutePath);
+                const isPng = buffer.length >= 24 && buffer[0] === 0x89 && buffer.toString('ascii', 1, 4) === 'PNG';
+                if (!isPng) {
+                  errors.push(`icons.default is not a valid PNG: ${iconRelativePath}`);
+                } else {
+                  const width = buffer.readUInt32BE(16);
+                  const height = buffer.readUInt32BE(20);
+                  if (width < 128 || height < 128) {
+                    errors.push(`icons.default must be at least 128x128. Found ${width}x${height}.`);
+                  }
+                }
+              }
+            }
+          }
+
+          fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+
+          if (errors.length > 0) {
+            for (const error of errors) {
+              console.error(`::error::${error}`);
+            }
+            process.exit(1);
+          }
+
+          console.log('Azure DevOps extension manifest validation passed.');
+          NODE
 
       - name: Package Azure DevOps extension VSIX
         id: package_vsix
