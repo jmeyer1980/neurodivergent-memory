@@ -359,7 +359,7 @@ the snapshot file and will warn if it detects an open WAL for the target directo
 Tagged releases can also publish an Azure DevOps / Visual Studio Marketplace extension when an extension manifest is present.
 
 - Workflow env defaults:
-  - `AZDO_MARKETPLACE_PUBLISHER_ID=eaac8a1e-86a0-6d1b-a8cd-6ef1a76d3a27`
+  - `AZDO_MARKETPLACE_PUBLISHER_ID=jmeyer-twg`
   - `AZDO_MARKETPLACE_SERVICE_URL=https://marketplace.visualstudio.com`
   - `AZDO_EXTENSION_MANIFEST_GLOBS=vss-extension.json`
 - Required GitHub secret for publishing:
@@ -367,6 +367,7 @@ Tagged releases can also publish an Azure DevOps / Visual Studio Marketplace ext
 - Behavior:
   - If no manifest matches `AZDO_EXTENSION_MANIFEST_GLOBS`, VSIX packaging/publishing is skipped.
   - If the PAT secret is missing, publishing is skipped without failing the rest of the release pipeline.
+  - If Marketplace publish is attempted and fails, the tagged release job fails so publication issues are visible immediately.
   - When produced, the `.vsix` artifact is also attached to the GitHub release.
 
 ## Development RC Channel

@@ -14,7 +14,7 @@ env:
   IMAGE_NAME: docker.io/twgbellok/neurodivergent-memory
   GHCR_IMAGE_NAME: ghcr.io/jmeyer1980/neurodivergent-memory
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
-  AZDO_MARKETPLACE_PUBLISHER_ID: eaac8a1e-86a0-6d1b-a8cd-6ef1a76d3a27
+  AZDO_MARKETPLACE_PUBLISHER_ID: jmeyer-twg
   AZDO_MARKETPLACE_SERVICE_URL: https://marketplace.visualstudio.com
   AZDO_EXTENSION_MANIFEST_GLOBS: vss-extension.json
 
@@ -358,7 +358,10 @@ jobs:
             exit 0
           fi
 
-          node -e "const fs=require('node:fs');const pkg=JSON.parse(fs.readFileSync('package.json','utf8'));const manifestPath='vss-extension.json';const manifest=JSON.parse(fs.readFileSync(manifestPath,'utf8'));manifest.version=pkg.version;fs.writeFileSync(manifestPath,JSON.stringify(manifest,null,2)+'\\n');"
+          node -e "const fs=require('node:fs');const pkg=JSON.parse(fs.readFileSync('package.json','utf8'));const manifestPath='vss-extension.json';const manifest=JSON.parse(fs.readFileSync(manifestPath,'utf8'));manifest.version=pkg.version;manifest.publisher=process.env.AZDO_MARKETPLACE_PUBLISHER_ID||manifest.publisher;fs.writeFileSync(manifestPath,JSON.stringify(manifest,null,2)+'\\n');"
+
+          extension_id="$(node -p \"JSON.parse(require('fs').readFileSync('vss-extension.json','utf8')).id\")"
+          publisher="$(node -p \"JSON.parse(require('fs').readFileSync('vss-extension.json','utf8')).publisher\")"
 
           npm exec --yes -- tfx-cli extension create --manifest-globs "$manifest_globs" --output-path .
 
@@ -370,6 +373,8 @@ jobs:
 
           echo "found=true" >> "$GITHUB_OUTPUT"
           echo "path=$vsix_path" >> "$GITHUB_OUTPUT"
+          echo "extension_id=$extension_id" >> "$GITHUB_OUTPUT"
+          echo "publisher=$publisher" >> "$GITHUB_OUTPUT"
 
       - name: Publish extension to Visual Studio Marketplace
         if: steps.package_vsix.outputs.found == 'true'
@@ -381,22 +386,14 @@ jobs:
             exit 0
           fi
 
-          set +e
           npm exec --yes -- tfx-cli extension publish \
             --auth-type pat \
-            --publisher "${{ env.AZDO_MARKETPLACE_PUBLISHER_ID }}" \
+            --publisher "${{ steps.package_vsix.outputs.publisher }}" \
             --token "$AZURE_DEVOPS_EXT_PAT" \
             --service-url "${{ env.AZDO_MARKETPLACE_SERVICE_URL }}" \
             --vsix "${{ steps.package_vsix.outputs.path }}" \
             --no-wait-validation \
             --no-prompt
-          status=$?
-          set -e
-
-          if [ "$status" -ne 0 ]; then
-            echo "::warning::Marketplace publish failed (non-blocking). Continue release and verify extension state with 'tfx extension isvalid' or rerun publish manually."
-            exit 0
-          fi
 
       - name: Pack npm artifact
         id: pack

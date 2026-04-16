@@ -2,6 +2,16 @@
 
 ## [Unreleased]
 
+## [0.3.5] - 2026-04-16
+
+This patch release aligns Azure DevOps Marketplace publishing with the canonical publisher slug and makes publication failures visible.
+
+### Fixed
+
+- Updated release workflow Marketplace publisher default to `jmeyer-twg` (matching the active publisher organization)
+- Release packaging now synchronizes both `version` and `publisher` into `vss-extension.json` before VSIX creation, preventing publisher drift between manifest and workflow
+- Marketplace publish step now fails the tagged release job on actual publish errors instead of masking them as non-blocking warnings
+
 ## [0.3.4] - 2026-04-15
 
 This patch release resolves Docker Hub immutable-tag push failures on release reruns and overlapping branch/tag workflows.
