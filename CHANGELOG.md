@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+## [0.3.6] - 2026-04-16
+
+This patch release fixes a packaging-script regression introduced in v0.3.5.
+
+### Fixed
+
+- Replaced shell-quoted Node `-p` extraction in the VSIX packaging step with direct `GITHUB_OUTPUT` writes from Node to avoid bash parsing errors (`syntax error near unexpected token '('`)
+- Preserved Marketplace publish fail-fast behavior while restoring stable VSIX packaging in tagged release runs
+
 ## [0.3.5] - 2026-04-16
 
 This patch release aligns Azure DevOps Marketplace publishing with the canonical publisher slug and makes publication failures visible.

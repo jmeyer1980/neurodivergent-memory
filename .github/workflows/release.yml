@@ -358,10 +358,7 @@ jobs:
             exit 0
           fi
 
-          node -e "const fs=require('node:fs');const pkg=JSON.parse(fs.readFileSync('package.json','utf8'));const manifestPath='vss-extension.json';const manifest=JSON.parse(fs.readFileSync(manifestPath,'utf8'));manifest.version=pkg.version;manifest.publisher=process.env.AZDO_MARKETPLACE_PUBLISHER_ID||manifest.publisher;fs.writeFileSync(manifestPath,JSON.stringify(manifest,null,2)+'\\n');"
-
-          extension_id="$(node -p \"JSON.parse(require('fs').readFileSync('vss-extension.json','utf8')).id\")"
-          publisher="$(node -p \"JSON.parse(require('fs').readFileSync('vss-extension.json','utf8')).publisher\")"
+          node -e "const fs=require('node:fs');const pkg=JSON.parse(fs.readFileSync('package.json','utf8'));const manifestPath='vss-extension.json';const manifest=JSON.parse(fs.readFileSync(manifestPath,'utf8'));manifest.version=pkg.version;manifest.publisher=process.env.AZDO_MARKETPLACE_PUBLISHER_ID||manifest.publisher;fs.writeFileSync(manifestPath,JSON.stringify(manifest,null,2)+'\\n');if(process.env.GITHUB_OUTPUT){fs.appendFileSync(process.env.GITHUB_OUTPUT,`extension_id=${manifest.id}\\n`);fs.appendFileSync(process.env.GITHUB_OUTPUT,`publisher=${manifest.publisher}\\n`);}"
 
           npm exec --yes -- tfx-cli extension create --manifest-globs "$manifest_globs" --output-path .
 
@@ -373,8 +370,6 @@ jobs:
 
           echo "found=true" >> "$GITHUB_OUTPUT"
           echo "path=$vsix_path" >> "$GITHUB_OUTPUT"
-          echo "extension_id=$extension_id" >> "$GITHUB_OUTPUT"
-          echo "publisher=$publisher" >> "$GITHUB_OUTPUT"
 
       - name: Publish extension to Visual Studio Marketplace
         if: steps.package_vsix.outputs.found == 'true'
