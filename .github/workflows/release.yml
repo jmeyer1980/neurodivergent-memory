@@ -39,8 +39,8 @@ jobs:
 
           # Guardrail: only sync if the tag commit exists on main.
           if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
-            echo "Tag commit is not on main; refusing to sync release branch."
-            exit 1
+            echo "Tag commit is not on main; skipping release branch sync."
+            exit 0
           fi
 
           git checkout -B release origin/release
@@ -362,7 +362,7 @@ jobs:
 
           node -e "const fs=require('node:fs');const pkg=JSON.parse(fs.readFileSync('package.json','utf8'));const manifestPath='vss-extension.json';const manifest=JSON.parse(fs.readFileSync(manifestPath,'utf8'));manifest.version=pkg.version;fs.writeFileSync(manifestPath,JSON.stringify(manifest,null,2)+'\\n');"
 
-          npm exec --yes tfx-cli extension create --manifest-globs "$manifest_globs" --output-path .
+          npm exec --yes -- tfx-cli extension create --manifest-globs "$manifest_globs" --output-path .
 
           vsix_path="$(ls -1 *.vsix | head -n 1)"
           if [ -z "$vsix_path" ]; then
@@ -383,7 +383,7 @@ jobs:
             exit 0
           fi
 
-          npm exec --yes tfx-cli extension publish \
+          npm exec --yes -- tfx-cli extension publish \
             --auth-type pat \
             --publisher "${{ env.AZDO_MARKETPLACE_PUBLISHER_ID }}" \
             --token "$AZURE_DEVOPS_EXT_PAT" \
