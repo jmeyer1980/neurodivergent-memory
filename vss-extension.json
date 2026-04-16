@@ -2,7 +2,7 @@
   "manifestVersion": 1,
   "id": "neurodivergent-memory",
   "publisher": "eaac8a1e-86a0-6d1b-a8cd-6ef1a76d3a27",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "name": "neurodivergent-memory",
   "description": "Model Context Protocol memory server focused on neurodivergent-friendly knowledge graphs.",
   "public": true,

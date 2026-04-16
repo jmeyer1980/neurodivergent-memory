@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+## [0.3.2] - 2026-04-15
+
+This patch release fixes release workflow failures observed on the initial `v0.3.1` run.
+
+### Fixed
+
+- Corrected `tfx-cli` invocation in GitHub Actions from `npm exec --yes tfx-cli ...` to `npm exec --yes -- tfx-cli ...`, preventing npm from swallowing `--manifest-globs` / `--output-path` and causing `Command 'vss-extension.json' not found`
+- Updated `sync_release_with_main` guardrail to skip (exit `0`) instead of fail when a tag commit is not on `main`, so expected non-main tag flows do not mark the run as failed
+
 ## [0.3.1] - 2026-04-15
 
 This patch release adds first-class Azure DevOps / Visual Studio Marketplace distribution support to the release pipeline.
