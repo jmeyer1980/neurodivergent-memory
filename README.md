@@ -354,6 +354,21 @@ the snapshot file and will warn if it detects an open WAL for the target directo
 - GitHub Actions generates **artifact attestations** for the npm tarball and the pushed container image digest
 - Tagged releases upload the npm tarball, checksums, and attestation bundles as release assets
 
+### Visual Studio Marketplace Distribution (Optional)
+
+Tagged releases can also publish an Azure DevOps / Visual Studio Marketplace extension when an extension manifest is present.
+
+- Workflow env defaults:
+  - `AZDO_MARKETPLACE_PUBLISHER_ID=eaac8a1e-86a0-6d1b-a8cd-6ef1a76d3a27`
+  - `AZDO_MARKETPLACE_SERVICE_URL=https://marketplace.visualstudio.com`
+  - `AZDO_EXTENSION_MANIFEST_GLOBS=vss-extension.json`
+- Required GitHub secret for publishing:
+  - `AZURE_DEVOPS_MARKETPLACE_TOKEN` (Marketplace PAT for your publisher)
+- Behavior:
+  - If no manifest matches `AZDO_EXTENSION_MANIFEST_GLOBS`, VSIX packaging/publishing is skipped.
+  - If the PAT secret is missing, publishing is skipped without failing the rest of the release pipeline.
+  - When produced, the `.vsix` artifact is also attached to the GitHub release.
+
 ## Development RC Channel
 
 Pushes to the `development` branch publish **release candidates** using the same npm package name (`neurodivergent-memory`) and container repositories.

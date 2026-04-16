@@ -71,6 +71,7 @@ web_modules/
 
 # Output of 'npm pack'
 *.tgz
+*.vsix
 
 # Yarn Integrity file
 .yarn-integrity

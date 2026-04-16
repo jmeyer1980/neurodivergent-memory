@@ -1,0 +1,43 @@
+{
+  "manifestVersion": 1,
+  "id": "neurodivergent-memory",
+  "publisher": "eaac8a1e-86a0-6d1b-a8cd-6ef1a76d3a27",
+  "version": "0.3.0",
+  "name": "neurodivergent-memory",
+  "description": "Model Context Protocol memory server focused on neurodivergent-friendly knowledge graphs.",
+  "public": true,
+  "categories": [
+    "Other"
+  ],
+  "targets": [
+    {
+      "id": "Microsoft.VisualStudio.Services"
+    }
+  ],
+  "contributionTypes": [
+    {
+      "id": "neurodivergentMemory.placeholder",
+      "name": "Neurodivergent Memory Placeholder",
+      "description": "Placeholder contribution type used for extension packaging metadata."
+    }
+  ],
+  "content": {
+    "details": {
+      "path": "docs/marketplace-overview.md"
+    }
+  },
+  "files": [
+    {
+      "path": "docs/marketplace-overview.md",
+      "addressable": true
+    },
+    {
+      "path": "README.md",
+      "addressable": true
+    },
+    {
+      "path": "LICENSE",
+      "addressable": true
+    }
+  ]
+}

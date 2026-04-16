@@ -14,6 +14,9 @@ env:
   IMAGE_NAME: docker.io/twgbellok/neurodivergent-memory
   GHCR_IMAGE_NAME: ghcr.io/jmeyer1980/neurodivergent-memory
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+  AZDO_MARKETPLACE_PUBLISHER_ID: eaac8a1e-86a0-6d1b-a8cd-6ef1a76d3a27
+  AZDO_MARKETPLACE_SERVICE_URL: https://marketplace.visualstudio.com
+  AZDO_EXTENSION_MANIFEST_GLOBS: vss-extension.json
 
 jobs:
   sync_release_with_main:
@@ -346,6 +349,48 @@ jobs:
       - name: Build package
         run: npm run build
 
+      - name: Package Azure DevOps extension VSIX
+        id: package_vsix
+        run: |
+          manifest_globs="${AZDO_EXTENSION_MANIFEST_GLOBS:-vss-extension.json}"
+
+          if ! compgen -G "$manifest_globs" > /dev/null; then
+            echo "No extension manifest matched '$manifest_globs'; skipping VSIX packaging."
+            echo "found=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          node -e "const fs=require('node:fs');const pkg=JSON.parse(fs.readFileSync('package.json','utf8'));const manifestPath='vss-extension.json';const manifest=JSON.parse(fs.readFileSync(manifestPath,'utf8'));manifest.version=pkg.version;fs.writeFileSync(manifestPath,JSON.stringify(manifest,null,2)+'\\n');"
+
+          npm exec --yes tfx-cli extension create --manifest-globs "$manifest_globs" --output-path .
+
+          vsix_path="$(ls -1 *.vsix | head -n 1)"
+          if [ -z "$vsix_path" ]; then
+            echo "VSIX packaging ran but no .vsix artifact was produced."
+            exit 1
+          fi
+
+          echo "found=true" >> "$GITHUB_OUTPUT"
+          echo "path=$vsix_path" >> "$GITHUB_OUTPUT"
+
+      - name: Publish extension to Visual Studio Marketplace
+        if: steps.package_vsix.outputs.found == 'true'
+        env:
+          AZURE_DEVOPS_EXT_PAT: ${{ secrets['AZURE_DEVOPS_MARKETPLACE_TOKEN'] }}
+        run: |
+          if [ -z "$AZURE_DEVOPS_EXT_PAT" ]; then
+            echo "AZURE_DEVOPS_MARKETPLACE_TOKEN is not configured; skipping Marketplace publish."
+            exit 0
+          fi
+
+          npm exec --yes tfx-cli extension publish \
+            --auth-type pat \
+            --publisher "${{ env.AZDO_MARKETPLACE_PUBLISHER_ID }}" \
+            --token "$AZURE_DEVOPS_EXT_PAT" \
+            --service-url "${{ env.AZDO_MARKETPLACE_SERVICE_URL }}" \
+            --vsix "${{ steps.package_vsix.outputs.path }}" \
+            --no-prompt
+
       - name: Pack npm artifact
         id: pack
         run: |
@@ -443,18 +488,23 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          assets=(
+            "${{ steps.pack.outputs.tarball }}"
+            checksums.txt
+            npm-package.attestation.json
+            docker-image.attestation.json
+          )
+
+          if [ "${{ steps.package_vsix.outputs.found }}" = "true" ]; then
+            assets+=("${{ steps.package_vsix.outputs.path }}")
+          fi
+
           if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
             gh release upload "$GITHUB_REF_NAME" \
-              "${{ steps.pack.outputs.tarball }}" \
-              checksums.txt \
-              npm-package.attestation.json \
-              docker-image.attestation.json \
+              "${assets[@]}" \
               --clobber
           else
             gh release create "$GITHUB_REF_NAME" \
-              "${{ steps.pack.outputs.tarball }}" \
-              checksums.txt \
-              npm-package.attestation.json \
-              docker-image.attestation.json \
+              "${assets[@]}" \
               --generate-notes
           fi
