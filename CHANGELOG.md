@@ -2,6 +2,21 @@
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-04-15
+
+This patch release adds first-class Azure DevOps / Visual Studio Marketplace distribution support to the release pipeline.
+
+### Marketplace
+
+- `vss-extension.json` manifest and Marketplace overview content at `docs/marketplace-overview.md` so VSIX packaging has explicit source assets
+- Optional tagged-release Marketplace publish path using `tfx-cli`, gated by manifest presence and `AZURE_DEVOPS_MARKETPLACE_TOKEN`
+- GitHub tagged releases now attach generated `.vsix` artifacts when present
+
+### Release Workflow
+
+- Release workflow now synchronizes `vss-extension.json` version from `package.json` during the packaging step to keep extension and package versions aligned
+- Generated `.vsix` artifacts are ignored via `.gitignore` to prevent accidental binary commits
+
 ### Added
 
 - Goal-aware retrieval tuning for `search_memories` and `related_to` via optional `context` scoring, plus `recency_weight` support on `search_memories`
