@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+## [0.3.7] - 2026-04-16
+
+This patch release fixes shell expansion in the VSIX packaging metadata export.
+
+### Fixed
+
+- Replaced JavaScript template-literal output writes in the `node -e` packaging helper with string concatenation so bash does not misinterpret `${...}` and abort with `bad substitution`
+- Restored stable `extension_id` / `publisher` output emission for downstream Marketplace publish arguments
+
 ## [0.3.6] - 2026-04-16
 
 This patch release fixes a packaging-script regression introduced in v0.3.5.
