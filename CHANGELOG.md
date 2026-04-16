@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+## [0.3.4] - 2026-04-15
+
+This patch release resolves Docker Hub immutable-tag push failures on release reruns and overlapping branch/tag workflows.
+
+### Fixed
+
+- Removed `type=sha` Docker metadata tags from `ci`, `rc_release`, and `release` jobs so workflows no longer attempt to push immutable `sha-<commit>` tags that may already exist
+- Preserved existing versioned/raw release tags while preventing Docker Hub collisions such as `sha-f97f62f` already assigned errors
+
 ## [0.3.3] - 2026-04-15
 
 This patch release hardens Marketplace publish behavior so release artifacts continue even when `tfx` validation status polling is unstable.
