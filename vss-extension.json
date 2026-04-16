@@ -2,7 +2,7 @@
   "manifestVersion": 1,
   "id": "neurodivergent-memory",
   "publisher": "jmeyer-twg",
-  "version": "0.3.8",
+  "version": "0.3.9",
   "name": "neurodivergent-memory",
   "description": "Model Context Protocol memory server focused on neurodivergent-friendly knowledge graphs.",
   "icons": {

@@ -2,6 +2,16 @@
 
 ## [Unreleased]
 
+## [0.3.9] - 2026-04-16
+
+This patch release hardens Marketplace publication by validating Azure DevOps extension requirements during pre-release runs before tag publication.
+
+### Fixed
+
+- Added RC-stage manifest policy validation in `.github/workflows/release.yml` for supported Azure DevOps categories and Marketplace icon requirements
+- Added RC-stage VSIX packaging validation gate to fail fast on packaging issues before tagged release
+- Updated extension category from unsupported `Other` to supported `Azure Pipelines`
+
 ## [0.3.8] - 2026-04-16
 
 This patch release addresses Marketplace publication requirements for extension icon metadata.
