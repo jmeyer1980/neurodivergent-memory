@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+## [0.3.8] - 2026-04-16
+
+This patch release addresses Marketplace publication requirements for extension icon metadata.
+
+### Fixed
+
+- Added a compliant square PNG icon (`assets/marketplace-icon.png`, 256x256) and wired it into `vss-extension.json` via `icons.default`
+- Included the icon asset in VSIX packaged files so Marketplace validation no longer rejects uploads for missing/invalid icon dimensions
+
 ## [0.3.7] - 2026-04-16
 
 This patch release fixes shell expansion in the VSIX packaging metadata export.
