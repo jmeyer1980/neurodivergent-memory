@@ -383,13 +383,22 @@ jobs:
             exit 0
           fi
 
+          set +e
           npm exec --yes -- tfx-cli extension publish \
             --auth-type pat \
             --publisher "${{ env.AZDO_MARKETPLACE_PUBLISHER_ID }}" \
             --token "$AZURE_DEVOPS_EXT_PAT" \
             --service-url "${{ env.AZDO_MARKETPLACE_SERVICE_URL }}" \
             --vsix "${{ steps.package_vsix.outputs.path }}" \
+            --no-wait-validation \
             --no-prompt
+          status=$?
+          set -e
+
+          if [ "$status" -ne 0 ]; then
+            echo "::warning::Marketplace publish failed (non-blocking). Continue release and verify extension state with 'tfx extension isvalid' or rerun publish manually."
+            exit 0
+          fi
 
       - name: Pack npm artifact
         id: pack

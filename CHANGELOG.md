@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+## [0.3.3] - 2026-04-15
+
+This patch release hardens Marketplace publish behavior so release artifacts continue even when `tfx` validation status polling is unstable.
+
+### Fixed
+
+- Marketplace publish now uses `--no-wait-validation` to avoid the `tfx` validation wait-path crash (`Cannot read properties of null (reading 'versions')`)
+- Marketplace publish failures are now non-blocking warnings so npm, Docker, and GitHub release asset publication continue
+
 ## [0.3.2] - 2026-04-15
 
 This patch release fixes release workflow failures observed on the initial `v0.3.1` run.
