@@ -13,6 +13,7 @@ This directory is a reusable, project-agnostic customization pack for memory-dri
 | `templates/copilot-instructions.md` | Bootstrap reference for GitHub Copilot sessions — tag schema, district table, tool quick-reference, session checklist, and memory-quality guardrails for recording why. |
 | `templates/explore_memory_city.prompt.md` | Prompt for guided exploration of memory districts and graph structure. |
 | `templates/memory-driven-issue-execution.prompt.md` | Prompt for executing a tracked issue with full memory-driven context (pull → plan → act → update), including durable reasoning capture. |
+| `templates/kanban-memory.instructions.md` | Instruction file that binds Kanban board lifecycle events (card creation, column transitions, blockers, sprint planning, and retrospectives) to neurodivergent-memory MCP writes. Includes a column→district mapping, per-transition memory contracts, a canonical `kanban:X` tag namespace, and memory quality guardrails. |
 
 ## Recommended Install Path
 

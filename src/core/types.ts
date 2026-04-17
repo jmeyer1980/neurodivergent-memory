@@ -10,6 +10,7 @@ export interface MemoryNPC {
   archetype: MemoryArchetype;
   agent_id?: string;
   project_id?: string;
+  session_id?: string;
   district: string;
   content: string;
   traits: string[];
