@@ -5579,9 +5579,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           "List sessions failed",
           error,
           formatMcpError(
-            NM_ERRORS.INPUT_VALIDATION_FAILED,
-            "List sessions request was invalid.",
-            "Retry list_sessions.",
+            NM_ERRORS.INTERNAL_ERROR,
+            "Unable to list sessions.",
+            "Retry list_sessions; if the problem persists, inspect server and storage health.",
           ),
         );
       }
