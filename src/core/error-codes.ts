@@ -1,3 +1,7 @@
+import { INTERNAL_ERROR } from "@modelcontextprotocol/sdk/spec.types.js";
+
+export const MCP_INTERNAL_ERROR_CODE = INTERNAL_ERROR;
+
 export const NM_ERRORS = {
   STORAGE_PATH_NOT_WRITABLE: "NM_E001",
   WAL_CORRUPT_ENTRY: "NM_E002",
@@ -33,9 +37,11 @@ export const NM_ERRORS = {
 } as const;
 
 export type NMErrorCode = (typeof NM_ERRORS)[keyof typeof NM_ERRORS];
+export type ProtocolErrorCode = typeof MCP_INTERNAL_ERROR_CODE;
+export type McpErrorCode = NMErrorCode | ProtocolErrorCode;
 
 export interface McpErrorShape {
-  code: NMErrorCode;
+  code: McpErrorCode;
   message: string;
   recovery: string;
 }
@@ -52,7 +58,7 @@ export class NMError extends Error {
   }
 }
 
-export function formatMcpError(code: NMErrorCode, message: string, recovery: string): McpErrorShape {
+export function formatMcpError(code: McpErrorCode, message: string, recovery: string): McpErrorShape {
   return {
     code,
     message,

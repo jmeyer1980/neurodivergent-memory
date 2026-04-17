@@ -30,6 +30,7 @@ import { resolvePersistenceLocation } from "./core/persistence.js";
 import { AsyncMutex } from "./core/async-mutex.js";
 import { LoopTelemetryTracker } from "./core/loop-telemetry.js";
 import {
+  MCP_INTERNAL_ERROR_CODE,
   NM_ERRORS,
   asMcpErrorShape,
   createNMError,
@@ -5584,7 +5585,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           "List sessions failed",
           error,
           formatMcpError(
-            NM_ERRORS.INTERNAL_ERROR,
+            MCP_INTERNAL_ERROR_CODE,
             "Unable to list sessions.",
             "Retry list_sessions; if the problem persists, inspect server and storage health.",
           ),

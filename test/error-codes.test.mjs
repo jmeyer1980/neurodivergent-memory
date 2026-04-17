@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  MCP_INTERNAL_ERROR_CODE,
   NM_ERRORS,
   asMcpErrorShape,
   createNMError,
@@ -65,4 +66,23 @@ test("formats MCP error results with code, message, and recovery", () => {
     }],
     isError: true,
   });
+});
+
+test("supports protocol internal error code without widening NM_E namespace", () => {
+  const error = formatMcpError(
+    MCP_INTERNAL_ERROR_CODE,
+    "Internal failure.",
+    "Retry and inspect server logs if the problem persists.",
+  );
+
+  assert.deepEqual(error, {
+    code: MCP_INTERNAL_ERROR_CODE,
+    message: "Internal failure.",
+    recovery: "Retry and inspect server logs if the problem persists.",
+  });
+
+  assert.equal(
+    formatMcpErrorText("List sessions failed", error),
+    `❌ List sessions failed\nCode: ${MCP_INTERNAL_ERROR_CODE}\nMessage: Internal failure.\nRecovery: Retry and inspect server logs if the problem persists.`,
+  );
 });
