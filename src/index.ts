@@ -1270,7 +1270,7 @@ class NeurodivergentMemory {
     return {
       ...rawMem,
       project_id: normalizeProjectId(rawMem.project_id),
-      session_id: normalizeSessionId((rawMem as any).session_id),
+      session_id: normalizeSessionId(rawMem.session_id),
       created: safeCreated,
       last_accessed: safeLastAccessed,
       repeat_write_count: repeatWriteCount,
