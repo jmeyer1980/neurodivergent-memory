@@ -5569,7 +5569,12 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         if (result.sessions.length === 0) {
           return { content: [{ type: "text", text: `🗿 No sessions found. Use session_id when storing memories to create sessions.` }] };
         }
-        const text = result.sessions.map(s => `• ${s.session_id}: ${s.count} memories`).join("\n");
+        const text = result.sessions
+          .map((s) => {
+            const memoryLabel = s.count === 1 ? "memory" : "memories";
+            return `• ${s.session_id}: ${s.count} ${memoryLabel}`;
+          })
+          .join("\n");
         return {
           content: [{ type: "text", text: `🗿 Sessions (${result.total} total):\n${text}` }]
         };
