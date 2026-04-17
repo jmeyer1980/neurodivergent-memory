@@ -800,6 +800,8 @@ type WalOperation = "store" | "update" | "delete" | "connect" | "import" | "regi
 
 const PROJECT_ID_MAX_LENGTH = 64;
 const PROJECT_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$/;
+const SESSION_ID_MAX_LENGTH = 64;
+const SESSION_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$/;
 const DEFAULT_AGENT_ID = "unassigned";
 
 const VALID_EPISTEMIC_STATUSES: EpistemicStatus[] = ["draft", "validated", "outdated"];
@@ -807,6 +809,7 @@ const VALID_EPISTEMIC_STATUSES: EpistemicStatus[] = ["draft", "validated", "outd
 type MemoryUpdatePayload = Partial<Pick<MemoryNPC, "content" | "tags" | "emotional_valence" | "intensity" | "district" | "epistemic_status" | "project_id" | "repeat_write_count" | "repeat_count" | "last_similarity_score" | "ping_pong_counter">> & {
   memory_agent_id?: string;
   project_id?: string | null;
+  session_id?: string | null;
 };
 
 interface WalEntry {
@@ -1267,6 +1270,7 @@ class NeurodivergentMemory {
     return {
       ...rawMem,
       project_id: normalizeProjectId(rawMem.project_id),
+      session_id: normalizeSessionId((rawMem as any).session_id),
       created: safeCreated,
       last_accessed: safeLastAccessed,
       repeat_write_count: repeatWriteCount,
@@ -2538,7 +2542,8 @@ class NeurodivergentMemory {
     intensity = 0.5,
     agent_id?: string,
     project_id?: string,
-    epistemic_status?: EpistemicStatus
+    epistemic_status?: EpistemicStatus,
+    session_id?: string
   ): StoreMemoryResult {
     const registeredDistrict = this.getRegisteredDistrict(district);
     let normalizedProjectId: string | undefined = undefined;
@@ -2552,6 +2557,18 @@ class NeurodivergentMemory {
         );
       }
       validateProjectId(normalizedProjectId);
+    }
+    let normalizedSessionId: string | undefined = undefined;
+    if (session_id !== undefined) {
+      normalizedSessionId = normalizeSessionId(session_id);
+      if (!normalizedSessionId) {
+        throw createNMError(
+          NM_ERRORS.INPUT_VALIDATION_FAILED,
+          `Invalid session_id after normalization: ${session_id}`,
+          "session_id must normalize to a non-empty canonical value."
+        );
+      }
+      validateSessionId(normalizedSessionId);
     }
     const storedAgentId = resolveStoredAgentId(agent_id);
 
@@ -2617,6 +2634,7 @@ class NeurodivergentMemory {
       archetype,
       agent_id: storedAgentId,
       project_id: normalizedProjectId,
+      session_id: normalizedSessionId,
       district,
       content,
       traits: this.generateTraits(archetype),
@@ -2703,6 +2721,9 @@ class NeurodivergentMemory {
     }
     if (updates.project_id !== undefined && updates.project_id !== null) {
       validateProjectId(updates.project_id);
+    }
+    if (updates.session_id !== undefined && updates.session_id !== null) {
+      validateSessionId(updates.session_id);
     }
     if (updates.memory_agent_id !== undefined) {
       const nextAgentId = normalizeOptionalAgentId(updates.memory_agent_id, "memory_agent_id");
@@ -2819,6 +2840,13 @@ class NeurodivergentMemory {
         memory.project_id = normalizeProjectId(updates.project_id);
       }
     }
+    if (Object.prototype.hasOwnProperty.call(updates, "session_id")) {
+      if (updates.session_id === null) {
+        delete memory.session_id;
+      } else if (updates.session_id !== undefined) {
+        memory.session_id = normalizeSessionId(updates.session_id);
+      }
+    }
 
     this.bm25.addDocument(id, this.documentText(memory));
   }
@@ -2863,6 +2891,7 @@ class NeurodivergentMemory {
     intensity_max?: number,
     context?: string,
     recency_weight = 0,
+    session_id?: string,
   ): SearchMemoriesResult {
     if (recency_weight < 0 || recency_weight > 1) {
       throw createNMError(
@@ -2884,6 +2913,11 @@ class NeurodivergentMemory {
       if (candidates.length === 0) {
         didYouMean = this.suggestProjectId(project_id);
       }
+    }
+
+    if (session_id) {
+      const normalizedFilter = normalizeSessionId(session_id);
+      candidates = candidates.filter(m => normalizeSessionId(m.session_id) === normalizedFilter);
     }
 
     if (tags && tags.length > 0) {
@@ -3108,11 +3142,16 @@ class NeurodivergentMemory {
     archetype?: string,
     project_id?: string,
     epistemic_statuses?: EpistemicStatusFilter[],
+    session_id?: string,
   ): { memories: MemoryNPC[]; total: number; page: number; page_size: number; total_pages: number } {
     let all = Object.values(this.memories);
     if (district) all = all.filter(m => m.district === district);
     if (archetype) all = all.filter(m => m.archetype === archetype);
     if (project_id) all = all.filter(m => this.matchesProjectId(m, project_id));
+    if (session_id) {
+      const normalizedFilter = normalizeSessionId(session_id);
+      all = all.filter(m => normalizeSessionId(m.session_id) === normalizedFilter);
+    }
     if (epistemic_statuses && epistemic_statuses.length > 0) {
       all = all.filter(m => {
         const status = m.epistemic_status ?? "unset";
@@ -3130,13 +3169,18 @@ class NeurodivergentMemory {
     return { memories, total, page, page_size, total_pages };
   }
 
-  memoryStats(project_id?: string): object {
-    const allMems = project_id
+  memoryStats(project_id?: string, session_id?: string): object {
+    let allMems = project_id
       ? Object.values(this.memories).filter(m => this.matchesProjectId(m, project_id))
       : Object.values(this.memories);
+    if (session_id) {
+      const normalizedFilter = normalizeSessionId(session_id);
+      allMems = allMems.filter(m => normalizeSessionId(m.session_id) === normalizedFilter);
+    }
     const totalMemories = allMems.length;
     const perAgent: { [key: string]: number } = {};
     const perProject: { [key: string]: number } = {};
+    const perSession: { [key: string]: number } = {};
 
     const perDistrict: { [key: string]: number } = {};
     const epistemicStatusBreakdown: { [key: string]: number } = {
@@ -3150,8 +3194,10 @@ class NeurodivergentMemory {
     for (const m of allMems) {
       const agentKey = m.agent_id ?? "unassigned";
       const projectKey = m.project_id ?? "(unset)";
+      const sessionKey = m.session_id ?? "(unset)";
       perAgent[agentKey] = (perAgent[agentKey] ?? 0) + 1;
       perProject[projectKey] = (perProject[projectKey] ?? 0) + 1;
+      perSession[sessionKey] = (perSession[sessionKey] ?? 0) + 1;
       const rawStatus = m.epistemic_status ?? "unset";
       const statusKey: EpistemicStatusFilter =
         (VALID_EPISTEMIC_STATUSES as string[]).includes(rawStatus) ? (rawStatus as EpistemicStatusFilter) : "unset";
@@ -3202,12 +3248,27 @@ class NeurodivergentMemory {
       perDistrict,
       perAgent,
       perProject,
+      perSession,
       epistemicStatusBreakdown,
       totalConnections,
       mostAccessed,
       orphans,
       loop_telemetry,
     };
+  }
+
+  listSessions(): { sessions: { session_id: string; count: number }[]; total: number } {
+    const sessionCounts: { [key: string]: number } = {};
+    for (const m of Object.values(this.memories)) {
+      const key = normalizeSessionId(m.session_id);
+      if (key) {
+        sessionCounts[key] = (sessionCounts[key] ?? 0) + 1;
+      }
+    }
+    const sessions = Object.entries(sessionCounts)
+      .sort((a, b) => b[1] - a[1])
+      .map(([session_id, count]) => ({ session_id, count }));
+    return { sessions, total: sessions.length };
   }
 
   // ── Helpers ────────────────────────────────────────────────────────────────
@@ -4055,6 +4116,41 @@ function normalizeProjectId(projectId: string | undefined | null): string | unde
     .toLocaleLowerCase("en");
 }
 
+function normalizeSessionId(sessionId: string | undefined | null): string | undefined {
+  if (typeof sessionId !== "string") {
+    return undefined;
+  }
+  // Unicode normalization (NFKC), trim, and lower-case for robust matching
+  return sessionId
+    .normalize("NFKC")
+    .trim()
+    .toLocaleLowerCase("en");
+}
+
+function validateSessionId(sessionId: string, fieldPath = "session_id"): void {
+  if (typeof sessionId !== "string") {
+    throw createNMError(
+      NM_ERRORS.INPUT_VALIDATION_FAILED,
+      `Invalid ${fieldPath}: must be a string.`,
+      `Provide a string value for ${fieldPath} matching ${SESSION_ID_PATTERN.toString()}.`,
+    );
+  }
+  if (sessionId.length > SESSION_ID_MAX_LENGTH) {
+    throw createNMError(
+      NM_ERRORS.INPUT_VALIDATION_FAILED,
+      `Invalid ${fieldPath}: maximum length is ${SESSION_ID_MAX_LENGTH}.`,
+      `Use a shorter ${fieldPath} matching ${SESSION_ID_PATTERN.toString()}.`,
+    );
+  }
+  if (!SESSION_ID_PATTERN.test(sessionId)) {
+    throw createNMError(
+      NM_ERRORS.INPUT_VALIDATION_FAILED,
+      `Invalid ${fieldPath}: must match ${SESSION_ID_PATTERN.toString()}.`,
+      `Use letters/numbers and . _ : - only, starting with an alphanumeric character.`,
+    );
+  }
+}
+
 function boundedLevenshteinDistance(left: string, right: string, maxDistance: number): number | undefined {
   if (Math.abs(left.length - right.length) > maxDistance) {
     return undefined;
@@ -4428,6 +4524,10 @@ function buildRegisteredToolDescriptors(): ToolDescriptor[] {
               type: "string",
               description: "Optional project identifier for attribution and scoped retrieval"
             },
+            session_id: {
+              type: "string",
+              description: "Optional session identifier for scoping memories to a specific interaction session"
+            },
             epistemic_status: {
               type: "string",
               enum: ["draft", "validated", "outdated"],
@@ -4512,6 +4612,10 @@ function buildRegisteredToolDescriptors(): ToolDescriptor[] {
             project_id: {
               type: ["string", "null"],
               description: "New project identifier (optional); pass null to clear existing project attribution"
+            },
+            session_id: {
+              type: ["string", "null"],
+              description: "New session identifier (optional); pass null to clear existing session attribution"
             },
             epistemic_status: {
               type: "string",
@@ -4643,6 +4747,10 @@ function buildRegisteredToolDescriptors(): ToolDescriptor[] {
               minimum: 0,
               maximum: 1,
               description: "Maximum intensity filter (0-1). Preferred name for new callers."
+            },
+            session_id: {
+              type: "string",
+              description: "Optional session_id filter"
             }
           },
           required: ["query"]
@@ -4731,6 +4839,10 @@ function buildRegisteredToolDescriptors(): ToolDescriptor[] {
               type: "string",
               description: "Optional project_id filter"
             },
+            session_id: {
+              type: "string",
+              description: "Optional session_id filter"
+            },
             epistemic_statuses: {
               type: "array",
               items: { type: "string", enum: ["draft", "validated", "outdated", "unset"] },
@@ -4748,8 +4860,20 @@ function buildRegisteredToolDescriptors(): ToolDescriptor[] {
             project_id: {
               type: "string",
               description: "Optional project_id scope for filtered stats"
+            },
+            session_id: {
+              type: "string",
+              description: "Optional session_id scope for filtered stats"
             }
           }
+        }
+      },
+      {
+        name: "list_sessions",
+        description: "List all session IDs that have been used to tag memories, with memory counts per session.",
+        inputSchema: {
+          type: "object",
+          properties: {}
         }
       },
       {
@@ -4945,6 +5069,7 @@ function toolWhenToUseHint(toolName: string): string {
       return "Use to create, modify, remove, or connect memory nodes in the graph.";
     case "list_memories":
     case "memory_stats":
+    case "list_sessions":
       return "Use for broad inventory, pagination, or aggregate status checks across the graph.";
     case "import_memories":
       return "Use for bulk import from inline entries or a snapshot file, with optional dry-run validation.";
@@ -5009,7 +5134,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       return buildListToolsResult();
     }
     case "store_memory": {
-      const { content, district, tags = [], emotional_valence, intensity = 0.5, agent_id, project_id, epistemic_status } = request.params.arguments as any;
+      const { content, district, tags = [], emotional_valence, intensity = 0.5, agent_id, project_id, epistemic_status, session_id } = request.params.arguments as any;
 
       try {
         const normalizedAgentId = normalizeOptionalAgentId(agent_id);
@@ -5050,6 +5175,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
               normalizedAgentId,
               project_id,
               epistemic_status,
+              session_id,
             );
           },
         );
@@ -5068,7 +5194,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         return {
           content: [{
             type: "text",
-            text: `🧠 Stored memory "${memory.name}" in ${memorySystem.getAllDistricts().find(d => d.name.toLowerCase().replace(/\s+/g, '_') === district)?.name || district}\nID: ${memory.id}\nArchetype: ${memory.archetype}\nAgent: ${memory.agent_id ?? "unassigned"}\nProject: ${memory.project_id ?? "unset"}\nEpistemic status: ${memory.epistemic_status ?? "unset"}\n${repeatLines}${warningLine}${repeatWarningLine}${cooldownLine}`
+            text: `🧠 Stored memory "${memory.name}" in ${memorySystem.getAllDistricts().find(d => d.name.toLowerCase().replace(/\s+/g, '_') === district)?.name || district}\nID: ${memory.id}\nArchetype: ${memory.archetype}\nAgent: ${memory.agent_id ?? "unassigned"}\nProject: ${memory.project_id ?? "unset"}\nSession: ${memory.session_id ?? "unset"}\nEpistemic status: ${memory.epistemic_status ?? "unset"}\n${repeatLines}${warningLine}${repeatWarningLine}${cooldownLine}`
           }]
         };
       } catch (error) {
@@ -5116,7 +5242,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     }
 
     case "update_memory": {
-      const { memory_id, content, district, tags, emotional_valence, intensity, epistemic_status, project_id, actor_district, agent_id, memory_agent_id } = request.params.arguments as any;
+      const { memory_id, content, district, tags, emotional_valence, intensity, epistemic_status, project_id, session_id, actor_district, agent_id, memory_agent_id } = request.params.arguments as any;
       try {
         const normalizedActorAgentId = normalizeOptionalAgentId(agent_id);
         const updates: MemoryUpdatePayload = {};
@@ -5128,6 +5254,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         if (epistemic_status !== undefined) updates.epistemic_status = epistemic_status;
         if (memory_agent_id !== undefined) updates.memory_agent_id = memory_agent_id;
         if (project_id !== undefined) updates.project_id = project_id;
+        if (session_id !== undefined) updates.session_id = session_id;
 
         const updateResult = await runMutatingTool(
           "update_memory",
@@ -5140,7 +5267,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         return {
           content: [{
             type: "text",
-            text: `✏️ Updated memory "${memory.name}" (${memory_id})\nDistrict: ${memory.district}\nAgent: ${memory.agent_id ?? DEFAULT_AGENT_ID}\nProject: ${memory.project_id ?? 'unset'}\nEpistemic status: ${memory.epistemic_status ?? 'unset'}\nTags: ${memory.tags.join(', ')}${cooldownLine}`
+            text: `✏️ Updated memory "${memory.name}" (${memory_id})\nDistrict: ${memory.district}\nAgent: ${memory.agent_id ?? DEFAULT_AGENT_ID}\nProject: ${memory.project_id ?? 'unset'}\nSession: ${memory.session_id ?? 'unset'}\nEpistemic status: ${memory.epistemic_status ?? 'unset'}\nTags: ${memory.tags.join(', ')}${cooldownLine}`
           }]
         };
       } catch (error) {
@@ -5215,10 +5342,14 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         emotional_valence_min, emotional_valence_max,
         intensity_min, intensity_max,
         min_intensity, max_intensity,
+        session_id,
       } = request.params.arguments as any;
       try {
         if (project_id !== undefined) {
           validateProjectId(project_id);
+        }
+        if (session_id !== undefined) {
+          validateSessionId(session_id);
         }
 
         const resolvedIntensityMin = min_intensity ?? intensity_min;
@@ -5229,7 +5360,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           min_score,
           emotional_valence_min, emotional_valence_max,
           resolvedIntensityMin, resolvedIntensityMax,
-          context, recency_weight,
+          context, recency_weight, session_id,
         );
         const results = searchResult.results;
         const didYouMeanLine = searchResult.did_you_mean
@@ -5330,17 +5461,20 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     }
 
     case "list_memories": {
-      const { page = 1, page_size = 20, district, archetype, project_id, epistemic_statuses } = request.params.arguments as any;
+      const { page = 1, page_size = 20, district, archetype, project_id, epistemic_statuses, session_id } = request.params.arguments as any;
       try {
         if (project_id !== undefined) {
           validateProjectId(project_id);
         }
-        const result = memorySystem.listMemories(page, page_size, district, archetype, project_id, epistemic_statuses);
+        if (session_id !== undefined) {
+          validateSessionId(session_id);
+        }
+        const result = memorySystem.listMemories(page, page_size, district, archetype, project_id, epistemic_statuses, session_id);
         if (result.memories.length === 0) {
           return { content: [{ type: "text", text: `📋 No memories found (page ${page})` }] };
         }
         const text = result.memories.map(m =>
-          `• ${m.id} — ${m.name} [${m.district}] | project: ${m.project_id ?? 'unset'} | tags: ${m.tags.join(', ') || 'none'}`
+          `• ${m.id} — ${m.name} [${m.district}] | project: ${m.project_id ?? 'unset'} | session: ${m.session_id ?? 'unset'} | tags: ${m.tags.join(', ') || 'none'}`
         ).join('\n');
         return {
           content: [{
@@ -5363,12 +5497,15 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     }
 
     case "memory_stats": {
-      const { project_id } = request.params.arguments as any;
+      const { project_id, session_id } = request.params.arguments as any;
       try {
         if (project_id !== undefined) {
           validateProjectId(project_id);
         }
-        const stats = memorySystem.memoryStats(project_id) as any;
+        if (session_id !== undefined) {
+          validateSessionId(session_id);
+        }
+        const stats = memorySystem.memoryStats(project_id, session_id) as any;
         const districtLines = Object.entries(stats.perDistrict)
           .map(([k, v]) => `  ${k}: ${v}`)
           .join('\n');
@@ -5376,6 +5513,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           .map(([k, v]) => `  ${k}: ${v}`)
           .join('\n');
         const perProjectLines = Object.entries(stats.perProject)
+          .map(([k, v]) => `  ${k}: ${v}`)
+          .join('\n');
+        const perSessionLines = Object.entries(stats.perSession)
           .map(([k, v]) => `  ${k}: ${v}`)
           .join('\n');
         const epistemicLines = Object.entries(stats.epistemicStatusBreakdown)
@@ -5406,7 +5546,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         return {
           content: [{
             type: "text",
-            text: `📊 Memory Stats\nScope project_id: ${project_id ?? 'all'}\nTotal memories: ${stats.totalMemories}\nTotal connections: ${stats.totalConnections}\n\nPer district:\n${districtLines}\n\nPer agent:\n${perAgentLines || '  (none)'}\n\nPer project:\n${perProjectLines || '  (none)'}\n\nEpistemic status:\n${epistemicLines || '  (none)'}\n\nMost accessed:\n${topAccessed}\n\nOrphans (no connections):\n${orphanList}\n\nLoop telemetry:\nrepeat_write_candidates:\n${repeatCandidates}\nping_pong_candidates:\n${pingPongCandidates}\nrecent_high_similarity_writes:\n${recentSimilarityWrites}`
+            text: `📊 Memory Stats\nScope project_id: ${project_id ?? 'all'}\nScope session_id: ${session_id ?? 'all'}\nTotal memories: ${stats.totalMemories}\nTotal connections: ${stats.totalConnections}\n\nPer district:\n${districtLines}\n\nPer agent:\n${perAgentLines || '  (none)'}\n\nPer project:\n${perProjectLines || '  (none)'}\n\nPer session:\n${perSessionLines || '  (none)'}\n\nEpistemic status:\n${epistemicLines || '  (none)'}\n\nMost accessed:\n${topAccessed}\n\nOrphans (no connections):\n${orphanList}\n\nLoop telemetry:\nrepeat_write_candidates:\n${repeatCandidates}\nping_pong_candidates:\n${pingPongCandidates}\nrecent_high_similarity_writes:\n${recentSimilarityWrites}`
           }]
         };
       } catch (error) {
@@ -5418,6 +5558,30 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             NM_ERRORS.INPUT_VALIDATION_FAILED,
             "Memory stats request was invalid.",
             "Verify optional filters and retry memory_stats.",
+          ),
+        );
+      }
+    }
+
+    case "list_sessions": {
+      try {
+        const result = memorySystem.listSessions();
+        if (result.sessions.length === 0) {
+          return { content: [{ type: "text", text: `🗿 No sessions found. Use session_id when storing memories to create sessions.` }] };
+        }
+        const text = result.sessions.map(s => `• ${s.session_id}: ${s.count} memories`).join("\n");
+        return {
+          content: [{ type: "text", text: `🗿 Sessions (${result.total} total):\n${text}` }]
+        };
+      } catch (error) {
+        return toolErrorResult(
+          "list_sessions",
+          "List sessions failed",
+          error,
+          formatMcpError(
+            NM_ERRORS.INPUT_VALIDATION_FAILED,
+            "List sessions request was invalid.",
+            "Retry list_sessions.",
           ),
         );
       }
