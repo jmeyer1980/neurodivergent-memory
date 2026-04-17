@@ -1,3 +1,5 @@
+import { INTERNAL_ERROR } from "@modelcontextprotocol/sdk/spec.types.js";
+
 export const NM_ERRORS = {
   STORAGE_PATH_NOT_WRITABLE: "NM_E001",
   WAL_CORRUPT_ENTRY: "NM_E002",
@@ -7,6 +9,7 @@ export const NM_ERRORS = {
   PERSISTENCE_WRITE_FAILED: "NM_E006",
   BM25_INDEX_INCONSISTENCY: "NM_E007",
   // Reserved / unassigned codes kept for long-term stability of the NM_E001–NM_E030 range.
+  INTERNAL_ERROR: INTERNAL_ERROR,
   RESERVED_008: "NM_E008",
   RESERVED_009: "NM_E009",
   WRITE_QUEUE_CAPACITY: "NM_E010",
