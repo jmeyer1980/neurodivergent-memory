@@ -2,6 +2,8 @@ export type MemoryArchetype = "scholar" | "merchant" | "mystic" | "guard";
 
 export type EpistemicStatus = "draft" | "validated" | "outdated";
 
+export type KanbanStatus = "backlog" | "ready" | "in_progress" | "blocked" | "done";
+
 export type EpistemicStatusFilter = EpistemicStatus | "unset";
 
 export interface MemoryNPC {
@@ -28,6 +30,9 @@ export interface MemoryNPC {
   repeat_count?: number;
   last_similarity_score?: number;
   ping_pong_counter?: number;
+  status?: KanbanStatus;
+  current_slice?: string;
+  why_now?: string;
 }
 
 export interface DistilledArtifact {

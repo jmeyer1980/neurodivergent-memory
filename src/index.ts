@@ -38,7 +38,7 @@ import {
   mcpErrorResult,
   type McpErrorShape,
 } from "./core/error-codes.js";
-import type { DistilledArtifact, EpistemicStatus, EpistemicStatusFilter, MemoryArchetype, MemoryNPC } from "./core/types.js";
+import type { DistilledArtifact, EpistemicStatus, EpistemicStatusFilter, KanbanStatus, MemoryArchetype, MemoryNPC } from "./core/types.js";
 
 function resolveServerPackageInfo(): { name: string; version: string } {
   try {
@@ -806,11 +806,15 @@ const SESSION_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$/;
 const DEFAULT_AGENT_ID = "unassigned";
 
 const VALID_EPISTEMIC_STATUSES: EpistemicStatus[] = ["draft", "validated", "outdated"];
+const KANBAN_STATUSES: KanbanStatus[] = ["backlog", "ready", "in_progress", "blocked", "done"];
 
 type MemoryUpdatePayload = Partial<Pick<MemoryNPC, "content" | "tags" | "emotional_valence" | "intensity" | "district" | "epistemic_status" | "project_id" | "repeat_write_count" | "repeat_count" | "last_similarity_score" | "ping_pong_counter">> & {
   memory_agent_id?: string;
   project_id?: string | null;
   session_id?: string | null;
+  status?: KanbanStatus | null;
+  current_slice?: string | null;
+  why_now?: string | null;
 };
 
 interface WalEntry {
@@ -2544,7 +2548,10 @@ class NeurodivergentMemory {
     agent_id?: string,
     project_id?: string,
     epistemic_status?: EpistemicStatus,
-    session_id?: string
+    session_id?: string,
+    status?: KanbanStatus,
+    current_slice?: string,
+    why_now?: string,
   ): StoreMemoryResult {
     const registeredDistrict = this.getRegisteredDistrict(district);
     let normalizedProjectId: string | undefined = undefined;
@@ -2649,6 +2656,9 @@ class NeurodivergentMemory {
       intensity,
       epistemic_status: resolvedEpistemicStatus,
       last_similarity_score: similarityScore,
+      ...(status !== undefined ? { status } : {}),
+      ...(current_slice !== undefined ? { current_slice } : {}),
+      ...(why_now !== undefined ? { why_now } : {}),
     };
 
     this.ensureCapacityForInsert();
@@ -2846,6 +2856,27 @@ class NeurodivergentMemory {
         delete memory.session_id;
       } else if (updates.session_id !== undefined) {
         memory.session_id = normalizeSessionId(updates.session_id);
+      }
+    }
+    if (Object.prototype.hasOwnProperty.call(updates, "status")) {
+      if (updates.status === null) {
+        delete memory.status;
+      } else if (updates.status !== undefined) {
+        memory.status = updates.status;
+      }
+    }
+    if (Object.prototype.hasOwnProperty.call(updates, "current_slice")) {
+      if (updates.current_slice === null) {
+        delete memory.current_slice;
+      } else if (updates.current_slice !== undefined) {
+        memory.current_slice = updates.current_slice;
+      }
+    }
+    if (Object.prototype.hasOwnProperty.call(updates, "why_now")) {
+      if (updates.why_now === null) {
+        delete memory.why_now;
+      } else if (updates.why_now !== undefined) {
+        memory.why_now = updates.why_now;
       }
     }
 
@@ -3270,6 +3301,43 @@ class NeurodivergentMemory {
       .sort((a, b) => b[1] - a[1])
       .map(([session_id, count]) => ({ session_id, count }));
     return { sessions, total: sessions.length };
+  }
+
+  kanbanView(opts: {
+    agent_id?: string;
+    project_id?: string;
+    session_id?: string;
+  } = {}): { lanes: { status: KanbanStatus; memories: Pick<MemoryNPC, "id" | "name" | "status" | "current_slice" | "why_now" | "agent_id" | "project_id" | "session_id">[] }[]; total: number } {
+    const { agent_id, project_id, session_id } = opts;
+    const normalizedAgentId = agent_id ? normalizeOptionalAgentId(agent_id) : undefined;
+    const normalizedProjectId = project_id ? normalizeProjectId(project_id) : undefined;
+    const normalizedSessionId = session_id ? normalizeSessionId(session_id) : undefined;
+
+    const all = Object.values(this.memories).filter((m) => {
+      if (m.district !== "practical_execution") return false;
+      if (normalizedAgentId !== undefined && m.agent_id !== normalizedAgentId) return false;
+      if (normalizedProjectId !== undefined && m.project_id !== normalizedProjectId) return false;
+      if (normalizedSessionId !== undefined && m.session_id !== normalizedSessionId) return false;
+      return true;
+    });
+
+    const ordered: KanbanStatus[] = ["in_progress", "blocked", "ready", "backlog", "done"];
+    const laneMap = new Map<KanbanStatus, Pick<MemoryNPC, "id" | "name" | "status" | "current_slice" | "why_now" | "agent_id" | "project_id" | "session_id">[]>();
+    for (const s of ordered) laneMap.set(s, []);
+
+    for (const m of all) {
+      const lane = m.status && ordered.includes(m.status as KanbanStatus)
+        ? (m.status as KanbanStatus)
+        : "backlog";
+      const bucket = laneMap.get(lane)!;
+      bucket.push({ id: m.id, name: m.name, status: lane, current_slice: m.current_slice, why_now: m.why_now, agent_id: m.agent_id, project_id: m.project_id, session_id: m.session_id });
+    }
+
+    const lanes = ordered
+      .filter((s) => (laneMap.get(s)?.length ?? 0) > 0)
+      .map((s) => ({ status: s, memories: laneMap.get(s)! }));
+
+    return { lanes, total: all.length };
   }
 
   // ── Helpers ────────────────────────────────────────────────────────────────
@@ -4152,6 +4220,16 @@ function validateSessionId(sessionId: string, fieldPath = "session_id"): void {
   }
 }
 
+function validateKanbanStatus(status: string): asserts status is KanbanStatus {
+  if (!KANBAN_STATUSES.includes(status as KanbanStatus)) {
+    throw createNMError(
+      NM_ERRORS.INPUT_VALIDATION_FAILED,
+      `Invalid status: "${status}". Expected one of: ${KANBAN_STATUSES.join(", ")}.`,
+      `Provide a valid kanban status: ${KANBAN_STATUSES.join(", ")}.`,
+    );
+  }
+}
+
 function boundedLevenshteinDistance(left: string, right: string, maxDistance: number): number | undefined {
   if (Math.abs(left.length - right.length) > maxDistance) {
     return undefined;
@@ -4533,6 +4611,19 @@ function buildRegisteredToolDescriptors(): ToolDescriptor[] {
               type: "string",
               enum: ["draft", "validated", "outdated"],
               description: "Optional epistemic status for planning memories"
+            },
+            status: {
+              type: "string",
+              enum: ["backlog", "ready", "in_progress", "blocked", "done"],
+              description: "Optional kanban status for workflow tracking (practical_execution recommended)"
+            },
+            current_slice: {
+              type: "string",
+              description: "Optional sub-task or slice currently being worked on"
+            },
+            why_now: {
+              type: "string",
+              description: "Optional reason this task is being prioritized now"
             }
           },
           required: ["content", "district"]
@@ -4622,6 +4713,19 @@ function buildRegisteredToolDescriptors(): ToolDescriptor[] {
               type: "string",
               enum: ["draft", "validated", "outdated"],
               description: "New epistemic status (optional)"
+            },
+            status: {
+              type: ["string", "null"],
+              enum: ["backlog", "ready", "in_progress", "blocked", "done", null],
+              description: "New kanban status (optional); pass null to clear"
+            },
+            current_slice: {
+              type: ["string", "null"],
+              description: "New current sub-task slice (optional); pass null to clear"
+            },
+            why_now: {
+              type: ["string", "null"],
+              description: "New prioritization reason (optional); pass null to clear"
             }
           },
           required: ["memory_id"]
@@ -5024,6 +5128,58 @@ function buildRegisteredToolDescriptors(): ToolDescriptor[] {
           },
           required: ["key", "name", "description", "luca_parent"]
         }
+      },
+      {
+        name: "kanban_view",
+        description: "Show a kanban board view of practical_execution memories, grouped by status (in_progress, blocked, ready, backlog, done). Useful for workflow status checks and WIP monitoring.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            agent_id: {
+              type: "string",
+              description: "Optional agent_id filter to show only this agent's tasks"
+            },
+            project_id: {
+              type: "string",
+              description: "Optional project_id filter"
+            },
+            session_id: {
+              type: "string",
+              description: "Optional session_id filter"
+            }
+          }
+        }
+      },
+      {
+        name: "update_status",
+        description: "Lightweight tool to transition a memory's kanban status and optionally set current_slice (the active sub-task) and why_now (the prioritization reason). Enforces WIP guardrail when transitioning to in_progress.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            memory_id: {
+              type: "string",
+              description: "ID of the memory to update"
+            },
+            status: {
+              type: "string",
+              enum: ["backlog", "ready", "in_progress", "blocked", "done"],
+              description: "New kanban status"
+            },
+            current_slice: {
+              type: ["string", "null"],
+              description: "Optional sub-task or slice currently being worked on. Pass null to clear."
+            },
+            why_now: {
+              type: ["string", "null"],
+              description: "Optional reason this task is being prioritized now. Pass null to clear."
+            },
+            agent_id: {
+              type: "string",
+              description: "Optional caller agent identifier for WIP guardrail attribution"
+            }
+          },
+          required: ["memory_id", "status"]
+        }
       }
     ];
 }
@@ -5071,7 +5227,10 @@ function toolWhenToUseHint(toolName: string): string {
     case "list_memories":
     case "memory_stats":
     case "list_sessions":
+    case "kanban_view":
       return "Use for broad inventory, pagination, or aggregate status checks across the graph.";
+    case "update_status":
+      return "Use to transition a memory's kanban status and optionally set current_slice or why_now.";
     case "import_memories":
       return "Use for bulk import from inline entries or a snapshot file, with optional dry-run validation.";
     case "storage_diagnostics":
@@ -5135,15 +5294,23 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       return buildListToolsResult();
     }
     case "store_memory": {
-      const { content, district, tags = [], emotional_valence, intensity = 0.5, agent_id, project_id, epistemic_status, session_id } = request.params.arguments as any;
+      const { content, district, tags = [], emotional_valence, intensity = 0.5, agent_id, project_id, epistemic_status, session_id, status, current_slice, why_now } = request.params.arguments as any;
 
       try {
+        if (status === null || current_slice === null || why_now === null) {
+          throw createNMError(
+            NM_ERRORS.INPUT_VALIDATION_FAILED,
+            "store_memory does not accept null for status, current_slice, or why_now. Omit these fields or provide valid string values.",
+            "To clear kanban fields on an existing memory, use update_memory instead.",
+          );
+        }
+        if (status !== undefined) validateKanbanStatus(status);
         const normalizedAgentId = normalizeOptionalAgentId(agent_id);
         const shouldCheckWipLimit =
           configuredWipLimit > 0 &&
           district === "practical_execution" &&
           typeof normalizedAgentId === "string" &&
-          hasTaskInProgressTags(tags);
+          (hasTaskInProgressTags(tags) || status === "in_progress");
 
         let wipWarning: string | undefined;
 
@@ -5177,6 +5344,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
               project_id,
               epistemic_status,
               session_id,
+              status,
+              current_slice,
+              why_now,
             );
           },
         );
@@ -5195,7 +5365,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         return {
           content: [{
             type: "text",
-            text: `🧠 Stored memory "${memory.name}" in ${memorySystem.getAllDistricts().find(d => d.name.toLowerCase().replace(/\s+/g, '_') === district)?.name || district}\nID: ${memory.id}\nArchetype: ${memory.archetype}\nAgent: ${memory.agent_id ?? "unassigned"}\nProject: ${memory.project_id ?? "unset"}\nSession: ${memory.session_id ?? "unset"}\nEpistemic status: ${memory.epistemic_status ?? "unset"}\n${repeatLines}${warningLine}${repeatWarningLine}${cooldownLine}`
+            text: `🧠 Stored memory "${memory.name}" in ${memorySystem.getAllDistricts().find(d => d.name.toLowerCase().replace(/\s+/g, '_') === district)?.name || district}\nID: ${memory.id}\nArchetype: ${memory.archetype}\nAgent: ${memory.agent_id ?? "unassigned"}\nProject: ${memory.project_id ?? "unset"}\nSession: ${memory.session_id ?? "unset"}\nStatus: ${memory.status ?? "unset"}\nEpistemic status: ${memory.epistemic_status ?? "unset"}\n${repeatLines}${warningLine}${repeatWarningLine}${cooldownLine}`
           }]
         };
       } catch (error) {
@@ -5243,8 +5413,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     }
 
     case "update_memory": {
-      const { memory_id, content, district, tags, emotional_valence, intensity, epistemic_status, project_id, session_id, actor_district, agent_id, memory_agent_id } = request.params.arguments as any;
+      const { memory_id, content, district, tags, emotional_valence, intensity, epistemic_status, project_id, session_id, actor_district, agent_id, memory_agent_id, status, current_slice, why_now } = request.params.arguments as any;
       try {
+        if (status !== undefined && status !== null) validateKanbanStatus(status);
         const normalizedActorAgentId = normalizeOptionalAgentId(agent_id);
         const updates: MemoryUpdatePayload = {};
         if (content !== undefined) updates.content = content;
@@ -5256,6 +5427,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         if (memory_agent_id !== undefined) updates.memory_agent_id = memory_agent_id;
         if (project_id !== undefined) updates.project_id = project_id;
         if (session_id !== undefined) updates.session_id = session_id;
+        if (status !== undefined) updates.status = status;
+        if (current_slice !== undefined) updates.current_slice = current_slice;
+        if (why_now !== undefined) updates.why_now = why_now;
 
         const updateResult = await runMutatingTool(
           "update_memory",
@@ -5268,7 +5442,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         return {
           content: [{
             type: "text",
-            text: `✏️ Updated memory "${memory.name}" (${memory_id})\nDistrict: ${memory.district}\nAgent: ${memory.agent_id ?? DEFAULT_AGENT_ID}\nProject: ${memory.project_id ?? 'unset'}\nSession: ${memory.session_id ?? 'unset'}\nEpistemic status: ${memory.epistemic_status ?? 'unset'}\nTags: ${memory.tags.join(', ')}${cooldownLine}`
+            text: `✏️ Updated memory "${memory.name}" (${memory_id})\nDistrict: ${memory.district}\nAgent: ${memory.agent_id ?? DEFAULT_AGENT_ID}\nProject: ${memory.project_id ?? 'unset'}\nSession: ${memory.session_id ?? 'unset'}\nStatus: ${memory.status ?? 'unset'}\nEpistemic status: ${memory.epistemic_status ?? 'unset'}\nTags: ${memory.tags.join(', ')}${cooldownLine}`
           }]
         };
       } catch (error) {
@@ -5588,6 +5762,127 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             MCP_INTERNAL_ERROR_CODE,
             "Unable to list sessions.",
             "Retry list_sessions; if the problem persists, inspect server and storage health.",
+          ),
+        );
+      }
+    }
+
+    case "kanban_view": {
+      try {
+        const { agent_id, project_id, session_id } = request.params.arguments as any;
+        const result = memorySystem.kanbanView({ agent_id, project_id, session_id });
+        if (result.total === 0) {
+          return { content: [{ type: "text", text: `📋 Kanban view: no practical_execution memories found.` }] };
+        }
+        const laneText = result.lanes
+          .map((lane) => {
+            const header = `## ${lane.status.toUpperCase()} (${lane.memories.length})`;
+            const rows = lane.memories
+              .map((m) => {
+                const slice = m.current_slice ? `\n    slice: ${m.current_slice}` : "";
+                const why = m.why_now ? `\n    why_now: ${m.why_now}` : "";
+                return `  • [${m.id}] ${m.name}${slice}${why}`;
+              })
+              .join("\n");
+            return `${header}\n${rows}`;
+          })
+          .join("\n\n");
+        return {
+          content: [{ type: "text", text: `📋 Kanban View (${result.total} memories)\n\n${laneText}` }],
+        };
+      } catch (error) {
+        return toolErrorResult(
+          "kanban_view",
+          "Kanban view failed",
+          error,
+          formatMcpError(
+            MCP_INTERNAL_ERROR_CODE,
+            "Unable to build kanban view.",
+            "Retry kanban_view; if the problem persists, inspect server and storage health.",
+          ),
+        );
+      }
+    }
+
+    case "update_status": {
+      const { memory_id, status, current_slice, why_now, agent_id } = request.params.arguments as any;
+      try {
+        if (!memory_id) {
+          throw createNMError(
+            NM_ERRORS.INPUT_VALIDATION_FAILED,
+            "memory_id is required.",
+            "Provide a valid memory_id and retry update_status.",
+          );
+        }
+        if (status === undefined || status === null) {
+          throw createNMError(
+            NM_ERRORS.INPUT_VALIDATION_FAILED,
+            "status is required for update_status.",
+            `Provide a valid status: ${KANBAN_STATUSES.join(", ")}.`,
+          );
+        }
+        validateKanbanStatus(status);
+        const normalizedActorAgentId = normalizeOptionalAgentId(agent_id);
+        const targetMemory = memorySystem.getAllMemories().find((m) => m.id === memory_id);
+        const normalizedGuardrailAgentId = normalizedActorAgentId ?? normalizeOptionalAgentId(targetMemory?.agent_id);
+
+        // WIP guardrail: warn when transitioning to in_progress
+        // Unified check: status field OR legacy in-progress tags
+        let wipWarning: string | undefined;
+        if (
+          status === "in_progress" &&
+          configuredWipLimit > 0 &&
+          typeof normalizedGuardrailAgentId === "string"
+        ) {
+          const existingInProgress = memorySystem
+            .getAllMemories()
+            .filter(
+              (m) =>
+                m.district === "practical_execution" &&
+                m.agent_id === normalizedGuardrailAgentId &&
+                (m.status === "in_progress" || hasTaskInProgressTags(m.tags)) &&
+                m.id !== memory_id,
+            );
+          if (existingInProgress.length >= configuredWipLimit) {
+            wipWarning = buildWipGuardrailWarning(normalizedGuardrailAgentId, existingInProgress);
+            logger.warn(
+              {
+                toolName: "update_status",
+                code: NM_ERRORS.WIP_LIMIT_EXCEEDED,
+                agentId: normalizedGuardrailAgentId,
+                limit: configuredWipLimit,
+                currentInProgressCount: existingInProgress.length,
+              },
+              "WIP guardrail warning emitted",
+            );
+          }
+        }
+
+        const updates: MemoryUpdatePayload = { status };
+        if (current_slice !== undefined) updates.current_slice = current_slice;
+        if (why_now !== undefined) updates.why_now = why_now;
+
+        const updateResult = await runMutatingTool(
+          "update_status",
+          () => memorySystem.updateMemory(memory_id, updates, { agent_id: normalizedActorAgentId }),
+        );
+        const memory = updateResult.memory;
+        const wipLine = wipWarning ? `\n${wipWarning}` : "";
+        return {
+          content: [{
+            type: "text",
+            text: `📋 Status updated for "${memory.name}" (${memory_id})\nStatus: ${memory.status ?? "unset"}\nCurrent slice: ${memory.current_slice ?? "unset"}\nWhy now: ${memory.why_now ?? "unset"}${wipLine}`,
+          }],
+        };
+      } catch (error) {
+        return toolErrorResult(
+          "update_status",
+          "Update status failed",
+          error,
+          formatMcpError(
+            NM_ERRORS.INPUT_VALIDATION_FAILED,
+            "Update status request was invalid.",
+            `Provide a valid memory_id and status (${KANBAN_STATUSES.join(", ")}), then retry update_status.`,
           ),
         );
       }
