@@ -231,7 +231,7 @@ test("list_sessions returns all session IDs with counts", async () => {
     assert.ok(text.includes("list-sess-b"), `Expected normalized 'list-sess-b' in: ${text}`);
     // session A has 2 memories, should be listed first (sorted by count desc)
     assert.ok(text.includes("list-sess-a: 2 memories"), `Expected count 2 for list-sess-a in: ${text}`);
-    assert.ok(text.includes("list-sess-b: 1 memories"), `Expected count 1 for list-sess-b in: ${text}`);
+    assert.ok(text.includes("list-sess-b: 1 memory"), `Expected count 1 for list-sess-b in: ${text}`);
     assert.ok(text.includes("Sessions (2 total)"), `Expected total count in: ${text}`);
   } finally {
     server.stop();
