@@ -107,6 +107,17 @@ describe("kanban fields: store_memory with status", () => {
     assert.match(text, /[Ii]nvalid status/i);
   });
 
+  it("rejects null status in store_memory", async () => {
+    const res = await callTool("store_memory", {
+      content: "Task with null status",
+      district: "practical_execution",
+      tags: ["kind:task"],
+      status: null,
+    });
+    const text = getText(res);
+    assert.match(text, /does not accept null/i);
+  });
+
   it("stores a memory without status (status shows as unset)", async () => {
     const res = await callTool("store_memory", {
       content: "Backlog task without explicit status",

@@ -9,16 +9,19 @@ Use the neurodivergent-memory MCP server as the persistent context layer for eve
 
 ---
 
-## Column → District Mapping
+## Status → District Mapping
 
-| Kanban Column | Primary District | Supporting District |
-|---|---|---|
-| **Backlog** | `vigilant_monitoring` | `practical_execution` |
-| **Ready / Groomed** | `practical_execution` | `logical_analysis` |
-| **In Progress** | `practical_execution` | `vigilant_monitoring` |
-| **In Review** | `logical_analysis` | `practical_execution` |
-| **Blocked** | `vigilant_monitoring` | `emotional_processing` |
-| **Done / Closed** | `logical_analysis` | `creative_synthesis` |
+These mappings apply to the canonical `KanbanStatus` values used by the system and grouped in `kanban_view`: `backlog`, `ready`, `in_progress`, `blocked`, and `done`.
+
+| Supported Status | Typical Board Column | Primary District | Supporting District |
+|---|---|---|---|
+| `backlog` | **Backlog** | `vigilant_monitoring` | `practical_execution` |
+| `ready` | **Ready / Groomed** | `practical_execution` | `logical_analysis` |
+| `in_progress` | **In Progress** | `practical_execution` | `vigilant_monitoring` |
+| `blocked` | **Blocked** | `vigilant_monitoring` | `emotional_processing` |
+| `done` | **Done / Closed** | `logical_analysis` | `creative_synthesis` |
+
+Additional board-specific columns such as **In Review** or **Closed / Won't Do** are out-of-band conventions not represented in `status` or `kanban_view`. If you need to preserve that distinction, record it in tags (for example, `kanban:in_review` or `resolution:wont_do`) rather than treating it as a separate `status`.
 
 ---
 

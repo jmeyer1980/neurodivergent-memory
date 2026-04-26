@@ -807,7 +807,6 @@ const DEFAULT_AGENT_ID = "unassigned";
 
 const VALID_EPISTEMIC_STATUSES: EpistemicStatus[] = ["draft", "validated", "outdated"];
 const KANBAN_STATUSES: KanbanStatus[] = ["backlog", "ready", "in_progress", "blocked", "done"];
-const KANBAN_STATUS_MAX_LENGTH = 20;
 
 type MemoryUpdatePayload = Partial<Pick<MemoryNPC, "content" | "tags" | "emotional_valence" | "intensity" | "district" | "epistemic_status" | "project_id" | "repeat_write_count" | "repeat_count" | "last_similarity_score" | "ping_pong_counter">> & {
   memory_agent_id?: string;
@@ -3327,11 +3326,11 @@ class NeurodivergentMemory {
     for (const s of ordered) laneMap.set(s, []);
 
     for (const m of all) {
-      const lane = m.status ?? "backlog";
-      const bucket = laneMap.get(lane);
-      if (bucket) {
-        bucket.push({ id: m.id, name: m.name, status: m.status, current_slice: m.current_slice, why_now: m.why_now, agent_id: m.agent_id, project_id: m.project_id, session_id: m.session_id });
-      }
+      const lane = m.status && ordered.includes(m.status as KanbanStatus)
+        ? (m.status as KanbanStatus)
+        : "backlog";
+      const bucket = laneMap.get(lane)!;
+      bucket.push({ id: m.id, name: m.name, status: lane, current_slice: m.current_slice, why_now: m.why_now, agent_id: m.agent_id, project_id: m.project_id, session_id: m.session_id });
     }
 
     const lanes = ordered
@@ -5298,13 +5297,20 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       const { content, district, tags = [], emotional_valence, intensity = 0.5, agent_id, project_id, epistemic_status, session_id, status, current_slice, why_now } = request.params.arguments as any;
 
       try {
-        if (status !== undefined && status !== null) validateKanbanStatus(status);
+        if (status === null || current_slice === null || why_now === null) {
+          throw createNMError(
+            NM_ERRORS.INPUT_VALIDATION_FAILED,
+            "store_memory does not accept null for status, current_slice, or why_now. Omit these fields or provide valid string values.",
+            "To clear kanban fields on an existing memory, use update_memory instead.",
+          );
+        }
+        if (status !== undefined) validateKanbanStatus(status);
         const normalizedAgentId = normalizeOptionalAgentId(agent_id);
         const shouldCheckWipLimit =
           configuredWipLimit > 0 &&
           district === "practical_execution" &&
           typeof normalizedAgentId === "string" &&
-          hasTaskInProgressTags(tags);
+          (hasTaskInProgressTags(tags) || status === "in_progress");
 
         let wipWarning: string | undefined;
 
@@ -5338,9 +5344,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
               project_id,
               epistemic_status,
               session_id,
-              status ?? undefined,
-              current_slice ?? undefined,
-              why_now ?? undefined,
+              status,
+              current_slice,
+              why_now,
             );
           },
         );
@@ -5817,30 +5823,33 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         }
         validateKanbanStatus(status);
         const normalizedActorAgentId = normalizeOptionalAgentId(agent_id);
+        const targetMemory = memorySystem.getAllMemories().find((m) => m.id === memory_id);
+        const normalizedGuardrailAgentId = normalizedActorAgentId ?? normalizeOptionalAgentId(targetMemory?.agent_id);
 
         // WIP guardrail: warn when transitioning to in_progress
+        // Unified check: status field OR legacy in-progress tags
         let wipWarning: string | undefined;
         if (
           status === "in_progress" &&
           configuredWipLimit > 0 &&
-          typeof normalizedActorAgentId === "string"
+          typeof normalizedGuardrailAgentId === "string"
         ) {
           const existingInProgress = memorySystem
             .getAllMemories()
             .filter(
               (m) =>
                 m.district === "practical_execution" &&
-                m.agent_id === normalizedActorAgentId &&
-                m.status === "in_progress" &&
+                m.agent_id === normalizedGuardrailAgentId &&
+                (m.status === "in_progress" || hasTaskInProgressTags(m.tags)) &&
                 m.id !== memory_id,
             );
           if (existingInProgress.length >= configuredWipLimit) {
-            wipWarning = buildWipGuardrailWarning(normalizedActorAgentId, existingInProgress);
+            wipWarning = buildWipGuardrailWarning(normalizedGuardrailAgentId, existingInProgress);
             logger.warn(
               {
                 toolName: "update_status",
                 code: NM_ERRORS.WIP_LIMIT_EXCEEDED,
-                agentId: normalizedActorAgentId,
+                agentId: normalizedGuardrailAgentId,
                 limit: configuredWipLimit,
                 currentInProgressCount: existingInProgress.length,
               },
