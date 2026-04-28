@@ -61,7 +61,7 @@ const SERVER_PACKAGE_INFO = resolveServerPackageInfo();
 const SERVER_START_TIME_ISO = new Date().toISOString();
 
 type AgentKitInstallMode = "prompt-first" | "auto-setup";
-type AgentKitBrand = "auto" | "copilot" | "claude";
+type AgentKitBrand = "auto" | "copilot" | "claude" | "cline";
 
 const AGENT_KIT_IMPORT_DIR_PRESETS = {
   copilot: path.join(".github", "agent-kit", "templates"),
@@ -135,8 +135,13 @@ function parseAgentKitCliOptions(argv: string[]): AgentKitCliOptions {
 
       case "--brand": {
         const value = argv[index + 1];
-        if (value !== "auto" && value !== "copilot" && value !== "claude") {
-          throw new Error("Invalid value for --brand. Use auto, copilot, or claude.");
+        if (
+          value !== "auto" &&
+          value !== "copilot" &&
+          value !== "claude" &&
+          value !== "cline"
+        ) {
+          throw new Error("Invalid value for --brand. Use auto, copilot, claude, or cline.");
         }
         brand = value;
         index += 1;
@@ -220,9 +225,13 @@ function stripMarkdownFrontmatter(content: string): string {
 }
 
 function getDefaultAgentKitImportDirectory(brand: Exclude<AgentKitBrand, "auto">): string {
-  return brand === "claude"
-    ? AGENT_KIT_IMPORT_DIR_PRESETS.claude
-    : AGENT_KIT_IMPORT_DIR_PRESETS.copilot;
+  if (brand === "claude") {
+    return AGENT_KIT_IMPORT_DIR_PRESETS.claude;
+  }
+  if (brand === "cline") {
+    return AGENT_KIT_IMPORT_DIR_PRESETS.cline;
+  }
+  return AGENT_KIT_IMPORT_DIR_PRESETS.copilot;
 }
 
 function resolveAgentKitImportDirectory(
@@ -342,10 +351,26 @@ function buildClaudeTemplateAgent(): string {
   ].join("\n");
 }
 
+function brandDisplayLabel(brand: Exclude<AgentKitBrand, "auto">): string {
+  switch (brand) {
+    case "claude":
+      return "Claude-style";
+    case "cline":
+      return "Cline-style";
+    case "copilot":
+    default:
+      return "Copilot-style";
+  }
+}
+
 function detectAgentKitBrand(targetRoot: string): Exclude<AgentKitBrand, "auto"> {
-  // Check for CLAUDE.md or .claude in the targetRoot or its parent (for normalized .github/.claude)
+  // Walk both the target itself and its parent so that a normalized .github/.claude/.clinerules
+  // path can still surface a brand-specific signal (CLAUDE.md, .claude/, .clinerules/).
   const candidates = [targetRoot, path.dirname(targetRoot)];
   for (const dir of candidates) {
+    if (fs.existsSync(path.join(dir, ".clinerules"))) {
+      return "cline";
+    }
     if (
       fs.existsSync(path.join(dir, "CLAUDE.md")) ||
       fs.existsSync(path.join(dir, ".claude"))
@@ -365,16 +390,33 @@ function normalizeAgentKitTargetRoot(targetRoot: string, brand: AgentKitBrand): 
     return {
       targetRoot: path.dirname(resolvedTargetRoot),
       brand: resolvedBrand,
-      normalizationNote: `Normalized ${resolvedTargetRoot} to repository root ${path.dirname(resolvedTargetRoot)} for ${resolvedBrand === "claude" ? "Claude-style" : "Copilot-style"} installation.`,
+      normalizationNote: `Normalized ${resolvedTargetRoot} to repository root ${path.dirname(resolvedTargetRoot)} for ${brandDisplayLabel(resolvedBrand)} installation.`,
+    };
+  }
+
+  if (basename === ".clinerules") {
+    const resolvedBrand: Exclude<AgentKitBrand, "auto"> =
+      brand === "auto" ? "cline" : brand;
+    return {
+      targetRoot: path.dirname(resolvedTargetRoot),
+      brand: resolvedBrand,
+      normalizationNote: `Normalized ${resolvedTargetRoot} to repository root ${path.dirname(resolvedTargetRoot)} for ${brandDisplayLabel(resolvedBrand)} installation.`,
     };
   }
 
   if (basename === ".github") {
-    const resolvedBrand = brand === "auto" ? detectAgentKitBrand(resolvedTargetRoot) : (brand === "claude" ? "claude" : "copilot");
+    let resolvedBrand: Exclude<AgentKitBrand, "auto">;
+    if (brand === "auto") {
+      resolvedBrand = detectAgentKitBrand(resolvedTargetRoot);
+    } else if (brand === "claude" || brand === "cline") {
+      resolvedBrand = brand;
+    } else {
+      resolvedBrand = "copilot";
+    }
     return {
       targetRoot: path.dirname(resolvedTargetRoot),
       brand: resolvedBrand,
-      normalizationNote: `Normalized ${resolvedTargetRoot} to repository root ${path.dirname(resolvedTargetRoot)} for ${resolvedBrand === "claude" ? "Claude-style" : "Copilot-style"} installation.`,
+      normalizationNote: `Normalized ${resolvedTargetRoot} to repository root ${path.dirname(resolvedTargetRoot)} for ${brandDisplayLabel(resolvedBrand)} installation.`,
     };
   }
 
@@ -384,7 +426,146 @@ function normalizeAgentKitTargetRoot(targetRoot: string, brand: AgentKitBrand): 
   };
 }
 
+
+function buildClineRootInstructions(importDirectoryDisplayPath: string): string {
+  return [
+    "# neurodivergent-memory Agent Kit for Cline",
+    "",
+    "This project was initialized with the neurodivergent-memory agent kit for Cline.",
+    "Cline reads workspace rules from `.clinerules/*.md` instead of `.github/copilot-instructions.md`,",
+    "so the kit's bootstrap, workflow, and kanban guidance are installed into `.clinerules/` directly.",
+    "",
+    "## Installed Cline assets",
+    "",
+    "- `.clinerules/neurodivergent-memory.md` — bootstrap (replaces `.github/copilot-instructions.md`)",
+    "- `.clinerules/nd-memory-workflow.md` — memory-driven workflow defaults",
+    "- `.clinerules/kanban-memory.md` — kanban ↔ memory integration",
+    "- `.clinerules/agents/*.md` — informational subagent profiles",
+    "- `.clinerules/workflows/*.md` — slash-command-discoverable prompts (e.g. `/setup-nd-memory`)",
+    `- The packaged source kit is mirrored under \`${importDirectoryDisplayPath}\` for refresh/reference.`,
+    "",
+    "If you need to refresh these files, rerun `npx neurodivergent-memory@latest init-agent-kit --brand cline` from the repository root.",
+  ].join("\n");
+}
+
+function buildClineBootstrapRule(sharedBootstrap: string): string {
+  return [
+    "# neurodivergent-memory bootstrap for Cline",
+    "",
+    "Cline reads `.clinerules/*.md` as workspace rules at session start.",
+    "This file mirrors the shared memory-server bootstrap guidance from the packaged agent kit so Cline-based",
+    "clients (`npx cline`, the Cline VS Code extension, the Cline kanban surface, etc.) can pick it up natively.",
+    "",
+    "---",
+    "",
+    sharedBootstrap,
+  ].join("\n");
+}
+
+function buildClineFlatRule(sharedSource: string, headerLine: string): string {
+  return [
+    headerLine,
+    "",
+    "Installed by neurodivergent-memory init-agent-kit (Cline layout).",
+    "Cline loads every `.md` file in `.clinerules/` as a workspace rule, so this content is in effect for all Cline-driven sessions in this repo.",
+    "",
+    "---",
+    "",
+    stripMarkdownFrontmatter(sharedSource),
+  ].join("\n");
+}
+
+function clineRuleBaseName(templateFileName: string): string {
+  if (templateFileName.endsWith(".instructions.md")) {
+    return templateFileName.slice(0, -".instructions.md".length);
+  }
+  if (templateFileName.endsWith(".prompt.md")) {
+    return templateFileName.slice(0, -".prompt.md".length);
+  }
+  if (templateFileName.endsWith(".agent.md")) {
+    return templateFileName.slice(0, -".agent.md".length);
+  }
+  return templateFileName.replace(/\.md$/, "");
+}
+
+function buildClineAgentKitInstallEntries(
+  sourceRoot: string,
+  targetRoot: string,
+  importDirectoryAbsolutePath: string,
+  importDirectoryDisplayPath: string,
+): AgentKitInstallEntry[] {
+  const templateFileNames = resolveAgentKitSourceFileNames(sourceRoot);
+
+  // 1. Mirror the raw kit under .clinerules/agent-kit/templates/ (or whatever import-dir was selected).
+  const entries: AgentKitInstallEntry[] = templateFileNames.map((fileName) => ({
+    sourcePath: path.join(sourceRoot, fileName),
+    targetPath: path.join(importDirectoryAbsolutePath, fileName),
+  }));
+
+  // 2. Bootstrap entry: copilot-instructions.md → .clinerules/neurodivergent-memory.md
+  //    Cline picks this up as a workspace rule at session start.
+  const bootstrapSource = readAgentKitTemplate(sourceRoot, "copilot-instructions.md");
+  entries.push({
+    targetPath: path.join(targetRoot, ".clinerules", "neurodivergent-memory.md"),
+    content: buildClineBootstrapRule(bootstrapSource),
+  });
+
+  // 3. README/manifest at the .clinerules root explaining the layout and refresh command.
+  entries.push({
+    targetPath: path.join(targetRoot, ".clinerules", "README.md"),
+    content: buildClineRootInstructions(importDirectoryDisplayPath),
+  });
+
+  // 4. Translate every other template into the location Cline natively reads:
+  //    - *.instructions.md → .clinerules/<name>.md (workspace rule)
+  //    - *.prompt.md       → .clinerules/workflows/<name>.md (slash-command discoverable)
+  //    - *.agent.md        → .clinerules/agents/<name>.md (informational subagent profile)
+  for (const fileName of templateFileNames) {
+    if (fileName === "copilot-instructions.md") {
+      continue;
+    }
+
+    const baseName = clineRuleBaseName(fileName);
+    const sourcePath = path.join(sourceRoot, fileName);
+
+    if (fileName.endsWith(".instructions.md")) {
+      const sharedSource = readAgentKitTemplate(sourceRoot, fileName);
+      entries.push({
+        targetPath: path.join(targetRoot, ".clinerules", `${baseName}.md`),
+        content: buildClineFlatRule(sharedSource, `# ${baseName}`),
+      });
+      continue;
+    }
+
+    if (fileName.endsWith(".prompt.md")) {
+      // Workflows are copied as-is so `/<baseName>` invocations keep the original frontmatter and prompt body.
+      entries.push({
+        sourcePath,
+        targetPath: path.join(targetRoot, ".clinerules", "workflows", `${baseName}.md`),
+      });
+      continue;
+    }
+
+    if (fileName.endsWith(".agent.md")) {
+      entries.push({
+        sourcePath,
+        targetPath: path.join(targetRoot, ".clinerules", "agents", `${baseName}.md`),
+      });
+      continue;
+    }
+  }
+
+  // De-duplicate any entries that resolve to the same target path (e.g. when import-dir overlaps with .clinerules).
+  const entriesByPath = new Map<string, AgentKitInstallEntry>();
+  for (const entry of entries) {
+    entriesByPath.set(entry.targetPath, entry);
+  }
+
+  return [...entriesByPath.values()].sort((left, right) => left.targetPath.localeCompare(right.targetPath));
+}
+
 function resolveCopilotAgentKitTargetRelativePaths(templateFileName: string): string[] {
+
   const relativeTargetPaths: string[] = [];
 
   if (templateFileName === "copilot-instructions.md") {
@@ -482,18 +663,29 @@ function resolveAgentKitInstall(sourceRoot: string, options: AgentKitCliOptions)
     normalized.brand,
     options.importDir,
   );
-  const installEntries = normalized.brand === "claude"
-    ? buildClaudeAgentKitInstallEntries(
+  let installEntries: AgentKitInstallEntry[];
+  if (normalized.brand === "claude") {
+    installEntries = buildClaudeAgentKitInstallEntries(
       sourceRoot,
       normalized.targetRoot,
       importDirectory.absolutePath,
       importDirectory.displayPath,
-    )
-    : buildCopilotAgentKitInstallEntries(
+    );
+  } else if (normalized.brand === "cline") {
+    installEntries = buildClineAgentKitInstallEntries(
+      sourceRoot,
+      normalized.targetRoot,
+      importDirectory.absolutePath,
+      importDirectory.displayPath,
+    );
+  } else {
+    installEntries = buildCopilotAgentKitInstallEntries(
       sourceRoot,
       normalized.targetRoot,
       importDirectory.absolutePath,
     );
+  }
+
 
   return {
     brand: normalized.brand,

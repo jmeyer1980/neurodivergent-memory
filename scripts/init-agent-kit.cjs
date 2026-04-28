@@ -23,14 +23,15 @@ function promptUser(question) {
 }
 
 async function promptBrand() {
-  const answer = (await promptUser("Install for which brand? [auto/copilot/claude] (default: auto): "))
+  const answer = (await promptUser("Install for which brand? [auto/copilot/claude/cline] (default: auto): "))
     .trim()
     .toLowerCase();
 
   if (!answer) return "auto";
-  if (answer === "auto" || answer === "copilot" || answer === "claude") return answer;
-  throw new Error("Unsupported brand. Use auto, copilot, or claude.");
+  if (answer === "auto" || answer === "copilot" || answer === "claude" || answer === "cline") return answer;
+  throw new Error("Unsupported brand. Use auto, copilot, claude, or cline.");
 }
+
 
 async function promptImportDir() {
   const answer = await promptUser(
