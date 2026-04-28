@@ -75,7 +75,79 @@ test("init-agent-kit normalizes a .claude target back to the repository root", (
   }
 });
 
+test("init-agent-kit installs Cline layout when brand cline is selected", () => {
+  const tempRepo = makeTempRepo();
+
+  try {
+    const result = runInitAgentKit(["--target", tempRepo, "--brand", "cline"]);
+
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(result.stdout, /Agent brand: cline/);
+    assert.match(result.stdout, /Kit import directory: \.clinerules\/agent-kit\/templates/);
+
+    // Native Cline workspace rules
+    assert.equal(fs.existsSync(path.join(tempRepo, ".clinerules", "neurodivergent-memory.md")), true);
+    assert.equal(fs.existsSync(path.join(tempRepo, ".clinerules", "kanban-memory.md")), true);
+    assert.equal(fs.existsSync(path.join(tempRepo, ".clinerules", "nd-memory-workflow.md")), true);
+    assert.equal(fs.existsSync(path.join(tempRepo, ".clinerules", "README.md")), true);
+
+    // Slash-command-discoverable workflows + informational subagent profiles
+    assert.equal(fs.existsSync(path.join(tempRepo, ".clinerules", "workflows", "setup-nd-memory.md")), true);
+    assert.equal(fs.existsSync(path.join(tempRepo, ".clinerules", "workflows", "explore_memory_city.md")), true);
+    assert.equal(fs.existsSync(path.join(tempRepo, ".clinerules", "agents", "neurodivergent-agent.md")), true);
+
+    // Raw kit mirror under the import-dir preset
+    assert.equal(
+      fs.existsSync(path.join(tempRepo, ".clinerules", "agent-kit", "templates", "kanban-memory.instructions.md")),
+      true,
+    );
+
+    // Should NOT install the Copilot or Claude layouts
+    assert.equal(fs.existsSync(path.join(tempRepo, ".github", "copilot-instructions.md")), false);
+    assert.equal(fs.existsSync(path.join(tempRepo, "CLAUDE.md")), false);
+
+    // Bootstrap rule should embed the shared bootstrap content with a Cline-specific header.
+    const bootstrap = fs.readFileSync(path.join(tempRepo, ".clinerules", "neurodivergent-memory.md"), "utf8");
+    assert.match(bootstrap, /neurodivergent-memory bootstrap for Cline/);
+  } finally {
+    fs.rmSync(tempRepo, { recursive: true, force: true });
+  }
+});
+
+test("init-agent-kit auto-detects Cline layout when the target repo already has .clinerules", () => {
+  const tempRepo = makeTempRepo();
+  fs.mkdirSync(path.join(tempRepo, ".clinerules"), { recursive: true });
+
+  try {
+    const result = runInitAgentKit(["--target", tempRepo]);
+
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(result.stdout, /Agent brand: cline/);
+    assert.equal(fs.existsSync(path.join(tempRepo, ".clinerules", "neurodivergent-memory.md")), true);
+    assert.equal(fs.existsSync(path.join(tempRepo, ".clinerules", "kanban-memory.md")), true);
+  } finally {
+    fs.rmSync(tempRepo, { recursive: true, force: true });
+  }
+});
+
+test("init-agent-kit normalizes a .clinerules target back to the repository root", () => {
+  const tempRepo = makeTempRepo();
+  const clineDir = path.join(tempRepo, ".clinerules");
+  fs.mkdirSync(clineDir, { recursive: true });
+
+  try {
+    const result = runInitAgentKit(["--target", clineDir, "--brand", "cline"]);
+
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(fs.existsSync(path.join(tempRepo, ".clinerules", "neurodivergent-memory.md")), true);
+    assert.match(result.stdout, /Normalized .*\.clinerules .* repository root/i);
+  } finally {
+    fs.rmSync(tempRepo, { recursive: true, force: true });
+  }
+});
+
 test("init-agent-kit auto-detects Claude layout when the target repo already has .claude", () => {
+
   const tempRepo = makeTempRepo();
   fs.mkdirSync(path.join(tempRepo, ".claude"), { recursive: true });
 

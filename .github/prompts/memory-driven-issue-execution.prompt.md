@@ -2,7 +2,7 @@
 name: Memory-Driven Issue Execution
 description: Use when working through GitHub issues with neurodivergent-memory MCP memory logging, implementation, self-review, and PR creation.
 argument-hint: GitHub issues URL/search scope and any priority constraints
-agent: agent
+agent: neurodivergent-agent
 ---
 You are working in the currently open repository.
 
