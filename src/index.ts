@@ -466,7 +466,7 @@ function buildClineFlatRule(sharedSource: string, headerLine: string): string {
   return [
     headerLine,
     "",
-    "Installed by neurodivergent-memory `init-agent-kit --brand cline`.",
+    "Installed by neurodivergent-memory init-agent-kit (Cline layout).",
     "Cline loads every `.md` file in `.clinerules/` as a workspace rule, so this content is in effect for all Cline-driven sessions in this repo.",
     "",
     "---",
@@ -527,9 +527,9 @@ function buildClineAgentKitInstallEntries(
 
     const baseName = clineRuleBaseName(fileName);
     const sourcePath = path.join(sourceRoot, fileName);
-    const sharedSource = readAgentKitTemplate(sourceRoot, fileName);
 
     if (fileName.endsWith(".instructions.md")) {
+      const sharedSource = readAgentKitTemplate(sourceRoot, fileName);
       entries.push({
         targetPath: path.join(targetRoot, ".clinerules", `${baseName}.md`),
         content: buildClineFlatRule(sharedSource, `# ${baseName}`),
