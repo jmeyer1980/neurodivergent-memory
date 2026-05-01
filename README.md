@@ -354,21 +354,46 @@ the snapshot file and will warn if it detects an open WAL for the target directo
 - GitHub Actions generates **artifact attestations** for the npm tarball and the pushed container image digest
 - Tagged releases upload the npm tarball, checksums, and attestation bundles as release assets
 
-### Visual Studio Marketplace Distribution (Optional)
+### Marketplace Distribution (Optional)
 
-Tagged releases can also publish an Azure DevOps / Visual Studio Marketplace extension when an extension manifest is present.
+Tagged releases can publish extension artifacts to three marketplace channels, plus Open VSX:
 
-- Workflow env defaults:
-  - `AZDO_MARKETPLACE_PUBLISHER_ID=jmeyer-twg`
-  - `AZDO_MARKETPLACE_SERVICE_URL=https://marketplace.visualstudio.com`
-  - `AZDO_EXTENSION_MANIFEST_GLOBS=vss-extension.json`
-- Required GitHub secret for publishing:
-  - `AZURE_DEVOPS_MARKETPLACE_TOKEN` (Marketplace PAT for your publisher)
-- Behavior:
-  - If no manifest matches `AZDO_EXTENSION_MANIFEST_GLOBS`, VSIX packaging/publishing is skipped.
-  - If the PAT secret is missing, publishing is skipped without failing the rest of the release pipeline.
-  - If Marketplace publish is attempted and fails, the tagged release job fails so publication issues are visible immediately.
-  - When produced, the `.vsix` artifact is also attached to the GitHub release.
+- Azure DevOps / Visual Studio Marketplace (Azure extension manifest: `vss-extension.json`)
+- VS Code Marketplace and Open VSX (VS Code extension manifest: `package.json`)
+- Visual Studio IDE Marketplace (Visual Studio IDE VSIX artifact, when provided)
+
+Install paths differ by client:
+
+- MCP runtime usage: run `npx neurodivergent-memory@latest`
+- VS Code UI companion extension: install from VS Code Marketplace (or Open VSX in compatible editors)
+- Azure DevOps marketplace package: install the `.vsix` into Azure DevOps extension management
+
+Workflow env defaults:
+
+- `AZDO_MARKETPLACE_PUBLISHER_ID=jmeyer-twg`
+- `AZDO_MARKETPLACE_SERVICE_URL=https://marketplace.visualstudio.com`
+- `AZDO_EXTENSION_MANIFEST_GLOBS=vss-extension.json`
+- `VSCODE_EXTENSION_PACKAGE_PATH=neurodivergent-memory-vscode.vsix`
+- `VSIDE_EXTENSION_VSIX_GLOBS=visualstudio-extension/*.vsix`
+
+Required GitHub secrets for publishing:
+
+- `AZURE_DEVOPS_MARKETPLACE_TOKEN` for Azure DevOps / Visual Studio Marketplace publish via `tfx-cli`
+- `VSCE_PAT` for VS Code Marketplace publish via `@vscode/vsce`
+- `OVSX_PAT` for optional Open VSX publish via `ovsx`
+
+Behavior:
+
+- If no manifest matches `AZDO_EXTENSION_MANIFEST_GLOBS`, Azure VSIX packaging/publishing is skipped.
+- If `AZURE_DEVOPS_MARKETPLACE_TOKEN` is missing, Azure marketplace publish is skipped.
+- If `VSCE_PAT` is missing, VS Code Marketplace publish is skipped.
+- If `OVSX_PAT` is missing, Open VSX publish is skipped.
+- If no Visual Studio IDE VSIX matches `VSIDE_EXTENSION_VSIX_GLOBS`, the Visual Studio IDE lane is marked `not-provided` and skipped.
+- If a Visual Studio IDE VSIX is found, it is attached to the GitHub release and the workflow emits channel guidance in the job summary.
+- Marketplace publish failures after a publish attempt fail the tagged release job so visibility is immediate.
+- Produced `.vsix` artifacts are attached to the GitHub release.
+
+The release workflow also writes a per-channel summary to the GitHub Actions job summary so publication visibility is explicit across Azure DevOps, VS Code, Visual Studio IDE, and Open VSX.
 
 ## Development RC Channel
 

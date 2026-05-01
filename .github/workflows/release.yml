@@ -17,6 +17,8 @@ env:
   AZDO_MARKETPLACE_PUBLISHER_ID: jmeyer-twg
   AZDO_MARKETPLACE_SERVICE_URL: https://marketplace.visualstudio.com
   AZDO_EXTENSION_MANIFEST_GLOBS: vss-extension.json
+  VSCODE_EXTENSION_PACKAGE_PATH: neurodivergent-memory-vscode.vsix
+  VSIDE_EXTENSION_VSIX_GLOBS: visualstudio-extension/*.vsix
 
 jobs:
   sync_release_with_main:
@@ -71,6 +73,15 @@ jobs:
 
       - name: Build package
         run: npm run build
+
+      - name: Validate VS Code extension VSIX packaging (RC gate)
+        run: |
+          npm run package:vscode
+          if [ ! -f "${VSCODE_EXTENSION_PACKAGE_PATH}" ]; then
+            echo "VS Code extension packaging did not produce ${VSCODE_EXTENSION_PACKAGE_PATH}."
+            exit 1
+          fi
+          echo "RC gate produced VS Code VSIX: ${VSCODE_EXTENSION_PACKAGE_PATH}"
 
       - name: Log in to Docker Hub
         uses: docker/login-action@v4
@@ -546,13 +557,56 @@ jobs:
           echo "found=true" >> "$GITHUB_OUTPUT"
           echo "path=$vsix_path" >> "$GITHUB_OUTPUT"
 
+      - name: Package VS Code extension VSIX
+        id: package_vscode_vsix
+        run: |
+          npm run package:vscode
+
+          if [ ! -f "${VSCODE_EXTENSION_PACKAGE_PATH}" ]; then
+            echo "VS Code extension packaging ran but no VSIX artifact was produced."
+            exit 1
+          fi
+
+          echo "path=${VSCODE_EXTENSION_PACKAGE_PATH}" >> "$GITHUB_OUTPUT"
+
+      - name: Discover Visual Studio IDE extension VSIX (optional)
+        id: discover_vside_vsix
+        run: |
+          vside_globs="${VSIDE_EXTENSION_VSIX_GLOBS:-visualstudio-extension/*.vsix}"
+
+          if ! compgen -G "$vside_globs" > /dev/null; then
+            echo "No Visual Studio IDE VSIX matched '$vside_globs'; skipping Visual Studio IDE channel publish path."
+            echo "found=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          vside_vsix_path="$(ls -1 $vside_globs | head -n 1)"
+          if [ -z "$vside_vsix_path" ]; then
+            echo "Visual Studio IDE VSIX discovery matched globs but produced no file path."
+            exit 1
+          fi
+
+          echo "found=true" >> "$GITHUB_OUTPUT"
+          echo "path=$vside_vsix_path" >> "$GITHUB_OUTPUT"
+
+      - name: Visual Studio IDE channel guidance
+        if: steps.discover_vside_vsix.outputs.found == 'true'
+        run: |
+          cat <<'EOF' >> "$GITHUB_STEP_SUMMARY"
+          ### Visual Studio IDE channel
+
+          A Visual Studio IDE VSIX artifact was discovered and attached to this release. Publication of Visual Studio IDE extensions can be completed from the Marketplace publisher portal under **New extension -> Visual Studio** if fully automated publish is not configured.
+          EOF
+
       - name: Publish extension to Visual Studio Marketplace
+        id: publish_azdo_marketplace
         if: steps.package_vsix.outputs.found == 'true'
         env:
           AZURE_DEVOPS_EXT_PAT: ${{ secrets['AZURE_DEVOPS_MARKETPLACE_TOKEN'] }}
         run: |
           if [ -z "$AZURE_DEVOPS_EXT_PAT" ]; then
             echo "AZURE_DEVOPS_MARKETPLACE_TOKEN is not configured; skipping Marketplace publish."
+            echo "published=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
@@ -564,6 +618,36 @@ jobs:
             --vsix "${{ steps.package_vsix.outputs.path }}" \
             --no-wait-validation \
             --no-prompt
+
+          echo "published=true" >> "$GITHUB_OUTPUT"
+
+      - name: Publish extension to VS Code Marketplace
+        id: publish_vscode_marketplace
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+        run: |
+          if [ -z "$VSCE_PAT" ]; then
+            echo "VSCE_PAT is not configured; skipping VS Code Marketplace publish."
+            echo "published=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          npm exec --yes -- @vscode/vsce publish --packagePath "${{ steps.package_vscode_vsix.outputs.path }}" -p "$VSCE_PAT"
+          echo "published=true" >> "$GITHUB_OUTPUT"
+
+      - name: Publish extension to Open VSX (optional)
+        id: publish_ovsx
+        env:
+          OVSX_PAT: ${{ secrets.OVSX_PAT }}
+        run: |
+          if [ -z "$OVSX_PAT" ]; then
+            echo "OVSX_PAT is not configured; skipping Open VSX publish."
+            echo "published=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          npm exec --yes -- ovsx publish "${{ steps.package_vscode_vsix.outputs.path }}" -p "$OVSX_PAT"
+          echo "published=true" >> "$GITHUB_OUTPUT"
 
       - name: Pack npm artifact
         id: pack
@@ -666,10 +750,15 @@ jobs:
             checksums.txt
             npm-package.attestation.json
             docker-image.attestation.json
+            "${{ steps.package_vscode_vsix.outputs.path }}"
           )
 
           if [ "${{ steps.package_vsix.outputs.found }}" = "true" ]; then
             assets+=("${{ steps.package_vsix.outputs.path }}")
+          fi
+
+          if [ "${{ steps.discover_vside_vsix.outputs.found }}" = "true" ]; then
+            assets+=("${{ steps.discover_vside_vsix.outputs.path }}")
           fi
 
           if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
@@ -681,3 +770,38 @@ jobs:
               "${assets[@]}" \
               --generate-notes
           fi
+
+      - name: Marketplace channel summary
+        if: always()
+        run: |
+          azdo_status="skipped"
+          vscode_status="skipped"
+          ovsx_status="skipped"
+          vside_status="not-provided"
+
+          if [ "${{ steps.publish_azdo_marketplace.outputs.published }}" = "true" ]; then
+            azdo_status="published"
+          fi
+
+          if [ "${{ steps.publish_vscode_marketplace.outputs.published }}" = "true" ]; then
+            vscode_status="published"
+          fi
+
+          if [ "${{ steps.publish_ovsx.outputs.published }}" = "true" ]; then
+            ovsx_status="published"
+          fi
+
+          if [ "${{ steps.discover_vside_vsix.outputs.found }}" = "true" ]; then
+            vside_status="artifact-attached"
+          fi
+
+          {
+            echo "### Marketplace Channel Summary"
+            echo
+            echo "| Channel | Status |"
+            echo "| --- | --- |"
+            echo "| Azure DevOps / Visual Studio Marketplace (Azure Extension) | ${azdo_status} |"
+            echo "| VS Code Marketplace | ${vscode_status} |"
+            echo "| Visual Studio IDE Marketplace | ${vside_status} |"
+            echo "| Open VSX | ${ovsx_status} |"
+          } >> "$GITHUB_STEP_SUMMARY"

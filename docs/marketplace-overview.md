@@ -13,11 +13,19 @@
 
 Use this package with MCP-capable clients and agents that need long-lived context across sessions and projects.
 
+The repository also ships a thin VS Code companion extension that helps users configure the MCP server quickly.
+The extension does not replace the MCP runtime; it provides setup-oriented commands and marketplace discoverability.
+
 Quick start:
 
 ```bash
 npx neurodivergent-memory@latest init-agent-kit
 ```
+
+VS Code companion commands:
+
+- `Neurodivergent Memory: Copy MCP Config`
+- `Neurodivergent Memory: Open Setup Docs`
 
 ## Repository and docs
 
