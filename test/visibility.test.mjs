@@ -98,7 +98,7 @@ test("store_memory with visibility:private stores and shows Visibility: private"
     assert.match(resultText(stored), /Visibility: private/);
 
     const retrieved = await server.callTool(2, "retrieve_memory", { memory_id: "memory_1" });
-    assert.match(resultText(retrieved), /private/);
+    assert.match(resultText(retrieved), /Visibility: private/);
   } finally {
     server.stop();
   }
@@ -337,7 +337,7 @@ test("share_memory sets visibility to shared and creates a provenance record", a
 
     // Source memory should now be shared
     const retrieved = await server.callTool(3, "retrieve_memory", { memory_id: "memory_1" });
-    assert.match(resultText(retrieved), /shared/);
+    assert.match(resultText(retrieved), /Visibility: shared/);
   } finally {
     server.stop();
   }

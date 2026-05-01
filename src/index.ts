@@ -3888,12 +3888,11 @@ class NeurodivergentMemory {
     // Append WAL before in-memory mutation
     this.ensureCapacityForInsert();
     this.appendWalEntry("store", { memory: this.serializeMemory(provenanceMemory) });
-    // Also link source memory to provenance
-    const updatedConnections = [...memory.connections, provenanceId];
-    this.appendWalEntry("update", { memory_id, updates: { connections: updatedConnections } as unknown as MemoryUpdatePayload });
+    // Use WAL "connect" operation so replay via connectMemoriesInternal restores the link
+    this.appendWalEntry("connect", { memory_id_1: memory_id, memory_id_2: provenanceId, bidirectional: true });
 
     this.insertMemory(provenanceMemory);
-    memory.connections = updatedConnections;
+    this.connectMemoriesInternal(memory_id, provenanceId, true);
     this.scheduleSave();
 
     logger.info(
@@ -5808,7 +5807,16 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         if (status !== undefined) updates.status = status;
         if (current_slice !== undefined) updates.current_slice = current_slice;
         if (why_now !== undefined) updates.why_now = why_now;
-        if (visibility !== undefined) updates.visibility = visibility;
+        if (visibility !== undefined) {
+          if (visibility !== null && !VALID_VISIBILITY_LEVELS.includes(visibility)) {
+            throw createNMError(
+              NM_ERRORS.INPUT_VALIDATION_FAILED,
+              `Invalid visibility level: ${visibility}`,
+              `Use one of: ${VALID_VISIBILITY_LEVELS.join(", ")}, or null to clear.`,
+            );
+          }
+          updates.visibility = visibility as VisibilityLevel | null;
+        }
 
         const updateResult = await runMutatingTool(
           "update_memory",
@@ -6156,7 +6164,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         return {
           content: [{
             type: "text",
-            text: `🔗 Shared memory "${result.memory.name}" (${memory_id})\nVisibility: ${result.memory.visibility ?? "shared"}\nProvenance record: ${result.provenance_id}\nShared with: ${target_agent_id}${target_project_id ? `\nProject: ${target_project_id}` : ""}`
+            text: `🔗 Shared memory "${result.memory.name}" (${memory_id})\nVisibility: ${result.memory.visibility ?? (new_visibility ?? "shared")}\nProvenance record: ${result.provenance_id}\nShared with: ${target_agent_id}${target_project_id ? `\nProject: ${target_project_id}` : ""}`
           }]
         };
       } catch (error) {
