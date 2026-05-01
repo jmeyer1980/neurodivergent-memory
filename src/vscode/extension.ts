@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 
-const DOCS_URL = 'https://github.com/jmeyer1980/neurodivergent-memory#setup';
+const DOCS_URL = 'https://github.com/jmeyer1980/neurodivergent-memory#quick-start';
 
 function buildMcpConfigSnippet(): string {
   return JSON.stringify(

@@ -13,6 +13,10 @@
     "Other"
   ],
   "main": "./build/vscode/extension.js",
+  "exports": {
+    ".": "./build/index.js",
+    "./vscode-extension": "./build/vscode/extension.js"
+  },
   "activationEvents": [
     "onCommand:neurodivergentMemory.copyMcpConfig",
     "onCommand:neurodivergentMemory.openDocs"
@@ -65,7 +69,7 @@
   "scripts": {
     "bench": "npm run benchmark",
     "build": "tsc && node -e \"require('fs').chmodSync('build/index.js', '755')\"",
-    "package:vscode": "npm run build && npm exec --yes -- @vscode/vsce package -o neurodivergent-memory.vsix",
+    "package:vscode": "npm run build && node scripts/package-vscode-extension.cjs",
     "prepack": "node scripts/prepare-agent-kit.cjs",
     "sync-memories": "npm run build && node build/scripts/sync-memories.js",
     "lint": "npm run lint:code && npm run lint:md",
@@ -85,7 +89,7 @@
   },
   "devDependencies": {
     "@types/node": "^25.5.2",
-    "@types/vscode": "^1.95.0",
+    "@types/vscode": "1.95.0",
     "typescript": "^6.0.2"
   }
 }

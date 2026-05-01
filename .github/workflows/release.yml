@@ -76,7 +76,7 @@ jobs:
 
       - name: Validate VS Code extension VSIX packaging (RC gate)
         run: |
-          npm exec --yes -- @vscode/vsce package -o "${VSCODE_EXTENSION_PACKAGE_PATH}"
+          npm run package:vscode
           if [ ! -f "${VSCODE_EXTENSION_PACKAGE_PATH}" ]; then
             echo "VS Code extension packaging did not produce ${VSCODE_EXTENSION_PACKAGE_PATH}."
             exit 1
@@ -560,7 +560,7 @@ jobs:
       - name: Package VS Code extension VSIX
         id: package_vscode_vsix
         run: |
-          npm exec --yes -- @vscode/vsce package -o "${VSCODE_EXTENSION_PACKAGE_PATH}"
+          npm run package:vscode
 
           if [ ! -f "${VSCODE_EXTENSION_PACKAGE_PATH}" ]; then
             echo "VS Code extension packaging ran but no VSIX artifact was produced."
@@ -632,7 +632,7 @@ jobs:
             exit 0
           fi
 
-          npm exec --yes -- @vscode/vsce publish -p "$VSCE_PAT"
+          npm exec --yes -- @vscode/vsce publish --packagePath "${{ steps.package_vscode_vsix.outputs.path }}" -p "$VSCE_PAT"
           echo "published=true" >> "$GITHUB_OUTPUT"
 
       - name: Publish extension to Open VSX (optional)
