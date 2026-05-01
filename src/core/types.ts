@@ -6,6 +6,8 @@ export type KanbanStatus = "backlog" | "ready" | "in_progress" | "blocked" | "do
 
 export type EpistemicStatusFilter = EpistemicStatus | "unset";
 
+export type VisibilityLevel = "private" | "shared" | "global";
+
 export interface MemoryNPC {
   id: string;
   name: string;
@@ -33,6 +35,7 @@ export interface MemoryNPC {
   status?: KanbanStatus;
   current_slice?: string;
   why_now?: string;
+  visibility?: VisibilityLevel;
 }
 
 export interface DistilledArtifact {
