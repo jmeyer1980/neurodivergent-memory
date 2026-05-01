@@ -17,6 +17,7 @@ env:
   AZDO_MARKETPLACE_PUBLISHER_ID: jmeyer-twg
   AZDO_MARKETPLACE_SERVICE_URL: https://marketplace.visualstudio.com
   AZDO_EXTENSION_MANIFEST_GLOBS: vss-extension.json
+  VSCODE_EXTENSION_PACKAGE_PATH: neurodivergent-memory-vscode.vsix
 
 jobs:
   sync_release_with_main:
@@ -71,6 +72,15 @@ jobs:
 
       - name: Build package
         run: npm run build
+
+      - name: Validate VS Code extension VSIX packaging (RC gate)
+        run: |
+          npm exec --yes -- @vscode/vsce package -o "${VSCODE_EXTENSION_PACKAGE_PATH}"
+          if [ ! -f "${VSCODE_EXTENSION_PACKAGE_PATH}" ]; then
+            echo "VS Code extension packaging did not produce ${VSCODE_EXTENSION_PACKAGE_PATH}."
+            exit 1
+          fi
+          echo "RC gate produced VS Code VSIX: ${VSCODE_EXTENSION_PACKAGE_PATH}"
 
       - name: Log in to Docker Hub
         uses: docker/login-action@v4
@@ -546,6 +556,18 @@ jobs:
           echo "found=true" >> "$GITHUB_OUTPUT"
           echo "path=$vsix_path" >> "$GITHUB_OUTPUT"
 
+      - name: Package VS Code extension VSIX
+        id: package_vscode_vsix
+        run: |
+          npm exec --yes -- @vscode/vsce package -o "${VSCODE_EXTENSION_PACKAGE_PATH}"
+
+          if [ ! -f "${VSCODE_EXTENSION_PACKAGE_PATH}" ]; then
+            echo "VS Code extension packaging ran but no VSIX artifact was produced."
+            exit 1
+          fi
+
+          echo "path=${VSCODE_EXTENSION_PACKAGE_PATH}" >> "$GITHUB_OUTPUT"
+
       - name: Publish extension to Visual Studio Marketplace
         if: steps.package_vsix.outputs.found == 'true'
         env:
@@ -564,6 +586,28 @@ jobs:
             --vsix "${{ steps.package_vsix.outputs.path }}" \
             --no-wait-validation \
             --no-prompt
+
+      - name: Publish extension to VS Code Marketplace
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+        run: |
+          if [ -z "$VSCE_PAT" ]; then
+            echo "VSCE_PAT is not configured; skipping VS Code Marketplace publish."
+            exit 0
+          fi
+
+          npm exec --yes -- @vscode/vsce publish -p "$VSCE_PAT"
+
+      - name: Publish extension to Open VSX (optional)
+        env:
+          OVSX_PAT: ${{ secrets.OVSX_PAT }}
+        run: |
+          if [ -z "$OVSX_PAT" ]; then
+            echo "OVSX_PAT is not configured; skipping Open VSX publish."
+            exit 0
+          fi
+
+          npm exec --yes -- ovsx publish "${{ steps.package_vscode_vsix.outputs.path }}" -p "$OVSX_PAT"
 
       - name: Pack npm artifact
         id: pack
@@ -666,6 +710,7 @@ jobs:
             checksums.txt
             npm-package.attestation.json
             docker-image.attestation.json
+            "${{ steps.package_vscode_vsix.outputs.path }}"
           )
 
           if [ "${{ steps.package_vsix.outputs.found }}" = "true" ]; then

@@ -1,8 +1,34 @@
 {
   "name": "neurodivergent-memory",
+  "displayName": "Neurodivergent Memory",
   "version": "0.3.9",
   "mcpName": "io.github.jmeyer1980/neurodivergent-memory",
   "description": "A Model Context Protocol server for knowledge graphs designed around neurodivergent thinking patterns",
+  "publisher": "jmeyer1980",
+  "icon": "assets/marketplace-icon.png",
+  "engines": {
+    "vscode": "^1.95.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "main": "./build/vscode/extension.js",
+  "activationEvents": [
+    "onCommand:neurodivergentMemory.copyMcpConfig",
+    "onCommand:neurodivergentMemory.openDocs"
+  ],
+  "contributes": {
+    "commands": [
+      {
+        "command": "neurodivergentMemory.copyMcpConfig",
+        "title": "Neurodivergent Memory: Copy MCP Config"
+      },
+      {
+        "command": "neurodivergentMemory.openDocs",
+        "title": "Neurodivergent Memory: Open Setup Docs"
+      }
+    ]
+  },
   "license": "MIT",
   "type": "module",
   "repository": {
@@ -30,11 +56,16 @@
   },
   "files": [
     "build",
-    "templates"
+    "templates",
+    "assets",
+    "docs",
+    "README.md",
+    "LICENSE"
   ],
   "scripts": {
     "bench": "npm run benchmark",
     "build": "tsc && node -e \"require('fs').chmodSync('build/index.js', '755')\"",
+    "package:vscode": "npm run build && npm exec --yes -- @vscode/vsce package -o neurodivergent-memory.vsix",
     "prepack": "node scripts/prepare-agent-kit.cjs",
     "sync-memories": "npm run build && node build/scripts/sync-memories.js",
     "lint": "npm run lint:code && npm run lint:md",
@@ -54,6 +85,7 @@
   },
   "devDependencies": {
     "@types/node": "^25.5.2",
+    "@types/vscode": "^1.95.0",
     "typescript": "^6.0.2"
   }
 }
