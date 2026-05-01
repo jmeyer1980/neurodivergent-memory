@@ -2,7 +2,7 @@
 name: explore_memory_city
 description: Use when you want the agent to explore the neurodivergent-memory MCP server as a living memory city, inspect districts, and summarize what is currently stored.
 argument-hint: Optional focus such as a topic, district, tag, or exploration goal
-agent: agent
+agent: neurodivergent-agent
 tools: [neurodivergent-memory/*]
 ---
 You are exploring the neurodivergent-memory MCP server itself, not merely describing it.

@@ -3,7 +3,7 @@ name: setup-nd-memory
 
 description: Set up memory-driven project customizations from the nd-memory agent kit and confirm install policy.
 argument-hint: Optional target agent name and any project-specific constraints
-agent: agent
+agent: neurodivergent-agent
 ---
 
 Import and configure memory-driven customizations for the current project.
