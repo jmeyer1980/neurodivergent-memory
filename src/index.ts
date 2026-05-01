@@ -38,7 +38,7 @@ import {
   mcpErrorResult,
   type McpErrorShape,
 } from "./core/error-codes.js";
-import type { DistilledArtifact, EpistemicStatus, EpistemicStatusFilter, KanbanStatus, MemoryArchetype, MemoryNPC } from "./core/types.js";
+import type { DistilledArtifact, EpistemicStatus, EpistemicStatusFilter, KanbanStatus, MemoryArchetype, MemoryNPC, VisibilityLevel } from "./core/types.js";
 
 function resolveServerPackageInfo(): { name: string; version: string } {
   try {
@@ -999,6 +999,7 @@ const DEFAULT_AGENT_ID = "unassigned";
 
 const VALID_EPISTEMIC_STATUSES: EpistemicStatus[] = ["draft", "validated", "outdated"];
 const KANBAN_STATUSES: KanbanStatus[] = ["backlog", "ready", "in_progress", "blocked", "done"];
+const VALID_VISIBILITY_LEVELS: VisibilityLevel[] = ["private", "shared", "global"];
 
 type MemoryUpdatePayload = Partial<Pick<MemoryNPC, "content" | "tags" | "emotional_valence" | "intensity" | "district" | "epistemic_status" | "project_id" | "repeat_write_count" | "repeat_count" | "last_similarity_score" | "ping_pong_counter">> & {
   memory_agent_id?: string;
@@ -1007,6 +1008,7 @@ type MemoryUpdatePayload = Partial<Pick<MemoryNPC, "content" | "tags" | "emotion
   status?: KanbanStatus | null;
   current_slice?: string | null;
   why_now?: string | null;
+  visibility?: VisibilityLevel | null;
 };
 
 interface WalEntry {
@@ -2744,6 +2746,7 @@ class NeurodivergentMemory {
     status?: KanbanStatus,
     current_slice?: string,
     why_now?: string,
+    visibility?: VisibilityLevel,
   ): StoreMemoryResult {
     const registeredDistrict = this.getRegisteredDistrict(district);
     let normalizedProjectId: string | undefined = undefined;
@@ -2851,6 +2854,7 @@ class NeurodivergentMemory {
       ...(status !== undefined ? { status } : {}),
       ...(current_slice !== undefined ? { current_slice } : {}),
       ...(why_now !== undefined ? { why_now } : {}),
+      ...(visibility !== undefined ? { visibility } : {}),
     };
 
     this.ensureCapacityForInsert();
@@ -3071,6 +3075,13 @@ class NeurodivergentMemory {
         memory.why_now = updates.why_now;
       }
     }
+    if (Object.prototype.hasOwnProperty.call(updates, "visibility")) {
+      if (updates.visibility === null) {
+        delete memory.visibility;
+      } else if (updates.visibility !== undefined) {
+        memory.visibility = updates.visibility;
+      }
+    }
 
     this.bm25.addDocument(id, this.documentText(memory));
   }
@@ -3116,6 +3127,7 @@ class NeurodivergentMemory {
     context?: string,
     recency_weight = 0,
     session_id?: string,
+    visibility?: VisibilityLevel[],
   ): SearchMemoriesResult {
     if (recency_weight < 0 || recency_weight > 1) {
       throw createNMError(
@@ -3169,6 +3181,13 @@ class NeurodivergentMemory {
     }
     if (intensity_max !== undefined) {
       candidates = candidates.filter(m => (m.intensity ?? 0.5) <= intensity_max!);
+    }
+
+    if (visibility && visibility.length > 0) {
+      candidates = candidates.filter(m => {
+        const memVisibility = m.visibility ?? "private";
+        return visibility.includes(memVisibility);
+      });
     }
 
     const hasContext = typeof context === "string" && context.trim().length > 0;
@@ -3367,6 +3386,7 @@ class NeurodivergentMemory {
     project_id?: string,
     epistemic_statuses?: EpistemicStatusFilter[],
     session_id?: string,
+    visibility?: VisibilityLevel[],
   ): { memories: MemoryNPC[]; total: number; page: number; page_size: number; total_pages: number } {
     let all = Object.values(this.memories);
     if (district) all = all.filter(m => m.district === district);
@@ -3380,6 +3400,12 @@ class NeurodivergentMemory {
       all = all.filter(m => {
         const status = m.epistemic_status ?? "unset";
         return epistemic_statuses.includes(status);
+      });
+    }
+    if (visibility && visibility.length > 0) {
+      all = all.filter(m => {
+        const memVisibility = m.visibility ?? "private";
+        return visibility.includes(memVisibility);
       });
     }
 
@@ -3776,6 +3802,113 @@ class NeurodivergentMemory {
       distilled: distilledMemory,
       artifact,
     };
+  }
+
+  /**
+   * Share a memory by updating its visibility and recording a provenance trail.
+   * Returns the updated memory and the new provenance connection memory ID.
+   * - `target_agent_id`: the agent to whom the memory is being shared (recorded for audit)
+   * - `target_project_id`: optionally restricts sharing to a specific project
+   * - `new_visibility`: the visibility level to set; defaults to "shared"
+   */
+  shareMemory(
+    memory_id: string,
+    target_agent_id: string,
+    target_project_id?: string,
+    new_visibility: VisibilityLevel = "shared",
+    agent_id?: string,
+  ): { memory: MemoryNPC; provenance_id: string } {
+    const memory = this.memories[memory_id];
+    if (!memory) {
+      throw createNMError(
+        NM_ERRORS.MEMORY_NOT_FOUND,
+        `Memory not found: ${memory_id}`,
+        "List or search memories first, then retry with a valid memory ID.",
+      );
+    }
+
+    if (!VALID_VISIBILITY_LEVELS.includes(new_visibility)) {
+      throw createNMError(
+        NM_ERRORS.INPUT_VALIDATION_FAILED,
+        `Invalid visibility level: ${new_visibility}`,
+        `Use one of: ${VALID_VISIBILITY_LEVELS.join(", ")}.`,
+      );
+    }
+
+    const normalizedTargetAgent = normalizeOptionalAgentId(target_agent_id, "target_agent_id");
+    if (!normalizedTargetAgent) {
+      throw createNMError(
+        NM_ERRORS.INPUT_VALIDATION_FAILED,
+        "target_agent_id must be a non-empty string.",
+        "Provide the agent identifier to share with.",
+      );
+    }
+
+    if (target_project_id !== undefined) {
+      validateProjectId(target_project_id, "target_project_id");
+    }
+
+    const storedAgentId = resolveStoredAgentId(agent_id);
+    const now = new Date();
+
+    // Update visibility on the source memory
+    const previousVisibility = memory.visibility ?? "private";
+    const visibilityUpdates: MemoryUpdatePayload = { visibility: new_visibility };
+    this.appendWalEntry("update", { memory_id, updates: visibilityUpdates });
+    this.applyMemoryUpdates(memory_id, visibilityUpdates);
+
+    // Create a provenance trail memory in vigilant_monitoring
+    const provenanceId = `memory_${this.nextMemoryId++}`;
+    const provenanceContent = `Share provenance: memory ${memory_id} shared by agent ${storedAgentId} with agent ${normalizedTargetAgent}${target_project_id ? ` in project ${target_project_id}` : ""}. Visibility changed from ${previousVisibility} to ${new_visibility}.`;
+    const provenanceMemory: MemoryNPC = {
+      id: provenanceId,
+      name: `Share provenance ${memory_id}`,
+      archetype: "guard",
+      agent_id: storedAgentId,
+      project_id: normalizeProjectId(target_project_id ?? memory.project_id),
+      district: "vigilant_monitoring",
+      content: provenanceContent,
+      traits: ["vigilant", "protective"],
+      concerns: ["safety", "boundaries"],
+      connections: [memory_id],
+      tags: [
+        "topic:visibility",
+        "kind:provenance",
+        "scope:project",
+        "layer:implementation",
+        `share:from:${storedAgentId}`,
+        `share:to:${normalizedTargetAgent}`,
+      ],
+      created: now,
+      last_accessed: now,
+      access_count: 1,
+      intensity: 0.5,
+    };
+
+    // Append WAL before in-memory mutation
+    this.ensureCapacityForInsert();
+    this.appendWalEntry("store", { memory: this.serializeMemory(provenanceMemory) });
+    // Use WAL "connect" operation so replay via connectMemoriesInternal restores the link
+    this.appendWalEntry("connect", { memory_id_1: memory_id, memory_id_2: provenanceId, bidirectional: true });
+
+    this.insertMemory(provenanceMemory);
+    this.connectMemoriesInternal(memory_id, provenanceId, true);
+    this.scheduleSave();
+
+    logger.info(
+      {
+        operation: "share_memory",
+        memory_id,
+        provenance_id: provenanceId,
+        from_agent: storedAgentId,
+        to_agent: normalizedTargetAgent,
+        new_visibility,
+        previous_visibility: previousVisibility,
+      },
+      "Shared memory",
+    );
+
+    return { memory: this.memories[memory_id], provenance_id: provenanceId };
   }
 
   /**
@@ -4816,6 +4949,11 @@ function buildRegisteredToolDescriptors(): ToolDescriptor[] {
             why_now: {
               type: "string",
               description: "Optional reason this task is being prioritized now"
+            },
+            visibility: {
+              type: "string",
+              enum: ["private", "shared", "global"],
+              description: "Optional visibility level: private (default, agent-local), shared (explicit share recipients), global (all agents)"
             }
           },
           required: ["content", "district"]
@@ -4918,6 +5056,11 @@ function buildRegisteredToolDescriptors(): ToolDescriptor[] {
             why_now: {
               type: ["string", "null"],
               description: "New prioritization reason (optional); pass null to clear"
+            },
+            visibility: {
+              type: ["string", "null"],
+              enum: ["private", "shared", "global", null],
+              description: "New visibility level (optional); pass null to clear (reverts to private default)"
             }
           },
           required: ["memory_id"]
@@ -5048,6 +5191,11 @@ function buildRegisteredToolDescriptors(): ToolDescriptor[] {
             session_id: {
               type: "string",
               description: "Optional session_id filter"
+            },
+            visibility: {
+              type: "array",
+              items: { type: "string", enum: ["private", "shared", "global"] },
+              description: "Optional visibility filter (OR logic). Unset memories are treated as private."
             }
           },
           required: ["query"]
@@ -5144,6 +5292,11 @@ function buildRegisteredToolDescriptors(): ToolDescriptor[] {
               type: "array",
               items: { type: "string", enum: ["draft", "validated", "outdated", "unset"] },
               description: "Optional epistemic status filters"
+            },
+            visibility: {
+              type: "array",
+              items: { type: "string", enum: ["private", "shared", "global"] },
+              description: "Optional visibility filter (OR logic). Unset memories are treated as private."
             }
           }
         }
@@ -5322,6 +5475,37 @@ function buildRegisteredToolDescriptors(): ToolDescriptor[] {
         }
       },
       {
+        name: "share_memory",
+        description: "Set a memory's visibility to 'shared' (or another level) and record an auditable provenance trail. Returns the updated memory and the provenance record ID.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            memory_id: {
+              type: "string",
+              description: "ID of the memory to share"
+            },
+            target_agent_id: {
+              type: "string",
+              description: "Agent identifier this memory is being shared with"
+            },
+            target_project_id: {
+              type: "string",
+              description: "Optional project identifier this memory is being shared into"
+            },
+            new_visibility: {
+              type: "string",
+              enum: ["private", "shared", "global"],
+              description: "Visibility level to set (default: shared)"
+            },
+            agent_id: {
+              type: "string",
+              description: "Optional agent performing the share action (uses stored default if omitted)"
+            }
+          },
+          required: ["memory_id", "target_agent_id"]
+        }
+      },
+      {
         name: "kanban_view",
         description: "Show a kanban board view of practical_execution memories, grouped by status (in_progress, blocked, ready, backlog, done). Useful for workflow status checks and WIP monitoring.",
         inputSchema: {
@@ -5486,7 +5670,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       return buildListToolsResult();
     }
     case "store_memory": {
-      const { content, district, tags = [], emotional_valence, intensity = 0.5, agent_id, project_id, epistemic_status, session_id, status, current_slice, why_now } = request.params.arguments as any;
+      const { content, district, tags = [], emotional_valence, intensity = 0.5, agent_id, project_id, epistemic_status, session_id, status, current_slice, why_now, visibility } = request.params.arguments as any;
 
       try {
         if (status === null || current_slice === null || why_now === null) {
@@ -5539,6 +5723,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
               status,
               current_slice,
               why_now,
+              visibility,
             );
           },
         );
@@ -5557,7 +5742,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         return {
           content: [{
             type: "text",
-            text: `🧠 Stored memory "${memory.name}" in ${memorySystem.getAllDistricts().find(d => d.name.toLowerCase().replace(/\s+/g, '_') === district)?.name || district}\nID: ${memory.id}\nArchetype: ${memory.archetype}\nAgent: ${memory.agent_id ?? "unassigned"}\nProject: ${memory.project_id ?? "unset"}\nSession: ${memory.session_id ?? "unset"}\nStatus: ${memory.status ?? "unset"}\nEpistemic status: ${memory.epistemic_status ?? "unset"}\n${repeatLines}${warningLine}${repeatWarningLine}${cooldownLine}`
+            text: `🧠 Stored memory "${memory.name}" in ${memorySystem.getAllDistricts().find(d => d.name.toLowerCase().replace(/\s+/g, '_') === district)?.name || district}\nID: ${memory.id}\nArchetype: ${memory.archetype}\nAgent: ${memory.agent_id ?? "unassigned"}\nProject: ${memory.project_id ?? "unset"}\nSession: ${memory.session_id ?? "unset"}\nStatus: ${memory.status ?? "unset"}\nEpistemic status: ${memory.epistemic_status ?? "unset"}\nVisibility: ${memory.visibility ?? "private"}\n${repeatLines}${warningLine}${repeatWarningLine}${cooldownLine}`
           }]
         };
       } catch (error) {
@@ -5599,13 +5784,13 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       return {
         content: [{
           type: "text",
-          text: `🧠 Retrieved memory "${memory.name}"\nDistrict: ${memory.district}\nAgent: ${memory.agent_id ?? 'unassigned'}\nProject: ${memory.project_id ?? 'unset'}\nEpistemic status: ${memory.epistemic_status ?? 'unset'}\nContent: ${memory.content}\nTags: ${memory.tags.join(', ')}\nEmotional valence: ${memory.emotional_valence ?? 'unset'}\nIntensity: ${memory.intensity ?? 'unset'}\nAccess count: ${memory.access_count}${retrieval?.distill_suggestion ? `\n${retrieval.distill_suggestion}` : ''}`
+          text: `🧠 Retrieved memory "${memory.name}"\nDistrict: ${memory.district}\nAgent: ${memory.agent_id ?? 'unassigned'}\nProject: ${memory.project_id ?? 'unset'}\nEpistemic status: ${memory.epistemic_status ?? 'unset'}\nVisibility: ${memory.visibility ?? 'private'}\nContent: ${memory.content}\nTags: ${memory.tags.join(', ')}\nEmotional valence: ${memory.emotional_valence ?? 'unset'}\nIntensity: ${memory.intensity ?? 'unset'}\nAccess count: ${memory.access_count}${retrieval?.distill_suggestion ? `\n${retrieval.distill_suggestion}` : ''}`
         }]
       };
     }
 
     case "update_memory": {
-      const { memory_id, content, district, tags, emotional_valence, intensity, epistemic_status, project_id, session_id, actor_district, agent_id, memory_agent_id, status, current_slice, why_now } = request.params.arguments as any;
+      const { memory_id, content, district, tags, emotional_valence, intensity, epistemic_status, project_id, session_id, actor_district, agent_id, memory_agent_id, status, current_slice, why_now, visibility } = request.params.arguments as any;
       try {
         if (status !== undefined && status !== null) validateKanbanStatus(status);
         const normalizedActorAgentId = normalizeOptionalAgentId(agent_id);
@@ -5622,6 +5807,16 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         if (status !== undefined) updates.status = status;
         if (current_slice !== undefined) updates.current_slice = current_slice;
         if (why_now !== undefined) updates.why_now = why_now;
+        if (visibility !== undefined) {
+          if (visibility !== null && !VALID_VISIBILITY_LEVELS.includes(visibility)) {
+            throw createNMError(
+              NM_ERRORS.INPUT_VALIDATION_FAILED,
+              `Invalid visibility level: ${visibility}`,
+              `Use one of: ${VALID_VISIBILITY_LEVELS.join(", ")}, or null to clear.`,
+            );
+          }
+          updates.visibility = visibility as VisibilityLevel | null;
+        }
 
         const updateResult = await runMutatingTool(
           "update_memory",
@@ -5634,7 +5829,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         return {
           content: [{
             type: "text",
-            text: `✏️ Updated memory "${memory.name}" (${memory_id})\nDistrict: ${memory.district}\nAgent: ${memory.agent_id ?? DEFAULT_AGENT_ID}\nProject: ${memory.project_id ?? 'unset'}\nSession: ${memory.session_id ?? 'unset'}\nStatus: ${memory.status ?? 'unset'}\nEpistemic status: ${memory.epistemic_status ?? 'unset'}\nTags: ${memory.tags.join(', ')}${cooldownLine}`
+            text: `✏️ Updated memory "${memory.name}" (${memory_id})\nDistrict: ${memory.district}\nAgent: ${memory.agent_id ?? DEFAULT_AGENT_ID}\nProject: ${memory.project_id ?? 'unset'}\nSession: ${memory.session_id ?? 'unset'}\nStatus: ${memory.status ?? 'unset'}\nEpistemic status: ${memory.epistemic_status ?? 'unset'}\nVisibility: ${memory.visibility ?? 'private'}\nTags: ${memory.tags.join(', ')}${cooldownLine}`
           }]
         };
       } catch (error) {
@@ -5709,7 +5904,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         emotional_valence_min, emotional_valence_max,
         intensity_min, intensity_max,
         min_intensity, max_intensity,
-        session_id,
+        session_id, visibility,
       } = request.params.arguments as any;
       try {
         if (project_id !== undefined) {
@@ -5727,7 +5922,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           min_score,
           emotional_valence_min, emotional_valence_max,
           resolvedIntensityMin, resolvedIntensityMax,
-          context, recency_weight, session_id,
+          context, recency_weight, session_id, visibility,
         );
         const results = searchResult.results;
         const didYouMeanLine = searchResult.did_you_mean
@@ -5828,7 +6023,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     }
 
     case "list_memories": {
-      const { page = 1, page_size = 20, district, archetype, project_id, epistemic_statuses, session_id } = request.params.arguments as any;
+      const { page = 1, page_size = 20, district, archetype, project_id, epistemic_statuses, session_id, visibility } = request.params.arguments as any;
       try {
         if (project_id !== undefined) {
           validateProjectId(project_id);
@@ -5836,7 +6031,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         if (session_id !== undefined) {
           validateSessionId(session_id);
         }
-        const result = memorySystem.listMemories(page, page_size, district, archetype, project_id, epistemic_statuses, session_id);
+        const result = memorySystem.listMemories(page, page_size, district, archetype, project_id, epistemic_statuses, session_id, visibility);
         if (result.memories.length === 0) {
           return { content: [{ type: "text", text: `📋 No memories found (page ${page})` }] };
         }
@@ -5954,6 +6149,33 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             MCP_INTERNAL_ERROR_CODE,
             "Unable to list sessions.",
             "Retry list_sessions; if the problem persists, inspect server and storage health.",
+          ),
+        );
+      }
+    }
+
+    case "share_memory": {
+      const { memory_id, target_agent_id, target_project_id, new_visibility, agent_id } = request.params.arguments as any;
+      try {
+        const result = await runMutatingTool(
+          "share_memory",
+          () => memorySystem.shareMemory(memory_id, target_agent_id, target_project_id, new_visibility, agent_id),
+        );
+        return {
+          content: [{
+            type: "text",
+            text: `🔗 Shared memory "${result.memory.name}" (${memory_id})\nVisibility: ${result.memory.visibility ?? (new_visibility ?? "shared")}\nProvenance record: ${result.provenance_id}\nShared with: ${target_agent_id}${target_project_id ? `\nProject: ${target_project_id}` : ""}`
+          }]
+        };
+      } catch (error) {
+        return toolErrorResult(
+          "share_memory",
+          "Failed to share memory",
+          error,
+          formatMcpError(
+            NM_ERRORS.INPUT_VALIDATION_FAILED,
+            "Share memory request was invalid.",
+            "Verify the memory_id and target_agent_id, then retry share_memory.",
           ),
         );
       }
