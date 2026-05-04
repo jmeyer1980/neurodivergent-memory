@@ -102,7 +102,7 @@ After all changes:
 ### 6. Resolve Threads
 
 For each addressed thread:
-- Call `github-pull-request_resolveReviewThread` with the thread `id`.
+- Call the declared GitHub pull-request review-thread resolution tool available in this environment with the thread `id`.
 - Resolve only when `canResolve` is `true`.
 - Skip threads already resolved or not resolvable.
 
