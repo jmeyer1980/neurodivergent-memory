@@ -13,6 +13,7 @@ This directory is a reusable, project-agnostic customization pack for memory-dri
 | `templates/copilot-instructions.md` | Bootstrap reference for GitHub Copilot sessions — tag schema, district table, tool quick-reference, session checklist, and memory-quality guardrails for recording why. |
 | `templates/explore_memory_city.prompt.md` | Prompt for guided exploration of memory districts and graph structure. |
 | `templates/memory-driven-issue-execution.prompt.md` | Prompt for executing a tracked issue with full memory-driven context (pull → plan → act → update), including durable reasoning capture. |
+| `templates/memory-driven-address-pr-comments.prompt.md` | Prompt for resolving pull request review comments with mandatory memory cadence (plan/progress/validation/handoff), rationale capture, and thread-resolution discipline. |
 | `templates/kanban-memory.instructions.md` | Instruction file that binds Kanban board lifecycle events (card creation, column transitions, blockers, sprint planning, and retrospectives) to neurodivergent-memory MCP writes. Includes a column→district mapping, per-transition memory contracts, a canonical `kanban:X` tag namespace, and memory quality guardrails. |
 
 ## Recommended Install Path
@@ -28,6 +29,17 @@ This copies the packaged templates into the target repository's `.github/...` lo
 If you need the mirrored raw kit under a different repo-local import directory, pass `--import-dir auto|copilot|claude|cline|zendesk|<repo-relative-path>`. The native brand entrypoints still install in their standard locations; `--import-dir` only changes where the reusable source bundle is mirrored.
 
 The authoring source in this repository stays under `.github/agent-kit/templates/`. The live destination `.github/agents/neurodivergent-agent.agent.md` should be treated as generated consumer state, not as a tracked source file.
+
+### Tool persistence troubleshooting
+
+If tools appear disabled after merge/pull, refresh the installed agent-kit using your repository's detected layout first:
+
+```bash
+npx neurodivergent-memory@latest init-agent-kit --brand auto
+```
+
+If auto-detection is not what you want, rerun with an explicit brand (`--brand copilot|claude|cline`) and optional `--import-dir ...`.
+Prefer running without `--force` first; use `--force` only when you intentionally want to overwrite existing installed files.
 
 ## Import Targets
 

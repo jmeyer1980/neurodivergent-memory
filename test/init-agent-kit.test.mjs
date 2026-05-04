@@ -27,6 +27,7 @@ test("init-agent-kit copies templates into standard .github targets", () => {
     assert.equal(fs.existsSync(path.join(tempRepo, ".github", "agents", "memory-driven-template.agent.md")), true);
     assert.equal(fs.existsSync(path.join(tempRepo, ".github", "instructions", "nd-memory-workflow.instructions.md")), true);
     assert.equal(fs.existsSync(path.join(tempRepo, ".github", "prompts", "setup-nd-memory.prompt.md")), true);
+    assert.equal(fs.existsSync(path.join(tempRepo, ".github", "prompts", "memory-driven-address-pr-comments.prompt.md")), true);
     assert.equal(fs.existsSync(path.join(tempRepo, ".github", "copilot-instructions.md")), true);
     // Verify templates are also installed into .github/agent-kit/templates/
     assert.equal(fs.existsSync(path.join(tempRepo, ".github", "agent-kit", "templates", "neurodivergent-agent.agent.md")), true);

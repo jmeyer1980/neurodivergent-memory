@@ -759,6 +759,17 @@ If you accidentally pass `.github` or `.claude` as the target path, the installe
 
 The source of truth remains under [`.github/agent-kit/templates/`](.github/agent-kit/templates/). The installed live agent file `.github/agents/neurodivergent-agent.agent.md` is intentionally treated as generated consumer state rather than a tracked repo artifact, so remote Copilot updates cannot keep wiping it out in this repository.
 
+### Tool persistence troubleshooting
+
+If tools appear disabled after merge/pull, refresh the installed agent-kit using your repository's detected layout first:
+
+```bash
+npx neurodivergent-memory@latest init-agent-kit --brand auto
+```
+
+If auto-detection is not what you want, rerun with an explicit brand (`--brand copilot|claude|cline`) and optional `--import-dir ...`.
+Prefer running without `--force` first; use `--force` only when you intentionally want to overwrite existing installed files.
+
 ### Manual copy fallback
 
 **Copy** the files you need into your project's standard customization locations — do not move them, so the originals remain available as a reference for future agents or contributors.
