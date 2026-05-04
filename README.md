@@ -761,14 +761,14 @@ The source of truth remains under [`.github/agent-kit/templates/`](.github/agent
 
 ### Tool persistence troubleshooting
 
-If tools appear disabled after merge/pull, refresh the generated live agent file from templates:
+If tools appear disabled after merge/pull, refresh the installed agent-kit using your repository's detected layout first:
 
 ```bash
-npx neurodivergent-memory init-agent-kit --brand copilot --force
+npx neurodivergent-memory@latest init-agent-kit --brand auto
 ```
 
-This rehydrates `.github/agents/neurodivergent-agent.agent.md` from `.github/agent-kit/templates/`.
-The template uses wildcard tool groups to reduce breakage when tool IDs evolve across extension/client versions.
+If auto-detection is not what you want, rerun with an explicit brand (`--brand copilot|claude|cline`) and optional `--import-dir ...`.
+Prefer running without `--force` first; use `--force` only when you intentionally want to overwrite existing installed files.
 
 ### Manual copy fallback
 

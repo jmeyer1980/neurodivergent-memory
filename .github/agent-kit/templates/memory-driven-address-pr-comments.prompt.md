@@ -54,7 +54,7 @@ Memory quality rules:
 
 ### 1. Read the Active PR
 
-Call the `github-pull-request_currentActivePullRequest` tool.
+Use the active-pull-request tool available in the current workflow (for example `github.vscode-pull-request-github/activePullRequest` or an equivalent pull-request read tool).
 
 Refresh logic:
 - Call the tool once without `refresh` to get cached state.
@@ -102,9 +102,10 @@ After all changes:
 ### 6. Resolve Threads
 
 For each addressed thread:
-- Call the declared GitHub pull-request review-thread resolution tool available in this environment with the thread `id`.
+- If the current workflow exposes a pull-request review-thread resolution tool, use that available tool with the thread `id`.
 - Resolve only when `canResolve` is `true`.
 - Skip threads already resolved or not resolvable.
+- If no review-thread resolution tool is available in the current workflow, do not attempt to resolve the thread; note that limitation in the final summary.
 
 ### 7. Summarize
 

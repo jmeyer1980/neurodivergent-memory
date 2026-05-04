@@ -30,6 +30,17 @@ If you need the mirrored raw kit under a different repo-local import directory, 
 
 The authoring source in this repository stays under `.github/agent-kit/templates/`. The live destination `.github/agents/neurodivergent-agent.agent.md` should be treated as generated consumer state, not as a tracked source file.
 
+### Tool persistence troubleshooting
+
+If tools appear disabled after merge/pull, refresh the installed agent-kit using your repository's detected layout first:
+
+```bash
+npx neurodivergent-memory@latest init-agent-kit --brand auto
+```
+
+If auto-detection is not what you want, rerun with an explicit brand (`--brand copilot|claude|cline`) and optional `--import-dir ...`.
+Prefer running without `--force` first; use `--force` only when you intentionally want to overwrite existing installed files.
+
 ## Import Targets
 
 **Copy** (do not move) these templates into your project's standard customization locations. The right directories vary by agent platform — use whatever location your agent natively reads from. Common examples:

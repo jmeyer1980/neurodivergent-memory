@@ -58,7 +58,7 @@ Memory quality rules:
 
 ### 1. Read the Active PR
 
-Call the `github-pull-request_currentActivePullRequest` tool.
+Use the active-pull-request tool available in the current workflow (for example `github.vscode-pull-request-github/activePullRequest` or an equivalent pull-request read tool).
 
 **Refresh logic**: Check whether a refresh is needed before reading:
 
