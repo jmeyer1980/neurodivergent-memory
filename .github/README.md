@@ -28,6 +28,17 @@ To change where the mirrored raw kit is placed, pass `--import-dir auto|copilot|
 
 The authoring source in this repository stays under `.github/agent-kit/templates/`. The live destination `.github/agents/neurodivergent-agent.agent.md` should be treated as generated consumer state, not as a tracked source file.
 
+### Tool persistence troubleshooting
+
+If tools appear disabled after merge/pull, refresh the generated live agent file from templates:
+
+```bash
+npx neurodivergent-memory init-agent-kit --brand copilot --force
+```
+
+This rehydrates `.github/agents/neurodivergent-agent.agent.md` from `.github/agent-kit/templates/`.
+The template uses wildcard tool groups to reduce breakage when tool IDs evolve across extension/client versions.
+
 ## Import Targets
 
 **Copy** (do not move) these templates into your project's standard customization locations. The right directories vary by agent platform — use whatever location your agent natively reads from. Common examples:

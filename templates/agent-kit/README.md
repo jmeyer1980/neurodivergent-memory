@@ -13,6 +13,7 @@ This directory is a reusable, project-agnostic customization pack for memory-dri
 | `templates/copilot-instructions.md` | Bootstrap reference for GitHub Copilot sessions — tag schema, district table, tool quick-reference, session checklist, and memory-quality guardrails for recording why. |
 | `templates/explore_memory_city.prompt.md` | Prompt for guided exploration of memory districts and graph structure. |
 | `templates/memory-driven-issue-execution.prompt.md` | Prompt for executing a tracked issue with full memory-driven context (pull → plan → act → update), including durable reasoning capture. |
+| `templates/memory-driven-address-pr-comments.prompt.md` | Prompt for resolving pull request review comments with mandatory memory cadence (plan/progress/validation/handoff), rationale capture, and thread-resolution discipline. |
 
 ## Recommended Install Path
 
@@ -35,6 +36,17 @@ npx neurodivergent-memory@latest init-agent-kit --brand claude
 That writes Claude-native entrypoints such as `CLAUDE.md`, `.claude/rules/`, and `.claude/agents/`, while still mirroring the raw source templates under `.claude/agent-kit/templates/`.
 
 The authoring source in this repository stays under `.github/agent-kit/templates/`. The live destination `.github/agents/neurodivergent-agent.agent.md` should be treated as generated consumer state, not as a tracked source file.
+
+### Tool persistence troubleshooting
+
+If tools appear disabled after merge/pull, refresh the generated live agent file from templates:
+
+```bash
+npx neurodivergent-memory init-agent-kit --brand copilot --force
+```
+
+This rehydrates `.github/agents/neurodivergent-agent.agent.md` from `.github/agent-kit/templates/`.
+The template uses wildcard tool groups to reduce breakage when tool IDs evolve across extension/client versions.
 
 ## Import Targets
 
