@@ -117,9 +117,10 @@ After all changes are made:
 
 For each thread that was addressed (either by a code change or by a deliberate decision not to change):
 
-- Call `github-pull-request_resolveReviewThread` with the `id` from the `reviewThreads` array.
+- If the current workflow exposes a pull-request review-thread resolution tool, use that available tool with the `id` from the `reviewThreads` array.
 - Only resolve threads where `canResolve` is `true`.
 - Skip threads that are already resolved (`isResolved: true`) or where `canResolve` is `false`.
+- If no review-thread resolution tool is available in the current workflow, do not attempt to resolve the thread; instead, note that limitation in the final summary.
 
 ### 7. Summarize
 
