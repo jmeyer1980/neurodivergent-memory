@@ -28,6 +28,7 @@ import { fileURLToPath } from "url";
 import { logger } from "./core/logger.js";
 import { resolvePersistenceLocation } from "./core/persistence.js";
 import { AsyncMutex } from "./core/async-mutex.js";
+import { FileSystemCoordinationLock, isFilesystemLockEnabled, COORDINATION_MODE_ENV } from "./core/coordination-lock.js";
 import { LoopTelemetryTracker } from "./core/loop-telemetry.js";
 import {
   MCP_INTERNAL_ERROR_CODE,
@@ -970,6 +971,9 @@ logger.info(
   "Resolved persistence location",
 );
 
+const COORDINATION_MODE = process.env[COORDINATION_MODE_ENV]?.trim() ?? "none";
+logger.info({ coordinationMode: COORDINATION_MODE }, "Cross-process coordination mode");
+
 /**
  * On-disk representation of a MemoryNPC: identical to MemoryNPC except that
  * Date fields are stored as ISO-8601 strings so the shape round-trips through
@@ -1162,6 +1166,9 @@ class NeurodivergentMemory {
   private saveTimer: ReturnType<typeof setTimeout> | null = null;
   // Promise chain that ensures saves never run concurrently
   private saveChain: Promise<void> = Promise.resolve();
+  // Optional cross-process filesystem lock (enabled via NEURODIVERGENT_COORDINATION_MODE=filesystem-lock)
+  private readonly coordinationLock: FileSystemCoordinationLock | null =
+    isFilesystemLockEnabled() ? new FileSystemCoordinationLock(PERSISTENCE_FILE) : null;
 
   constructor() {
     this.initializeDistricts();
@@ -1402,13 +1409,19 @@ class NeurodivergentMemory {
   }
 
   private async saveToDiskAsync(): Promise<void> {
-    await fs.promises.mkdir(PERSISTENCE_DIR, { recursive: true });
-    const snapshot = this.createSnapshot();
-    // Write to a temp file first, then rename for an atomic swap so a partial
-    // write can never corrupt the live snapshot.
-    const tmp = PERSISTENCE_FILE + ".tmp";
-    await fs.promises.writeFile(tmp, JSON.stringify(snapshot, null, 2), "utf-8");
-    await fs.promises.rename(tmp, PERSISTENCE_FILE);
+    // Acquire cross-process lock if coordination mode is enabled.
+    await this.coordinationLock?.acquire();
+    try {
+      await fs.promises.mkdir(PERSISTENCE_DIR, { recursive: true });
+      const snapshot = this.createSnapshot();
+      // Write to a temp file first, then rename for an atomic swap so a partial
+      // write can never corrupt the live snapshot.
+      const tmp = PERSISTENCE_FILE + ".tmp";
+      await fs.promises.writeFile(tmp, JSON.stringify(snapshot, null, 2), "utf-8");
+      await fs.promises.rename(tmp, PERSISTENCE_FILE);
+    } finally {
+      this.coordinationLock?.release();
+    }
   }
 
   private saveToDiskSync(): void {
