@@ -41,8 +41,18 @@ NEURODIVERGENT_MEMORY_FILE=/data/shared/memories.json npx neurodivergent-memory
 ## Profile B — Multi-Writer with Filesystem Lock
 
 Use this when multiple neurodivergent-memory server processes must share the
-same snapshot file (e.g., two agents on the same machine, a container sidecar
-alongside a host server).
+same snapshot file during a **rolling restart or brief overlap window** (e.g.,
+the old process is draining while the new one starts up). It is also safe for
+a container sidecar alongside a host server where at most one process writes
+at any given moment.
+
+> **⚠️ Not for active-active concurrent writers**: each process maintains its
+> own **in-memory state** and writes a **full snapshot** without reloading or
+> merging state from other processes. The filesystem lock prevents a
+> **torn write** (two processes writing at the same instant), but it does **not**
+> prevent **lost updates** (last writer wins, overwriting changes made by the
+> other process since its last load). For active-active workloads, use a
+> single process with multiple agents connecting to it over MCP.
 
 ### Configuration
 
@@ -50,9 +60,9 @@ alongside a host server).
 export NEURODIVERGENT_COORDINATION_MODE=filesystem-lock
 export NEURODIVERGENT_MEMORY_FILE=/data/shared/memories.json
 
-# Start as many processes as needed — each will coordinate through the lock.
-npx neurodivergent-memory &
-npx neurodivergent-memory &
+# One process replaces another during a rolling restart.
+npx neurodivergent-memory &   # new process
+# ... allow old process to drain and stop
 ```
 
 ### How it works
@@ -80,13 +90,18 @@ npx neurodivergent-memory &
 
 ### Limitations
 
+- **Startup path not covered**: the startup WAL-compaction write (`saveToDiskSync`)
+  runs once at process boot without acquiring the lock. In practice this window
+  is sub-second and is safe for rolling-restart deployments, but it means two
+  processes simultaneously booting against the same snapshot could race on that
+  initial compaction write. Use staggered restarts to avoid this window.
 - Filesystem locking provides safety only on **local filesystems**. Network
   filesystems (NFS, SMB, some FUSE mounts) may not respect `O_EXCL` atomicity.
   Use a local path or a volume driver that guarantees POSIX lock semantics.
-- This mode does not handle read–write races for retrieval paths. Reads do not
-  acquire the lock and may observe an intermediate snapshot state during a
-  concurrent write window. For strict read consistency, use a single-writer
-  topology.
+- Reads do not acquire the lock. A reader may observe a **stale snapshot** (the
+  previous complete state before a concurrent write committed). Because writes
+  use temp-file + atomic rename, readers always see a complete snapshot—never
+  partially-written data. For strict read freshness, use a single-writer topology.
 
 ---
 
@@ -94,21 +109,23 @@ npx neurodivergent-memory &
 
 | Code | Meaning | Recovery |
 |---|---|---|
-| `NM_E008` | Lock could not be acquired (another process holds it) | Wait and retry; check the lock holder PID in the error message |
+| `NM_E008` | Reserved for a future fail-fast acquire mode (not currently emitted) | N/A |
 | `NM_E009` | Lock acquire timed out after 5 seconds | Remove the stale lock file if the holder process is no longer running |
 
 ---
 
 ## Verifying Coordination Mode at Startup
 
-When the server starts, it logs the active coordination mode:
+When the server starts, it logs the effective coordination mode and the raw env value:
 
 ```json
-{ "coordinationMode": "filesystem-lock", "msg": "Cross-process coordination mode" }
+{ "coordinationMode": "filesystem-lock", "rawEnvValue": "filesystem-lock", "msg": "Cross-process coordination mode" }
 ```
 
-If the env var is absent or set to an unrecognised value, the log shows:
+If the env var is absent or set to an unrecognised value, the effective mode is `"none"`
+regardless of what the raw value was:
 
 ```json
-{ "coordinationMode": "none", "msg": "Cross-process coordination mode" }
+{ "coordinationMode": "none", "rawEnvValue": "(unset)", "msg": "Cross-process coordination mode" }
+{ "coordinationMode": "none", "rawEnvValue": "shared-snapshot", "msg": "Cross-process coordination mode" }
 ```

@@ -21,6 +21,7 @@
 
 import * as fs from "fs";
 import { NM_ERRORS, createNMError } from "./error-codes.js";
+import { logger } from "./logger.js";
 
 export const COORDINATION_MODE_ENV = "NEURODIVERGENT_COORDINATION_MODE";
 export const FILESYSTEM_LOCK_MODE = "filesystem-lock";
@@ -77,8 +78,16 @@ export class FileSystemCoordinationLock {
   release(): void {
     try {
       fs.unlinkSync(this.lockFile);
-    } catch {
-      // Tolerate missing lock file — release is idempotent.
+    } catch (err: unknown) {
+      // ENOENT is expected when the lock file is already gone — idempotent release.
+      if (isEnoent(err)) return;
+      // Any other error (EPERM, EACCES, EBUSY, …) means the lock file is still
+      // present. Log it so operators can diagnose the stale lock file and clean
+      // it up manually before writers time out.
+      logger.error(
+        { lockFile: this.lockFile, err },
+        "Failed to release coordination lock file — stale lock may block future writers",
+      );
     }
   }
 
@@ -92,7 +101,7 @@ export class FileSystemCoordinationLock {
       }
       return true;
     } catch (err: unknown) {
-      if (isEnoentOrEexist(err)) return false;
+      if (isLockContended(err)) return false;
       throw err;
     }
   }
@@ -115,9 +124,22 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function isEnoentOrEexist(err: unknown): boolean {
+/**
+ * Returns true when the lock-file creation failed because another process
+ * already holds the lock (EEXIST from O_EXCL). Used to decide whether to
+ * retry or to re-throw.
+ */
+function isLockContended(err: unknown): boolean {
   if (err instanceof Error && "code" in err) {
     return (err as NodeJS.ErrnoException).code === "EEXIST";
+  }
+  return false;
+}
+
+/** Returns true when a file was missing (ENOENT). */
+function isEnoent(err: unknown): boolean {
+  if (err instanceof Error && "code" in err) {
+    return (err as NodeJS.ErrnoException).code === "ENOENT";
   }
   return false;
 }

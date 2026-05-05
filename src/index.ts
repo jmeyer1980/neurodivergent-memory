@@ -28,7 +28,7 @@ import { fileURLToPath } from "url";
 import { logger } from "./core/logger.js";
 import { resolvePersistenceLocation } from "./core/persistence.js";
 import { AsyncMutex } from "./core/async-mutex.js";
-import { FileSystemCoordinationLock, isFilesystemLockEnabled, COORDINATION_MODE_ENV } from "./core/coordination-lock.js";
+import { FileSystemCoordinationLock, isFilesystemLockEnabled, COORDINATION_MODE_ENV, FILESYSTEM_LOCK_MODE } from "./core/coordination-lock.js";
 import { LoopTelemetryTracker } from "./core/loop-telemetry.js";
 import {
   MCP_INTERNAL_ERROR_CODE,
@@ -971,8 +971,12 @@ logger.info(
   "Resolved persistence location",
 );
 
-const COORDINATION_MODE = process.env[COORDINATION_MODE_ENV]?.trim() ?? "none";
-logger.info({ coordinationMode: COORDINATION_MODE }, "Cross-process coordination mode");
+const COORDINATION_MODE_RAW = process.env[COORDINATION_MODE_ENV]?.trim();
+const COORDINATION_MODE_EFFECTIVE = isFilesystemLockEnabled() ? FILESYSTEM_LOCK_MODE : "none";
+logger.info(
+  { coordinationMode: COORDINATION_MODE_EFFECTIVE, rawEnvValue: COORDINATION_MODE_RAW ?? "(unset)" },
+  "Cross-process coordination mode",
+);
 
 /**
  * On-disk representation of a MemoryNPC: identical to MemoryNPC except that
