@@ -3137,15 +3137,18 @@ class NeurodivergentMemory {
         memory.visibility = updates.visibility;
       }
     }
+    let clearedPublicationState = false;
     if (Object.prototype.hasOwnProperty.call(updates, "publication_state")) {
       if (updates.publication_state === null) {
         delete memory.publication_state;
         delete memory.last_publication_step;
+        clearedPublicationState = true;
       } else if (updates.publication_state !== undefined) {
         memory.publication_state = updates.publication_state;
       }
     }
-    if (Object.prototype.hasOwnProperty.call(updates, "last_publication_step")) {
+    // Skip last_publication_step update when publication_state was just cleared to prevent orphaned step
+    if (!clearedPublicationState && Object.prototype.hasOwnProperty.call(updates, "last_publication_step")) {
       if (updates.last_publication_step === null) {
         delete memory.last_publication_step;
       } else if (updates.last_publication_step !== undefined) {
@@ -6665,9 +6668,25 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           );
         }
         const targetState: TaskPublicationState = completed ? "published_complete" : "published_partial";
+
+        // Idempotent: same-state retries for publish_task are no-ops
+        if (memory.publication_state === targetState) {
+          return {
+            content: [{
+              type: "text",
+              text: [
+                `✅ publish_task: already ${targetState} — no changes made.`,
+                `memory_id: ${memory_id}`,
+                `lifecycle_state: ${targetState}`,
+                memory.last_publication_step ? `last_publication_step: ${memory.last_publication_step}` : "",
+              ].filter(Boolean).join("\n"),
+            }],
+          };
+        }
+
         const transitionError = checkPublicationTransition(memory.publication_state, targetState);
 
-        // Idempotent: already at published_complete while requesting completed=true is a no-op
+        // Legacy explicit check kept for published_complete idempotency documentation
         if (memory.publication_state === "published_complete" && completed) {
           return {
             content: [{
@@ -6693,7 +6712,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         const normalizedActorAgentId = normalizeOptionalAgentId(agent_id);
         const updates: MemoryUpdatePayload = { publication_state: targetState };
         if (last_step !== undefined && last_step !== null) updates.last_publication_step = String(last_step);
-        memorySystem.updateMemory(memory_id, updates, { agent_id: normalizedActorAgentId });
+        await runMutatingTool("publish_task", () => memorySystem.updateMemory(memory_id, updates, { agent_id: normalizedActorAgentId }));
 
         const nextAllowed = VALID_PUBLICATION_TRANSITIONS[targetState];
         return {
@@ -6725,6 +6744,15 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     case "resume_task": {
       const { memory_id, agent_id } = request.params.arguments as any;
       try {
+        const RESUME_TASK_ALLOWED_ARGS = new Set(["memory_id", "agent_id"]);
+        const rejectedFields = Object.keys(request.params.arguments as object).filter(k => !RESUME_TASK_ALLOWED_ARGS.has(k));
+        if (rejectedFields.length > 0) {
+          throw createNMError(
+            NM_ERRORS.INPUT_VALIDATION_FAILED,
+            `resume_task received unsupported argument(s): ${rejectedFields.join(", ")}.`,
+            `Only the following arguments are supported: ${[...RESUME_TASK_ALLOWED_ARGS].join(", ")}.`,
+          );
+        }
         if (!memory_id) {
           throw createNMError(
             NM_ERRORS.INPUT_VALIDATION_FAILED,
@@ -6770,11 +6798,11 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         // Record that we are resuming (transition to published_partial if coming from resumable)
         const normalizedActorAgentId = normalizeOptionalAgentId(agent_id);
         if (currentState === "resumable") {
-          memorySystem.updateMemory(
+          await runMutatingTool("resume_task", () => memorySystem.updateMemory(
             memory_id,
             { publication_state: "published_partial" },
             { agent_id: normalizedActorAgentId },
-          );
+          ));
         }
 
         const updatedState: TaskPublicationState = currentState === "resumable" ? "published_partial" : currentState;
@@ -6847,17 +6875,17 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             `Cannot close task from state '${currentState}'. ${transitionError}`,
             `Allowed next states: ${nextAllowed.join(", ")}. ` +
               (currentState === "published_complete"
-                ? "First call publish_task or update_memory to set publication_state=closable, then retry close_task."
+                ? "Use update_memory with publication_state=closable, then retry close_task."
                 : "Advance the task to 'closable' state before closing."),
           );
         }
 
         const normalizedActorAgentId = normalizeOptionalAgentId(agent_id);
-        memorySystem.updateMemory(
+        await runMutatingTool("close_task", () => memorySystem.updateMemory(
           memory_id,
           { publication_state: "closed" },
           { agent_id: normalizedActorAgentId },
-        );
+        ));
         return {
           content: [{
             type: "text",

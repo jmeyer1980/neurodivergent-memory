@@ -48,7 +48,7 @@ export interface MemoryNPC {
   current_slice?: string;
   why_now?: string;
   visibility?: VisibilityLevel;
-  /** Task publication lifecycle state (draft → published_partial → published_complete → closable → closed). */
+  /** Task publication lifecycle state: draft → published_partial | published_complete; published_complete → resumable | closable; resumable → published_partial | published_complete; closable → closed. */
   publication_state?: TaskPublicationState;
   /** Last successfully completed publication step (e.g. "pr_created", "reviewer_requested"). */
   last_publication_step?: string;
