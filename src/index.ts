@@ -39,7 +39,7 @@ import {
   mcpErrorResult,
   type McpErrorShape,
 } from "./core/error-codes.js";
-import type { DistilledArtifact, EpistemicStatus, EpistemicStatusFilter, KanbanStatus, MemoryArchetype, MemoryNPC, VisibilityLevel } from "./core/types.js";
+import type { DistilledArtifact, EpistemicStatus, EpistemicStatusFilter, KanbanStatus, MemoryArchetype, MemoryNPC, TaskPublicationState, VisibilityLevel } from "./core/types.js";
 
 function resolveServerPackageInfo(): { name: string; version: string } {
   try {
@@ -1009,6 +1009,42 @@ const VALID_EPISTEMIC_STATUSES: EpistemicStatus[] = ["draft", "validated", "outd
 const KANBAN_STATUSES: KanbanStatus[] = ["backlog", "ready", "in_progress", "blocked", "done"];
 const VALID_VISIBILITY_LEVELS: VisibilityLevel[] = ["private", "shared", "global"];
 
+const TASK_PUBLICATION_STATES: TaskPublicationState[] = [
+  "draft",
+  "published_partial",
+  "published_complete",
+  "resumable",
+  "closable",
+  "closed",
+];
+
+/**
+ * Valid state transitions for task publication lifecycle.
+ * Each key is the current state; value is the set of states it may transition to.
+ */
+const VALID_PUBLICATION_TRANSITIONS: Readonly<Record<TaskPublicationState, ReadonlyArray<TaskPublicationState>>> = {
+  draft:               ["published_partial", "published_complete"],
+  published_partial:   ["published_complete", "resumable"],
+  published_complete:  ["resumable", "closable"],
+  resumable:           ["published_partial", "published_complete"],
+  closable:            ["closed"],
+  closed:              ["closed"], // idempotent self-transition
+};
+
+/** Returns an error message when a transition is illegal, or undefined when allowed. */
+function checkPublicationTransition(
+  from: TaskPublicationState | undefined,
+  to: TaskPublicationState,
+): string | undefined {
+  const effectiveFrom: TaskPublicationState = from ?? "draft";
+  const allowed = VALID_PUBLICATION_TRANSITIONS[effectiveFrom];
+  if (allowed.includes(to)) return undefined;
+  return (
+    `Invalid publication state transition: ${effectiveFrom} → ${to}. ` +
+    `Allowed next states from ${effectiveFrom}: ${allowed.join(", ")}.`
+  );
+}
+
 type MemoryUpdatePayload = Partial<Pick<MemoryNPC, "content" | "tags" | "emotional_valence" | "intensity" | "district" | "epistemic_status" | "project_id" | "repeat_write_count" | "repeat_count" | "last_similarity_score" | "ping_pong_counter">> & {
   memory_agent_id?: string;
   project_id?: string | null;
@@ -1017,6 +1053,8 @@ type MemoryUpdatePayload = Partial<Pick<MemoryNPC, "content" | "tags" | "emotion
   current_slice?: string | null;
   why_now?: string | null;
   visibility?: VisibilityLevel | null;
+  publication_state?: TaskPublicationState | null;
+  last_publication_step?: string | null;
 };
 
 interface WalEntry {
@@ -3099,6 +3137,24 @@ class NeurodivergentMemory {
         memory.visibility = updates.visibility;
       }
     }
+    let clearedPublicationState = false;
+    if (Object.prototype.hasOwnProperty.call(updates, "publication_state")) {
+      if (updates.publication_state === null) {
+        delete memory.publication_state;
+        delete memory.last_publication_step;
+        clearedPublicationState = true;
+      } else if (updates.publication_state !== undefined) {
+        memory.publication_state = updates.publication_state;
+      }
+    }
+    // Skip last_publication_step update when publication_state was just cleared to prevent orphaned step
+    if (!clearedPublicationState && Object.prototype.hasOwnProperty.call(updates, "last_publication_step")) {
+      if (updates.last_publication_step === null) {
+        delete memory.last_publication_step;
+      } else if (updates.last_publication_step !== undefined) {
+        memory.last_publication_step = updates.last_publication_step;
+      }
+    }
 
     this.bm25.addDocument(id, this.documentText(memory));
   }
@@ -5078,6 +5134,15 @@ function buildRegisteredToolDescriptors(): ToolDescriptor[] {
               type: ["string", "null"],
               enum: ["private", "shared", "global", null],
               description: "New visibility level (optional); pass null to clear (reverts to private default)"
+            },
+            publication_state: {
+              type: ["string", "null"],
+              enum: ["draft", "published_partial", "published_complete", "resumable", "closable", "closed", null],
+              description: "New task publication lifecycle state (optional); pass null to clear. Prefer using publish_task, resume_task, or close_task for validated transitions."
+            },
+            last_publication_step: {
+              type: ["string", "null"],
+              description: "Name of the last successfully completed publication step (e.g. 'pr_created', 'reviewer_requested'). Pass null to clear."
             }
           },
           required: ["memory_id"]
@@ -5573,6 +5638,68 @@ function buildRegisteredToolDescriptors(): ToolDescriptor[] {
           },
           required: ["memory_id", "status"]
         }
+      },
+      {
+        name: "publish_task",
+        description: "Advance a task memory's publication lifecycle state toward published_complete. Records the last completed publication step for diagnostic recovery. Idempotent: retrying after partial success converges to published_complete without side effects.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            memory_id: {
+              type: "string",
+              description: "ID of the task memory whose publication state to advance"
+            },
+            completed: {
+              type: "boolean",
+              description: "true = all publish steps succeeded → published_complete; false = only some steps succeeded → published_partial"
+            },
+            last_step: {
+              type: "string",
+              description: "Name of the last successfully completed publication step (e.g. 'pr_created', 'reviewer_requested')"
+            },
+            agent_id: {
+              type: "string",
+              description: "Optional caller agent identifier"
+            }
+          },
+          required: ["memory_id", "completed"]
+        }
+      },
+      {
+        name: "resume_task",
+        description: "Validate that a task memory is in a resumable state and return a structured diagnostic payload (lifecycle_state, last_successful_step, next_allowed_actions, recovery_suggestion). Returns a deterministic error contract when the task is not resumable.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            memory_id: {
+              type: "string",
+              description: "ID of the task memory to resume"
+            },
+            agent_id: {
+              type: "string",
+              description: "Optional caller agent identifier"
+            }
+          },
+          required: ["memory_id"]
+        }
+      },
+      {
+        name: "close_task",
+        description: "Transition a task memory to closed state. Idempotent: repeated calls on an already-closed task return a stable 'already closed' result without mutation. Returns a deterministic error when the task is not in a closable state.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            memory_id: {
+              type: "string",
+              description: "ID of the task memory to close"
+            },
+            agent_id: {
+              type: "string",
+              description: "Optional caller agent identifier"
+            }
+          },
+          required: ["memory_id"]
+        }
       }
     ];
 }
@@ -5624,6 +5751,12 @@ function toolWhenToUseHint(toolName: string): string {
       return "Use for broad inventory, pagination, or aggregate status checks across the graph.";
     case "update_status":
       return "Use to transition a memory's kanban status and optionally set current_slice or why_now.";
+    case "publish_task":
+      return "Use after completing publish steps (e.g. PR created, reviewer requested) to record partial or complete publication state.";
+    case "resume_task":
+      return "Use to validate a task is in a resumable state and retrieve diagnostic context before continuing work.";
+    case "close_task":
+      return "Use to idempotently close a completed or published task memory.";
     case "import_memories":
       return "Use for bulk import from inline entries or a snapshot file, with optional dry-run validation.";
     case "storage_diagnostics":
@@ -5801,15 +5934,24 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       return {
         content: [{
           type: "text",
-          text: `🧠 Retrieved memory "${memory.name}"\nDistrict: ${memory.district}\nAgent: ${memory.agent_id ?? 'unassigned'}\nProject: ${memory.project_id ?? 'unset'}\nEpistemic status: ${memory.epistemic_status ?? 'unset'}\nVisibility: ${memory.visibility ?? 'private'}\nContent: ${memory.content}\nTags: ${memory.tags.join(', ')}\nEmotional valence: ${memory.emotional_valence ?? 'unset'}\nIntensity: ${memory.intensity ?? 'unset'}\nAccess count: ${memory.access_count}${retrieval?.distill_suggestion ? `\n${retrieval.distill_suggestion}` : ''}`
+          text: `🧠 Retrieved memory "${memory.name}"\nDistrict: ${memory.district}\nAgent: ${memory.agent_id ?? 'unassigned'}\nProject: ${memory.project_id ?? 'unset'}\nEpistemic status: ${memory.epistemic_status ?? 'unset'}\nVisibility: ${memory.visibility ?? 'private'}\nContent: ${memory.content}\nTags: ${memory.tags.join(', ')}\nEmotional valence: ${memory.emotional_valence ?? 'unset'}\nIntensity: ${memory.intensity ?? 'unset'}\nAccess count: ${memory.access_count}${memory.publication_state ? `\nPublication state: ${memory.publication_state}` : ''}${memory.last_publication_step ? `\nLast publication step: ${memory.last_publication_step}` : ''}${retrieval?.distill_suggestion ? `\n${retrieval.distill_suggestion}` : ''}`
         }]
       };
     }
 
     case "update_memory": {
-      const { memory_id, content, district, tags, emotional_valence, intensity, epistemic_status, project_id, session_id, actor_district, agent_id, memory_agent_id, status, current_slice, why_now, visibility } = request.params.arguments as any;
+      const { memory_id, content, district, tags, emotional_valence, intensity, epistemic_status, project_id, session_id, actor_district, agent_id, memory_agent_id, status, current_slice, why_now, visibility, publication_state, last_publication_step } = request.params.arguments as any;
       try {
         if (status !== undefined && status !== null) validateKanbanStatus(status);
+        if (publication_state !== undefined && publication_state !== null) {
+          if (!TASK_PUBLICATION_STATES.includes(publication_state)) {
+            throw createNMError(
+              NM_ERRORS.INPUT_VALIDATION_FAILED,
+              `Invalid publication_state: ${publication_state}`,
+              `Use one of: ${TASK_PUBLICATION_STATES.join(", ")}, or null to clear.`,
+            );
+          }
+        }
         const normalizedActorAgentId = normalizeOptionalAgentId(agent_id);
         const updates: MemoryUpdatePayload = {};
         if (content !== undefined) updates.content = content;
@@ -5824,6 +5966,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         if (status !== undefined) updates.status = status;
         if (current_slice !== undefined) updates.current_slice = current_slice;
         if (why_now !== undefined) updates.why_now = why_now;
+        if (publication_state !== undefined) updates.publication_state = publication_state as TaskPublicationState | null;
+        if (last_publication_step !== undefined) updates.last_publication_step = last_publication_step;
         if (visibility !== undefined) {
           if (visibility !== null && !VALID_VISIBILITY_LEVELS.includes(visibility)) {
             throw createNMError(
@@ -6493,6 +6637,274 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             NM_ERRORS.INPUT_VALIDATION_FAILED,
             "Register district request was invalid.",
             "Verify key (snake_case), name, description, and luca_parent, then retry register_district.",
+          ),
+        );
+      }
+    }
+
+    case "publish_task": {
+      const { memory_id, completed, last_step, agent_id } = request.params.arguments as any;
+      try {
+        if (!memory_id) {
+          throw createNMError(
+            NM_ERRORS.INPUT_VALIDATION_FAILED,
+            "memory_id is required for publish_task.",
+            "Provide a valid memory_id and retry publish_task.",
+          );
+        }
+        if (typeof completed !== "boolean") {
+          throw createNMError(
+            NM_ERRORS.INPUT_VALIDATION_FAILED,
+            "completed (boolean) is required for publish_task.",
+            "Set completed=true when all publish steps succeeded, false when only partial.",
+          );
+        }
+        const memory = memorySystem.getAllMemories().find((m) => m.id === memory_id);
+        if (!memory) {
+          throw createNMError(
+            NM_ERRORS.MEMORY_NOT_FOUND,
+            `Memory not found: ${memory_id}`,
+            "List or search memories first, then retry publish_task with a valid memory_id.",
+          );
+        }
+        const targetState: TaskPublicationState = completed ? "published_complete" : "published_partial";
+
+        // Idempotent: same-state retries for publish_task are no-ops
+        if (memory.publication_state === targetState) {
+          return {
+            content: [{
+              type: "text",
+              text: [
+                `✅ publish_task: already ${targetState} — no changes made.`,
+                `memory_id: ${memory_id}`,
+                `lifecycle_state: ${targetState}`,
+                memory.last_publication_step ? `last_publication_step: ${memory.last_publication_step}` : "",
+              ].filter(Boolean).join("\n"),
+            }],
+          };
+        }
+
+        const transitionError = checkPublicationTransition(memory.publication_state, targetState);
+
+        // Legacy explicit check kept for published_complete idempotency documentation
+        if (memory.publication_state === "published_complete" && completed) {
+          return {
+            content: [{
+              type: "text",
+              text: [
+                `✅ publish_task: already published_complete — no changes made.`,
+                `memory_id: ${memory_id}`,
+                `lifecycle_state: published_complete`,
+                memory.last_publication_step ? `last_publication_step: ${memory.last_publication_step}` : "",
+              ].filter(Boolean).join("\n"),
+            }],
+          };
+        }
+
+        if (transitionError) {
+          throw createNMError(
+            NM_ERRORS.INPUT_VALIDATION_FAILED,
+            transitionError,
+            `Check current publication_state (${memory.publication_state ?? "draft"}) and use the correct target state.`,
+          );
+        }
+
+        const normalizedActorAgentId = normalizeOptionalAgentId(agent_id);
+        const updates: MemoryUpdatePayload = { publication_state: targetState };
+        if (last_step !== undefined && last_step !== null) updates.last_publication_step = String(last_step);
+        await runMutatingTool("publish_task", () => memorySystem.updateMemory(memory_id, updates, { agent_id: normalizedActorAgentId }));
+
+        const nextAllowed = VALID_PUBLICATION_TRANSITIONS[targetState];
+        return {
+          content: [{
+            type: "text",
+            text: [
+              `📤 publish_task: ${memory.publication_state ?? "draft"} → ${targetState}`,
+              `memory_id: ${memory_id}`,
+              `lifecycle_state: ${targetState}`,
+              updates.last_publication_step ? `last_publication_step: ${updates.last_publication_step}` : "",
+              `next_allowed_actions: ${nextAllowed.join(", ")}`,
+            ].filter(Boolean).join("\n"),
+          }],
+        };
+      } catch (error) {
+        return toolErrorResult(
+          "publish_task",
+          "publish_task failed",
+          error,
+          formatMcpError(
+            NM_ERRORS.INPUT_VALIDATION_FAILED,
+            "publish_task request was invalid.",
+            "Provide a valid memory_id, set completed=true/false, and ensure a legal publication state transition.",
+          ),
+        );
+      }
+    }
+
+    case "resume_task": {
+      const { memory_id, agent_id } = request.params.arguments as any;
+      try {
+        const RESUME_TASK_ALLOWED_ARGS = new Set(["memory_id", "agent_id"]);
+        const rejectedFields = Object.keys(request.params.arguments as object).filter(k => !RESUME_TASK_ALLOWED_ARGS.has(k));
+        if (rejectedFields.length > 0) {
+          throw createNMError(
+            NM_ERRORS.INPUT_VALIDATION_FAILED,
+            `resume_task received unsupported argument(s): ${rejectedFields.join(", ")}.`,
+            `Only the following arguments are supported: ${[...RESUME_TASK_ALLOWED_ARGS].join(", ")}.`,
+          );
+        }
+        if (!memory_id) {
+          throw createNMError(
+            NM_ERRORS.INPUT_VALIDATION_FAILED,
+            "memory_id is required for resume_task.",
+            "Provide a valid memory_id and retry resume_task.",
+          );
+        }
+        const memory = memorySystem.getAllMemories().find((m) => m.id === memory_id);
+        if (!memory) {
+          throw createNMError(
+            NM_ERRORS.MEMORY_NOT_FOUND,
+            `Memory not found: ${memory_id}`,
+            "The task reference is stale or nonexistent. Search memories to locate the correct memory_id before retrying resume_task.",
+          );
+        }
+        const currentState: TaskPublicationState = memory.publication_state ?? "draft";
+        const allowedFromCurrent = VALID_PUBLICATION_TRANSITIONS[currentState];
+        const isResumable = currentState === "resumable" || currentState === "published_partial";
+
+        if (!isResumable) {
+          // Return structured diagnostic — not a hard error, but a non-resumable diagnostic
+          return {
+            content: [{
+              type: "text",
+              text: [
+                `⚠️ resume_task: task is not in a resumable state.`,
+                `lifecycle_state: ${currentState}`,
+                `last_successful_step: ${memory.last_publication_step ?? "(none recorded)"}`,
+                `next_allowed_actions: ${allowedFromCurrent.join(", ")}`,
+                `recovery_suggestion: This task is currently in state '${currentState}'. ` +
+                  (currentState === "draft"
+                    ? "Run publish_task first to begin the publication workflow."
+                    : currentState === "published_complete" || currentState === "closable"
+                      ? "Use close_task to conclude this task, or update its publication_state to resumable if further work is needed."
+                      : currentState === "closed"
+                        ? "Task is already closed and cannot be resumed."
+                        : `Transition to 'resumable' using update_memory before calling resume_task.`),
+              ].join("\n"),
+            }],
+          };
+        }
+
+        // Record that we are resuming (transition to published_partial if coming from resumable)
+        const normalizedActorAgentId = normalizeOptionalAgentId(agent_id);
+        if (currentState === "resumable") {
+          await runMutatingTool("resume_task", () => memorySystem.updateMemory(
+            memory_id,
+            { publication_state: "published_partial" },
+            { agent_id: normalizedActorAgentId },
+          ));
+        }
+
+        const updatedState: TaskPublicationState = currentState === "resumable" ? "published_partial" : currentState;
+        const nextAllowed = VALID_PUBLICATION_TRANSITIONS[updatedState];
+        return {
+          content: [{
+            type: "text",
+            text: [
+              `▶️ resume_task: task is resumable.`,
+              `lifecycle_state: ${updatedState}`,
+              `last_successful_step: ${memory.last_publication_step ?? "(none recorded)"}`,
+              `next_allowed_actions: ${nextAllowed.join(", ")}`,
+              `recovery_suggestion: Continue from the last successful step and call publish_task(completed=true) when all publish steps are done.`,
+            ].join("\n"),
+          }],
+        };
+      } catch (error) {
+        return toolErrorResult(
+          "resume_task",
+          "resume_task failed",
+          error,
+          formatMcpError(
+            NM_ERRORS.MEMORY_NOT_FOUND,
+            "resume_task could not locate or validate the target task.",
+            "Provide a valid memory_id that refers to an existing task memory, then retry resume_task.",
+          ),
+        );
+      }
+    }
+
+    case "close_task": {
+      const { memory_id, agent_id } = request.params.arguments as any;
+      try {
+        if (!memory_id) {
+          throw createNMError(
+            NM_ERRORS.INPUT_VALIDATION_FAILED,
+            "memory_id is required for close_task.",
+            "Provide a valid memory_id and retry close_task.",
+          );
+        }
+        const memory = memorySystem.getAllMemories().find((m) => m.id === memory_id);
+        if (!memory) {
+          throw createNMError(
+            NM_ERRORS.MEMORY_NOT_FOUND,
+            `Memory not found: ${memory_id}`,
+            "List or search memories first, then retry close_task with a valid memory_id.",
+          );
+        }
+        const currentState: TaskPublicationState = memory.publication_state ?? "draft";
+
+        // Idempotent: already closed → stable no-op
+        if (currentState === "closed") {
+          return {
+            content: [{
+              type: "text",
+              text: [
+                `✅ close_task: already closed — no changes made.`,
+                `memory_id: ${memory_id}`,
+                `lifecycle_state: closed`,
+              ].join("\n"),
+            }],
+          };
+        }
+
+        const transitionError = checkPublicationTransition(currentState, "closed");
+        if (transitionError) {
+          const nextAllowed = VALID_PUBLICATION_TRANSITIONS[currentState];
+          throw createNMError(
+            NM_ERRORS.INPUT_VALIDATION_FAILED,
+            `Cannot close task from state '${currentState}'. ${transitionError}`,
+            `Allowed next states: ${nextAllowed.join(", ")}. ` +
+              (currentState === "published_complete"
+                ? "Use update_memory with publication_state=closable, then retry close_task."
+                : "Advance the task to 'closable' state before closing."),
+          );
+        }
+
+        const normalizedActorAgentId = normalizeOptionalAgentId(agent_id);
+        await runMutatingTool("close_task", () => memorySystem.updateMemory(
+          memory_id,
+          { publication_state: "closed" },
+          { agent_id: normalizedActorAgentId },
+        ));
+        return {
+          content: [{
+            type: "text",
+            text: [
+              `🔒 close_task: ${currentState} → closed.`,
+              `memory_id: ${memory_id}`,
+              `lifecycle_state: closed`,
+            ].join("\n"),
+          }],
+        };
+      } catch (error) {
+        return toolErrorResult(
+          "close_task",
+          "close_task failed",
+          error,
+          formatMcpError(
+            NM_ERRORS.INPUT_VALIDATION_FAILED,
+            "close_task request was invalid.",
+            "Ensure the task is in 'closable' state before calling close_task, or check if it is already closed.",
           ),
         );
       }
