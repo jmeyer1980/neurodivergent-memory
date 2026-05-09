@@ -95,6 +95,33 @@ test("second acquire times out when lock is already held", async () => {
   }
 });
 
+test("timeout reports holder diagnostics for pre-existing lock (multi-process characterization)", async () => {
+  const snapshot = makeTempSnapshot();
+  const lockPath = lockFilePathFor(snapshot);
+  fs.writeFileSync(
+    lockPath,
+    JSON.stringify({ pid: 424242, timestamp: "2026-05-09T00:00:00.000Z" }),
+    "utf-8",
+  );
+
+  const contender = new FileSystemCoordinationLock(snapshot, 150);
+
+  try {
+    await assert.rejects(
+      () => contender.acquire(),
+      (err) => {
+        assert.ok(err instanceof Error, "should throw an Error");
+        assert.ok(err.message.includes("Could not acquire filesystem coordination lock"));
+        assert.ok(err.message.includes("pid=424242"));
+        assert.ok(err.message.includes("2026-05-09T00:00:00.000Z"));
+        return true;
+      },
+    );
+  } finally {
+    fs.unlinkSync(lockPath);
+  }
+});
+
 test("acquire succeeds after contending lock is released", async () => {
   const snapshot = makeTempSnapshot();
   const holder = new FileSystemCoordinationLock(snapshot, 1_000);

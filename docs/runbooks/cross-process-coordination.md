@@ -129,3 +129,27 @@ regardless of what the raw value was:
 { "coordinationMode": "none", "rawEnvValue": "(unset)", "msg": "Cross-process coordination mode" }
 { "coordinationMode": "none", "rawEnvValue": "shared-snapshot", "msg": "Cross-process coordination mode" }
 ```
+
+---
+
+## v0.4.0 Orchestration Safety Validation Notes (Issue #114)
+
+This section captures release-readiness evidence for orchestration safety.
+
+### Covered Scenarios
+
+- Single-process concurrent write stress test validates that burst writes retain expected memory cardinality.
+- Crash-and-recovery scenario validates WAL replay restores state and startup compaction truncates WAL.
+- Eviction-at-capacity scenario validates LRU behavior under `NEURODIVERGENT_MEMORY_MAX` limits.
+- Contention characterization validates lock timeout diagnostics include holder PID and timestamp hints.
+
+### Test Entrypoints
+
+- `test/orchestration-safety-validation.test.mjs`
+- `test/coordination-lock.test.mjs`
+
+### Known Limitations
+
+- Multi-process contention characterization is lock-layer focused; it does not model full active-active write merge semantics.
+- Lock acquire timeout remains fixed at 5 seconds in runtime behavior and is not yet operator-configurable.
+- Network filesystems may not honor local `O_EXCL` semantics; these validations assume local filesystem behavior.
