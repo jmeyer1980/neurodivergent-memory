@@ -16,6 +16,8 @@ Use this package with MCP-capable clients and agents that need long-lived contex
 The repository also ships a thin VS Code companion extension that helps users configure the MCP server quickly.
 The extension does not replace the MCP runtime; it provides setup-oriented commands and marketplace discoverability.
 
+> **MCP-first note:** The `neurodivergent-memory` runtime is the canonical distribution. Use the npm package or Docker image directly, and only use the VS Code extension as a convenience layer for configuration or discovery.
+
 Quick start:
 
 ```bash

@@ -64,6 +64,8 @@ npm -v # Should print an npm 11.x version.
 npx neurodivergent-memory@latest init-agent-kit
 ```
 
+> **MCP-first note:** This repository's MCP server (see `server.json` and the `neurodivergent-memory` npm package) is the canonical distribution and runtime for the memory server. Marketplace artifacts and editor extensions (VS Code, Azure DevOps, Visual Studio) are optional convenience integrations that wrap or package the core server; prefer the `npx neurodivergent-memory` or Docker examples below for predictable installation and versioning.
+
 ### Linux/macOS
 
 ```bash
@@ -356,7 +358,9 @@ the snapshot file and will warn if it detects an open WAL for the target directo
 
 ### Marketplace Distribution (Optional)
 
-Tagged releases can publish extension artifacts to three marketplace channels, plus Open VSX:
+Tagged releases can publish extension artifacts to three marketplace channels, plus Open VSX.
+
+> **Runtime note:** the canonical `neurodivergent-memory` runtime is the MCP server package and its Docker image, not the marketplace artifacts. Marketplace/extension channels are optional distribution wrappers for editor and CI integration, not replacements for the underlying runtime.
 
 - Azure DevOps / Visual Studio Marketplace (Azure extension manifest: `vss-extension.json`)
 - VS Code Marketplace and Open VSX (VS Code extension manifest: `package.json`)
