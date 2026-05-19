@@ -358,7 +358,9 @@ the snapshot file and will warn if it detects an open WAL for the target directo
 
 ### Marketplace Distribution (Optional)
 
-Tagged releases can publish extension artifacts to three marketplace channels, plus Open VSX:
+Tagged releases can publish extension artifacts to three marketplace channels, plus Open VSX.
+
+> **Runtime note:** the canonical `neurodivergent-memory` runtime is the MCP server package and its Docker image, not the marketplace artifacts. Marketplace/extension channels are optional distribution wrappers for editor and CI integration, not replacements for the underlying runtime.
 
 - Azure DevOps / Visual Studio Marketplace (Azure extension manifest: `vss-extension.json`)
 - VS Code Marketplace and Open VSX (VS Code extension manifest: `package.json`)
