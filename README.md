@@ -64,6 +64,8 @@ npm -v # Should print an npm 11.x version.
 npx neurodivergent-memory@latest init-agent-kit
 ```
 
+> **MCP-first note:** This repository's MCP server (see `server.json` and the `neurodivergent-memory` npm package) is the canonical distribution and runtime for the memory server. Marketplace artifacts and editor extensions (VS Code, Azure DevOps, Visual Studio) are optional convenience integrations that wrap or package the core server; prefer the `npx neurodivergent-memory` or Docker examples below for predictable installation and versioning.
+
 ### Linux/macOS
 
 ```bash
