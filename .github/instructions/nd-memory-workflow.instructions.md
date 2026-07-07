@@ -10,6 +10,7 @@ Use neurodivergent-memory MCP as a persistent memory layer for development sessi
 1. Start with `memory_stats`.
 2. Run `search_memories` for the active task.
 3. Use retrieved context before proposing or changing code.
+4. Create or update the MCP-backed plan memory before substantial execution.
 
 ## Cadence
 
@@ -20,7 +21,7 @@ Use neurodivergent-memory MCP as a persistent memory layer for development sessi
 - For substantial implementation work, pair `practical_execution` updates with a `logical_analysis` or `creative_synthesis` memory when the durable principle should outlive the task log.
 - If the source memory is noisy, distill it so the stable reasoning survives separately from the implementation detail.
 - Connect related memories to reduce future rediscovery.
-- Keep tags canonical: `topic:X`, `scope:X`, `kind:X`, `layer:X`.
+- Tags are optional enrichment; when tagging, use canonical namespaces: `topic:X`, `scope:X`, `kind:X`, `layer:X`.
 - Do not treat repo memory files or local notes as substitutes for MCP memory writes.
 
 ## Minimum MCP sequence
