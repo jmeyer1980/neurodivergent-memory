@@ -75,7 +75,7 @@ A memory write is **required** whenever any of the following events occurs — n
 - **DO NOT** skip the "Improve & Distill" phase — stale or siloed memories reduce the value of future sessions.
 - **DO NOT** treat neurodivergent-memory as a write-only log; use search and traversal to connect and build on prior work.
 - **DO NOT** assume the project context persists — always pull memories first, even if you've worked on this project before.
-- **DO NOT** create memories without appropriate tags (`topic:X`, `scope:X`, `kind:X`, `layer:X`) — canonical tags make retrieval reliable.
+- Tags and district are optional per-write — `content` alone is a valid `store_memory` call, and district auto-infers when omitted. Reserve canonical tags (`topic:X`, `scope:X`, `kind:X`, `layer:X`) for memories meant to be durable or cross-session searchable; don't gate quick task-log writes on constructing a full tag set.
 - **DO NOT** defer hand-off documentation — create a summary memory and document next steps before ending the session.
 - **DO NOT** rationalize skipping memory for "quick" tasks — see Memory Trigger Contract above.
 - **DO NOT** let `practical_execution` dominate the graph with disconnected task logs; connect execution back to scholar/mystic memories that explain the governing principle.

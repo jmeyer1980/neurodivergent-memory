@@ -828,6 +828,7 @@ interface StoreMemoryResult {
   ping_pong_count?: number;
   no_net_new_info_warning?: string;
   cooldown_duration_ms?: number;
+  district_inferred?: boolean;
 }
 
 interface RetrieveMemoryResult {
@@ -2786,11 +2787,50 @@ class NeurodivergentMemory {
     return registeredDistrict;
   }
 
+  /**
+   * Infer the best-fit district for content when the caller doesn't supply
+   * one. Scores content tokens against each district's description and
+   * activities (keyword overlap, no external model needed) and falls back to
+   * "practical_execution" when nothing scores above zero.
+   *
+   * Exists to remove district selection from the mandatory per-write decision
+   * set: callers can write with just `content` and get a reasonable default,
+   * then correct it later via update_memory if the guess was wrong.
+   */
+  inferDistrict(content: string): string {
+    const tokens = content.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+    const tokenSet = new Set(tokens);
+
+    let bestKey = "practical_execution";
+    let bestScore = 0;
+
+    for (const [key, district] of Object.entries(this.districts)) {
+      const signalWords = [
+        ...district.description.toLowerCase().split(/[^a-z0-9]+/),
+        ...district.activities.flatMap(a => a.toLowerCase().split(/[^a-z0-9]+/)),
+        ...key.split("_"),
+      ].filter(Boolean);
+
+      let score = 0;
+      for (const word of signalWords) {
+        if (tokenSet.has(word)) score += 1;
+        else if (word.length > 4 && tokens.some(t => t.startsWith(word.slice(0, 5)))) score += 0.5;
+      }
+
+      if (score > bestScore) {
+        bestScore = score;
+        bestKey = key;
+      }
+    }
+
+    return bestKey;
+  }
+
   // ── Core CRUD ──────────────────────────────────────────────────────────────
 
   storeMemory(
     content: string,
-    district: string,
+    district?: string,
     tags: string[] = [],
     emotional_valence?: number,
     intensity = 0.5,
@@ -2803,7 +2843,14 @@ class NeurodivergentMemory {
     why_now?: string,
     visibility?: VisibilityLevel,
   ): StoreMemoryResult {
-    const registeredDistrict = this.getRegisteredDistrict(district);
+    const districtWasInferred = !district;
+    if (districtWasInferred) {
+      district = this.inferDistrict(content);
+    }
+    // Narrowed: guaranteed a valid district key from here on (supplied or inferred above).
+    const resolvedDistrict: string = district as string;
+    district = resolvedDistrict;
+    const registeredDistrict = this.getRegisteredDistrict(resolvedDistrict);
     let normalizedProjectId: string | undefined = undefined;
     if (project_id !== undefined) {
       normalizedProjectId = normalizeProjectId(project_id);
@@ -2939,6 +2986,7 @@ class NeurodivergentMemory {
       ping_pong_count: pingPongCount,
       no_net_new_info_warning: noNetNewInfoWarning,
       cooldown_duration_ms: cooldownDurationMs,
+      district_inferred: districtWasInferred,
     };
   }
 
@@ -4974,7 +5022,7 @@ function buildRegisteredToolDescriptors(): ToolDescriptor[] {
             district: {
               type: "string",
               enum: ["logical_analysis", "emotional_processing", "practical_execution", "vigilant_monitoring", "creative_synthesis"],
-              description: "Memory district to store in"
+              description: "Optional. Memory district to store in. If omitted, the district is auto-inferred from content — pass this only when you want to override the guess."
             },
             tags: {
               type: "array",
@@ -5029,7 +5077,7 @@ function buildRegisteredToolDescriptors(): ToolDescriptor[] {
               description: "Optional visibility level: private (default, agent-local), shared (explicit share recipients), global (all agents)"
             }
           },
-          required: ["content", "district"]
+          required: ["content"]
         }
       },
       {
@@ -5105,11 +5153,11 @@ function buildRegisteredToolDescriptors(): ToolDescriptor[] {
               description: `Optional repair-only agent identifier used to backfill memories currently storing ${DEFAULT_AGENT_ID} or no attribution.`
             },
             project_id: {
-              type: ["string", "null"],
+              type: "string",
               description: "New project identifier (optional); pass null to clear existing project attribution"
             },
             session_id: {
-              type: ["string", "null"],
+              type: "string",
               description: "New session identifier (optional); pass null to clear existing session attribution"
             },
             epistemic_status: {
@@ -5118,30 +5166,30 @@ function buildRegisteredToolDescriptors(): ToolDescriptor[] {
               description: "New epistemic status (optional)"
             },
             status: {
-              type: ["string", "null"],
-              enum: ["backlog", "ready", "in_progress", "blocked", "done", null],
+              type: "string",
+              enum: ["backlog", "ready", "in_progress", "blocked", "done"],
               description: "New kanban status (optional); pass null to clear"
             },
             current_slice: {
-              type: ["string", "null"],
+              type: "string",
               description: "New current sub-task slice (optional); pass null to clear"
             },
             why_now: {
-              type: ["string", "null"],
+              type: "string",
               description: "New prioritization reason (optional); pass null to clear"
             },
             visibility: {
-              type: ["string", "null"],
-              enum: ["private", "shared", "global", null],
+              type: "string",
+              enum: ["private", "shared", "global"],
               description: "New visibility level (optional); pass null to clear (reverts to private default)"
             },
             publication_state: {
-              type: ["string", "null"],
-              enum: ["draft", "published_partial", "published_complete", "resumable", "closable", "closed", null],
+              type: "string",
+              enum: ["draft", "published_partial", "published_complete", "resumable", "closable", "closed"],
               description: "New task publication lifecycle state (optional); pass null to clear. Prefer using publish_task, resume_task, or close_task for validated transitions."
             },
             last_publication_step: {
-              type: ["string", "null"],
+              type: "string",
               description: "Name of the last successfully completed publication step (e.g. 'pr_created', 'reviewer_requested'). Pass null to clear."
             }
           },
@@ -5624,11 +5672,11 @@ function buildRegisteredToolDescriptors(): ToolDescriptor[] {
               description: "New kanban status"
             },
             current_slice: {
-              type: ["string", "null"],
+              type: "string",
               description: "Optional sub-task or slice currently being worked on. Pass null to clear."
             },
             why_now: {
-              type: ["string", "null"],
+              type: "string",
               description: "Optional reason this task is being prioritized now. Pass null to clear."
             },
             agent_id: {
@@ -5889,10 +5937,13 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           storeResult.similarity_score !== undefined ? `similarity_score: ${storeResult.similarity_score.toFixed(3)}` : undefined,
           storeResult.ping_pong_detected ? `ping_pong_detected: true (transition_count=${storeResult.ping_pong_count ?? 0})` : undefined,
         ].filter(Boolean).join("\n");
+        const resolvedDistrictKey = memory.district;
+        const districtLabel = memorySystem.getAllDistricts().find(d => d.name.toLowerCase().replace(/\s+/g, '_').replace(/_district$/, '') === resolvedDistrictKey)?.name || resolvedDistrictKey;
+        const inferredNote = storeResult.district_inferred ? " (auto-inferred, override with district: on write if wrong)" : "";
         return {
           content: [{
             type: "text",
-            text: `🧠 Stored memory "${memory.name}" in ${memorySystem.getAllDistricts().find(d => d.name.toLowerCase().replace(/\s+/g, '_') === district)?.name || district}\nID: ${memory.id}\nArchetype: ${memory.archetype}\nAgent: ${memory.agent_id ?? "unassigned"}\nProject: ${memory.project_id ?? "unset"}\nSession: ${memory.session_id ?? "unset"}\nStatus: ${memory.status ?? "unset"}\nEpistemic status: ${memory.epistemic_status ?? "unset"}\nVisibility: ${memory.visibility ?? "private"}\n${repeatLines}${warningLine}${repeatWarningLine}${cooldownLine}`
+            text: `🧠 Stored memory "${memory.name}" in ${districtLabel}${inferredNote}\nID: ${memory.id}\nArchetype: ${memory.archetype}\nAgent: ${memory.agent_id ?? "unassigned"}\nProject: ${memory.project_id ?? "unset"}\nSession: ${memory.session_id ?? "unset"}\nStatus: ${memory.status ?? "unset"}\nEpistemic status: ${memory.epistemic_status ?? "unset"}\nVisibility: ${memory.visibility ?? "private"}\n${repeatLines}${warningLine}${repeatWarningLine}${cooldownLine}`
           }]
         };
       } catch (error) {
@@ -6487,6 +6538,17 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     }
 
     case "server_handshake": {
+      const quickstart = [
+        "",
+        "📋 Quick start (read this once per session)",
+        "1. `store_memory` needs only `content`. District, tags, intensity, agent_id, etc. are all optional — the server fills in sensible defaults.",
+        "2. District is auto-inferred from your content if you omit it. The response tells you when this happened (\"auto-inferred\"); if the guess is wrong, either pass `district` explicitly next time or fix it with `update_memory`.",
+        "3. Tags (`topic:X`, `scope:X`, `kind:X`, `layer:X`) are optional enrichment, not a requirement. Add them when a memory is meant to be durable or cross-session searchable; skip them for quick task-log notes. A bare `store_memory({content})` call is a complete, valid write.",
+        "4. Before starting work, call `search_memories` for the current task and `memory_stats` for an overview — don't assume prior context persists.",
+        "5. Use `connect_memories` to link related entries so future sessions can follow the thread instead of rediscovering it.",
+        "In short: write early, write often, and don't let metadata decisions slow you down — content is the only thing that has to be right on the first try.",
+      ].join("\n");
+
       return {
         content: [{
           type: "text",
@@ -6498,6 +6560,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             `PID: ${process.pid}`,
             `Node.js: ${process.version}`,
             "Transport: stdio",
+            quickstart,
           ].join("\n"),
         }],
       };

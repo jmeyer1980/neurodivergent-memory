@@ -24,7 +24,8 @@ Use neurodivergent-memory MCP as a persistent memory layer for development sessi
 - For substantial implementation work, pair `practical_execution` updates with a `logical_analysis` or `creative_synthesis` memory when the durable principle should outlive the task log.
 - If the source memory is noisy, distill it so the stable reasoning survives separately from the implementation detail.
 - Connect related memories to reduce future rediscovery.
-- Keep tags canonical: `topic:X`, `scope:X`, `kind:X`, `layer:X`.
+- `district` is optional — omit it and the server infers one from content; only pass it when you know the guess will be wrong.
+- Tags are optional enrichment, not a gate. A bare `store_memory` call with just `content` is a complete, valid write. Add canonical tags (`topic:X`, `scope:X`, `kind:X`, `layer:X`) only when they'll materially help future retrieval — don't spend a decision cycle constructing a full tag set for a one-line note.
 - Do not treat repo memory files or local notes as substitutes for MCP memory writes.
 
 ## Sub-agent guidance
