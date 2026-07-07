@@ -1,0 +1,3 @@
+[submodule "docs/neurodivergent-memory.wiki"]
+	path = docs/neurodivergent-memory.wiki
+	url = https://github.com/jmeyer1980/neurodivergent-memory.wiki.git
