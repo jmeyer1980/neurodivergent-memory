@@ -6,7 +6,7 @@ When you need to run multiple server processes that share the same
 
 ## As of v0.4.0: Single-Writer Daemon Architecture
 
-Starting with v0.4.0, the default `node build/index.js` launch mode is a **stdio proxy** that ensures a single daemon process (`--daemon`) is running and forwards JSON-RPC requests to it. Stdio proxy launches cannot be direct writers to `memories.json`. The **multi-writer scenario** now requires explicitly running two daemon processes on different ports (via `--daemon --port <N>`) against the same `memories.json` file, with `NEURODIVERGENT_COORDINATION_MODE=filesystem-lock` enabled. The lock coordination only applies to that deliberate, multi-daemon deployment (Profile B below). For the standard single-daemon case (proxy → daemon), locking is not needed and not used.
+Starting with v0.4.0, the default `node build/index.js` launch mode is a **stdio proxy** that ensures a single daemon process (`--daemon`) is running and forwards JSON-RPC requests to it. Stdio proxy launches cannot be direct writers to `memories.json`. The **multi-writer scenario** now requires explicitly running two daemon processes on different ports (via `--daemon` with the `NEURODIVERGENT_MEMORY_DAEMON_PORT` environment variable) against the same `memories.json` file, with `NEURODIVERGENT_COORDINATION_MODE=filesystem-lock` enabled. The lock coordination only applies to that deliberate, multi-daemon deployment (Profile B below). For the standard single-daemon case (proxy → daemon), locking is not needed and not used.
 
 ---
 

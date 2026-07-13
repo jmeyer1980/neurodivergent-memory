@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.4.0
+## [0.4.0] - 2026-07-13
 
 ### Added
 - **Single-writer daemon architecture.** `build/index.js` now dispatches three modes:
