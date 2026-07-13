@@ -1,7 +1,7 @@
 # Single-Writer Memory Daemon — Design
 
 **Date:** 2026-07-13
-**Status:** Approved design, not yet implemented
+**Status:** Shipped 2026-07-13 (v0.4.0) — see docs/superpowers/plans/2026-07-13-single-writer-daemon.md
 **Target:** development branch
 **Implements:** Step 2 of [2026-07-11-remote-shared-memory-service-design.md](2026-07-11-remote-shared-memory-service-design.md), plus the stdio-proxy shim, in one pass ("B + C" — mode-aware entrypoint + bridge retires its MCP child)
 

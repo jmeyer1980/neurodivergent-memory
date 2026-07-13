@@ -75,9 +75,30 @@ const DAEMON_PORT = resolveDaemonPort(process.env);
 const DAEMON_ENTRY = process.env.ND_MEM_DAEMON_ENTRY || path.join(process.cwd(), 'build', 'index.js');
 const DAEMON_LOG = path.join(path.dirname(MEMORY_PATH), 'daemon.log');
 
+// Set once per process the first time a memoryPath mismatch is detected, so the
+// warning doesn't spam stderr on every forwarded tool call.
+let memoryPathMismatchWarned = false;
+
+/** path.resolve + (on win32) lowercase, so drive-letter case and slash style don't cause false positives. */
+function normalizePathForComparison(candidate) {
+  const resolved = path.resolve(candidate);
+  return process.platform === 'win32' ? resolved.toLowerCase() : resolved;
+}
+
+function warnOnMemoryPathMismatch(daemonMemoryPath, daemonPid) {
+  if (memoryPathMismatchWarned || !daemonMemoryPath) return;
+  if (normalizePathForComparison(daemonMemoryPath) === normalizePathForComparison(MEMORY_PATH)) return;
+  memoryPathMismatchWarned = true;
+  console.error(
+    'Bridge: WARNING daemon memoryPath differs from this bridge\'s MEMORY_PATH — the daemon (started by a different client) is serving a different memory store than this bridge expects.',
+    { daemonMemoryPath, bridgeMemoryPath: MEMORY_PATH, daemonPid },
+  );
+}
+
 let rpcId = 1;
 async function runMcpTool(toolName, args) {
-  await ensureDaemon({ port: DAEMON_PORT, entryPath: DAEMON_ENTRY, logFile: DAEMON_LOG });
+  const health = await ensureDaemon({ port: DAEMON_PORT, entryPath: DAEMON_ENTRY, logFile: DAEMON_LOG });
+  warnOnMemoryPathMismatch(health.memoryPath, health.pid);
   const res = await fetch(`http://127.0.0.1:${DAEMON_PORT}/mcp`, {
     method: 'POST',
     headers: {

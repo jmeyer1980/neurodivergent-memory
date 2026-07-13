@@ -27,11 +27,12 @@ async function main(): Promise<void> {
     // losing daemon exits before it can ever touch the file.
     const { createHttpListener, attachDaemonRoutes } = await import("./core/daemon.js");
     const httpServer = await createHttpListener(resolveDaemonPort());
-    const { createMcpServer, SERVER_PACKAGE_INFO, PERSISTENCE_FILE } = await import("./server-main.js");
+    const { createMcpServer, SERVER_PACKAGE_INFO, PERSISTENCE_FILE, getMemoryCount } = await import("./server-main.js");
     attachDaemonRoutes(httpServer, {
       createServer: createMcpServer,
       version: SERVER_PACKAGE_INFO.version,
       memoryPath: PERSISTENCE_FILE,
+      getMemoryCount,
     });
     return;
   }

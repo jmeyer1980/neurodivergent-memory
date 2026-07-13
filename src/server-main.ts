@@ -3722,6 +3722,11 @@ class NeurodivergentMemory {
     return Object.values(this.memories);
   }
 
+  /** Minimal public accessor for daemon /health diagnostics; avoids exposing the full memory map. */
+  getMemoryCountForDiagnostics(): number {
+    return this.getAllMemories().length;
+  }
+
   /**
    * Distill an emotional memory into a structured logical artifact.
    * Translates raw emotional processing content into signals, triggers, constraints,
@@ -4119,6 +4124,11 @@ class NeurodivergentMemory {
 
 // Global memory system instance
 const memorySystem = new NeurodivergentMemory();
+
+/** Daemon /health diagnostics: current in-memory memory count. */
+export function getMemoryCount(): number {
+  return memorySystem.getMemoryCountForDiagnostics();
+}
 
 const SYNTHESIS_PROMPT_INCLUDE_ALL_THRESHOLD = 60;
 const SYNTHESIS_PROMPT_MAX_MEMORIES = 75;

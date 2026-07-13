@@ -7,6 +7,7 @@ export interface DaemonRouteOptions {
   createServer: () => Server;
   version: string;
   memoryPath: string;
+  getMemoryCount: () => number;
 }
 
 /**
@@ -34,7 +35,7 @@ export function createHttpListener(port: number): Promise<http.Server> {
 }
 
 export function attachDaemonRoutes(httpServer: http.Server, options: DaemonRouteOptions): void {
-  const { createServer, version, memoryPath } = options;
+  const { createServer, version, memoryPath, getMemoryCount } = options;
 
   httpServer.removeAllListeners("request");
   httpServer.on("request", (req, res) => {
@@ -45,7 +46,7 @@ export function attachDaemonRoutes(httpServer: http.Server, options: DaemonRoute
     try {
       if (req.method === "GET" && req.url === "/health") {
         res.writeHead(200, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ ok: true, pid: process.pid, version, memoryPath, mode: "daemon" }));
+        res.end(JSON.stringify({ ok: true, pid: process.pid, version, memoryPath, mode: "daemon", memoryCount: getMemoryCount() }));
         return;
       }
       if (req.method === "POST" && req.url === "/mcp") {
@@ -69,8 +70,10 @@ export function attachDaemonRoutes(httpServer: http.Server, options: DaemonRoute
       res.end(JSON.stringify({ ok: false, error: "not found" }));
     } catch (err) {
       logger.error({ err }, "Daemon request handling failed");
-      if (!res.headersSent) res.writeHead(500, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ jsonrpc: "2.0", id: null, error: { code: -32603, message: "Internal server error" } }));
+      if (!res.writableEnded) {
+        if (!res.headersSent) res.writeHead(500, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ jsonrpc: "2.0", id: null, error: { code: -32603, message: "Internal server error" } }));
+      }
     }
   }
 

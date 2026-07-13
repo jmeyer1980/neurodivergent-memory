@@ -1,5 +1,7 @@
 # Changelog
 
+## [Unreleased]
+
 ## [0.4.0] - 2026-07-13
 
 ### Added
@@ -13,8 +15,6 @@
 ### Changed
 - The web-app bridge (`scripts/nd-mem-bridge-server.mjs`) no longer spawns its own MCP
   child; `/save` and `/update` forward to the shared daemon (`routedTo: "daemon-http"`).
-
-## [Unreleased]
 
 ## [0.3.9] - 2026-04-16
 

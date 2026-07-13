@@ -62,6 +62,7 @@ test("daemon serves health and stateless tools/call, and persists writes", async
     assert.equal(health.pid, child.pid);
     assert.equal(health.mode, "daemon");
     assert.ok(health.memoryPath.startsWith(tempDir));
+    assert.equal(typeof health.memoryCount, "number");
 
     const listed = await postMcp(port, { jsonrpc: "2.0", id: 1, method: "tools/list", params: {} });
     assert.ok(Array.isArray(listed.result.tools) && listed.result.tools.length > 0, `tools/list failed: ${JSON.stringify(listed)}\nstderr: ${stderr}`);

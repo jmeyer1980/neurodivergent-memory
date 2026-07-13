@@ -17,6 +17,27 @@ export interface ProxyOptions {
 
 const FALLBACK_PROTOCOL_VERSION = "2024-11-05";
 
+// Set once per process the first time a memoryPath mismatch is detected, so the
+// warning doesn't spam the log on every forwarded request.
+let memoryPathMismatchWarned = false;
+
+/** path.resolve + (on win32) lowercase, so drive-letter case and slash style don't cause false positives. */
+function normalizePathForComparison(candidate: string): string {
+  const resolved = path.resolve(candidate);
+  return process.platform === "win32" ? resolved.toLowerCase() : resolved;
+}
+
+function warnOnMemoryPathMismatch(daemonMemoryPath: string | undefined, daemonPid: number | undefined): void {
+  if (memoryPathMismatchWarned || !daemonMemoryPath) return;
+  const localMemoryPath = resolvePersistenceLocation().file;
+  if (normalizePathForComparison(daemonMemoryPath) === normalizePathForComparison(localMemoryPath)) return;
+  memoryPathMismatchWarned = true;
+  logger.warn(
+    { daemonMemoryPath, localMemoryPath, daemonPid },
+    "Daemon memoryPath differs from this client's resolved persistence location; the daemon (started by a different client) is serving a different memory store than this client expects",
+  );
+}
+
 /**
  * Proxy mode: this process NEVER opens the store. It answers `initialize`
  * locally (the daemon is stateless per request) and forwards every other
@@ -73,7 +94,8 @@ export async function runStdioProxy(options: ProxyOptions): Promise<void> {
     if (msg.id === undefined) return;
 
     try {
-      await ensureDaemon({ port, entryPath: options.entryPath, logFile });
+      const health = await ensureDaemon({ port, entryPath: options.entryPath, logFile });
+      warnOnMemoryPathMismatch(health.memoryPath, health.pid);
       const res = await fetch(`http://127.0.0.1:${port}/mcp`, {
         method: "POST",
         headers: {
