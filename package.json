@@ -81,7 +81,7 @@
     "benchmark": "npm run build && node benchmarks/memory-benchmark.mjs",
     "prepare": "npm run build",
     "watch": "tsc --watch",
-    "inspector": "npx @modelcontextprotocol/inspector build/index.js"
+    "inspector": "npx @modelcontextprotocol/inspector -e NEURODIVERGENT_MEMORY_MODE=standalone build/index.js"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.29.0",

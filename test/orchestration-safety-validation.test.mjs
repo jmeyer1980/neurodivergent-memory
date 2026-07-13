@@ -30,6 +30,7 @@ function startServer(options = {}) {
     env: {
       ...process.env,
       NEURODIVERGENT_MEMORY_DIR: tempDir,
+      NEURODIVERGENT_MEMORY_MODE: "standalone",
       NEURODIVERGENT_MEMORY_LOG_LEVEL: "error",
       ...(options.env ?? {}),
     },

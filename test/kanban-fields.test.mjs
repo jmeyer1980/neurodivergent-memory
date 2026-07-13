@@ -67,7 +67,7 @@ function getText(res) {
 before(async () => {
   serverProcess = spawn("node", [SERVER_PATH], {
     stdio: ["pipe", "pipe", "pipe"],
-    env: { ...process.env, NM_PERSISTENCE_PATH: "", NM_DISABLE_WAL: "true", NM_WIP_LIMIT: "1" },
+    env: { ...process.env, NEURODIVERGENT_MEMORY_MODE: "standalone", NM_PERSISTENCE_PATH: "", NM_DISABLE_WAL: "true", NM_WIP_LIMIT: "1" },
   });
   serverProcess.stderr.on("data", () => {}); // suppress stderr
   await sendRequest("initialize", {

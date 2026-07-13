@@ -24,6 +24,7 @@ function startServer(command) {
     env: {
       ...process.env,
       NEURODIVERGENT_MEMORY_DIR: tempDir,
+      NEURODIVERGENT_MEMORY_MODE: "standalone",
       NEURODIVERGENT_MEMORY_LOG_LEVEL: process.env.NEURODIVERGENT_MEMORY_LOG_LEVEL || "error",
     },
   });

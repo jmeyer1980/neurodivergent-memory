@@ -42,6 +42,7 @@ async function setup() {
       ...process.env,
       HOME: persistDir,
       NEURODIVERGENT_MEMORY_DIR: persistDir,
+      NEURODIVERGENT_MEMORY_MODE: "standalone",
     },
     stdio: ['pipe', 'pipe', 'inherit'],
   });

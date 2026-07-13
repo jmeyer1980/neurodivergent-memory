@@ -168,6 +168,7 @@ function startServer() {
     env: {
       ...process.env,
       NEURODIVERGENT_MEMORY_DIR: tempDir,
+      NEURODIVERGENT_MEMORY_MODE: "standalone",
       NEURODIVERGENT_MEMORY_LOG_LEVEL: "error",
     },
     stdio: ["pipe", "pipe", "pipe"],
