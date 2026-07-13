@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.4.0
+
+### Added
+- **Single-writer daemon architecture.** `build/index.js` now dispatches three modes:
+  `--daemon` (sole process that opens `memories.json`, serving MCP over Streamable HTTP
+  on `127.0.0.1:3838`, port overridable via `NEURODIVERGENT_MEMORY_DAEMON_PORT`),
+  stdio **proxy** (the new default — ensures the daemon is running and forwards JSON-RPC;
+  never opens the store), and `NEURODIVERGENT_MEMORY_MODE=standalone` (previous behavior,
+  for tests/CI/inspector). Fixes the multi-writer last-writer-wins data loss of 2026-07-13.
+
+### Changed
+- The web-app bridge (`scripts/nd-mem-bridge-server.mjs`) no longer spawns its own MCP
+  child; `/save` and `/update` forward to the shared daemon (`routedTo: "daemon-http"`).
+
 ## [Unreleased]
 
 ## [0.3.9] - 2026-04-16
