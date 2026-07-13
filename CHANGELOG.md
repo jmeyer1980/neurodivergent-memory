@@ -2,7 +2,7 @@
 
 ## [Unreleased]
 
-## [0.4.0] - 2026-07-13
+Running locally on the development branch; not part of a release cut (version stays 0.3.9). The 0.4.0 version number remains reserved for the Council & Multi-Agent Orchestration milestone per the roadmap.
 
 ### Added
 - **Single-writer daemon architecture.** `build/index.js` now dispatches three modes:
