@@ -7,6 +7,7 @@
  */
 import * as path from "path";
 import { fileURLToPath } from "url";
+import { resolveRunMode, resolveDaemonPort } from "./core/run-mode.js";
 
 async function main(): Promise<void> {
   const command = process.argv[2];
@@ -17,7 +18,24 @@ async function main(): Promise<void> {
     return;
   }
 
-  // Mode dispatch lands in Tasks 3 and 5. Until then, standalone for all.
+  const mode = resolveRunMode();
+
+  if (mode === "daemon") {
+    // Bind the port BEFORE importing server-main: the import constructs the
+    // store and may compact the WAL (a write). Holding the port first means a
+    // losing daemon exits before it can ever touch the file.
+    const { createHttpListener, attachDaemonRoutes } = await import("./core/daemon.js");
+    const httpServer = await createHttpListener(resolveDaemonPort());
+    const { createMcpServer, SERVER_PACKAGE_INFO, PERSISTENCE_FILE } = await import("./server-main.js");
+    attachDaemonRoutes(httpServer, {
+      createServer: createMcpServer,
+      version: SERVER_PACKAGE_INFO.version,
+      memoryPath: PERSISTENCE_FILE,
+    });
+    return;
+  }
+
+  // Mode dispatch for proxy lands in Task 5. Until then, standalone for all.
   const { runStandalone } = await import("./server-main.js");
   await runStandalone();
 }
