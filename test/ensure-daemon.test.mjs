@@ -48,23 +48,31 @@ test("ensureDaemon spawns a real daemon when none is running", async () => {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "ndm-ensure-spawn-"));
   const port = await getFreePort();
   const logFile = path.join(tempDir, "daemon.log");
-  const health = await ensureDaemon({
-    port,
-    entryPath: path.join(process.cwd(), "build", "index.js"),
-    logFile,
-    env: {
-      ...process.env,
-      NEURODIVERGENT_MEMORY_DIR: tempDir,
-      NEURODIVERGENT_MEMORY_DAEMON_PORT: String(port),
-    },
-    timeoutMs: 10000,
-  });
+  let health;
   try {
+    health = await ensureDaemon({
+      port,
+      entryPath: path.join(process.cwd(), "build", "index.js"),
+      logFile,
+      env: {
+        ...process.env,
+        NEURODIVERGENT_MEMORY_DIR: tempDir,
+        NEURODIVERGENT_MEMORY_DAEMON_PORT: String(port),
+      },
+      timeoutMs: 10000,
+    });
     assert.equal(health.ok, true);
     assert.equal(typeof health.pid, "number");
     assert.equal(health.mode, "daemon");
   } finally {
-    if (health.pid) process.kill(health.pid);
+    if (health?.pid) {
+      process.kill(health.pid);
+    } else {
+      // Covers spawn-succeeded-but-poll-timed-out: the daemon may still be starting up
+      // even though ensureDaemon() threw, so give it one last chance before giving up.
+      const lastChance = await checkDaemonHealth(port, 500).catch(() => null);
+      if (lastChance?.pid) process.kill(lastChance.pid);
+    }
   }
 });
 

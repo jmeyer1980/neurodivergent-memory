@@ -22,16 +22,21 @@ export interface EnsureDaemonOptions {
 }
 
 export async function checkDaemonHealth(port: number, timeoutMs = 750): Promise<DaemonHealth | null> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), timeoutMs);
     const res = await fetch(`http://127.0.0.1:${port}/health`, { signal: controller.signal });
-    clearTimeout(timer);
-    if (!res.ok) return null;
+    if (!res.ok) {
+      // Drain the body so undici reclaims the socket promptly even though we don't need the payload.
+      await res.arrayBuffer().catch(() => {});
+      return null;
+    }
     const body = (await res.json()) as DaemonHealth;
     return body.ok ? body : null;
   } catch {
     return null;
+  } finally {
+    clearTimeout(timer);
   }
 }
 
@@ -48,12 +53,14 @@ export async function ensureDaemon(options: EnsureDaemonOptions): Promise<Daemon
   const { port, entryPath, logFile } = options;
   const timeoutMs = options.timeoutMs ?? 5000;
   const pollIntervalMs = options.pollIntervalMs ?? 100;
+  const deadline = Date.now() + timeoutMs;
 
-  const existing = await checkDaemonHealth(port);
+  const existing = await checkDaemonHealth(port, Math.min(750, timeoutMs));
   if (existing) return existing;
 
   fs.mkdirSync(path.dirname(logFile), { recursive: true });
   const logFd = fs.openSync(logFile, "a");
+  let spawnErrorMessage: string | undefined;
   try {
     const child = spawn(process.execPath, [entryPath, "--daemon"], {
       detached: true,
@@ -61,20 +68,25 @@ export async function ensureDaemon(options: EnsureDaemonOptions): Promise<Daemon
       stdio: ["ignore", "ignore", logFd],
       env: { ...(options.env ?? process.env), NEURODIVERGENT_MEMORY_MODE: "daemon" },
     });
-    child.on("error", () => { /* surfaced by the health-poll timeout below */ });
+    child.on("error", (err) => {
+      // Surfaced in the timeout error below; the health-poll loop is what actually detects failure.
+      spawnErrorMessage = err.message;
+    });
     child.unref();
   } finally {
     fs.closeSync(logFd);
   }
 
-  const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    const health = await checkDaemonHealth(port, Math.min(750, pollIntervalMs * 5));
+    const perCheckTimeoutMs = Math.max(50, Math.min(750, pollIntervalMs * 5, deadline - Date.now()));
+    const health = await checkDaemonHealth(port, perCheckTimeoutMs);
     if (health) return health;
+    if (Date.now() >= deadline) break;
     await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
   }
   throw new Error(
     `Memory daemon did not become healthy on 127.0.0.1:${port} within ${timeoutMs}ms. ` +
-      `Check the daemon log: ${logFile}`,
+      `Check the daemon log: ${logFile}` +
+      (spawnErrorMessage ? ` (spawn error: ${spawnErrorMessage})` : ""),
   );
 }
