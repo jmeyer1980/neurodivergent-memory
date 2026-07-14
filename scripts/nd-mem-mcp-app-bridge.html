@@ -95,13 +95,14 @@
 
   <script type="module">
     try {
-      const helpers = await import('http://localhost:3737/nd-mem-app-helpers.mjs');
+      const base = location.protocol.startsWith('http') ? location.origin : 'http://localhost:3737';
+      const helpers = await import(base + '/nd-mem-app-helpers.mjs');
       window.ndMemHelpers = helpers;
     } catch { /* bridge down — rename flow will explain when clicked */ }
   </script>
 
   <script>
-    const BRIDGE = 'http://localhost:3737';
+    const BRIDGE = location.protocol.startsWith('http') ? location.origin : 'http://localhost:3737';
     // Carousels (projects) and decks (districts) are derived from the live snapshot — never hardcoded.
     const DISTRICTS = ['logical_analysis','emotional_processing','practical_execution','vigilant_monitoring','creative_synthesis'];
     const UNASSIGNED = '(no project)';
@@ -275,7 +276,7 @@
           moved++;
         }
         state.activeCarousel = target;
-        await loadSnapshot();
+        try { await loadSnapshot(); } catch { /* SSE will refresh; success toast still shows */ }
         showToast(`Moved ${moved} card${moved===1?'':'s'} from ${source} to ${target}.`);
       } finally {
         setWriteButtonsDisabled(false);
@@ -291,6 +292,7 @@
       if(typed===null) return;
       const newName = typed.trim();
       if(!newName || newName===c.id) return;
+      if(helpers.normalizeProjectId(newName)===helpers.normalizeProjectId(UNASSIGNED)){ showToast('That name is reserved for unassigned cards.'); return; }
       const others = carousels().filter(x=>x.id!==UNASSIGNED && x.id!==c.id);
       const collision = others.find(o=>helpers.normalizeProjectId(o.id)===helpers.normalizeProjectId(newName));
       let target = newName;
@@ -299,7 +301,7 @@
         target = collision.id; // canonical spelling wins, whatever was typed
       } else {
         const near = helpers.nearMissOf(newName, others.map(o=>o.id));
-        if(near && confirm(`Did you mean "${near}"? OK = merge into "${near}", Cancel = keep "${newName}".`)){
+        if(near && confirm(`Did you mean "${near}"? OK = move all ${c.items.length} cards into "${near}", Cancel = keep "${newName}".`)){
           target = near;
         } else if(!confirm(`Rename all ${c.items.length} cards from "${c.id}" to "${newName}"?`)){
           return;

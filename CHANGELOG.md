@@ -11,6 +11,12 @@ Running locally on the development branch; not part of a release cut (version st
   stdio **proxy** (the new default — ensures the daemon is running and forwards JSON-RPC;
   never opens the store), and `NEURODIVERGENT_MEMORY_MODE=standalone` (previous behavior,
   for tests/CI/inspector). Fixes the multi-writer last-writer-wins data loss of 2026-07-13.
+- **Project rename / merge-on-collision in the web app.** "Rename project…" bulk
+  re-assigns `project_id` for every card in the active project; renaming to an
+  existing project (case- and `-`/`_`-insensitive) confirms and merges into its
+  canonical spelling, with a "did you mean" guard for near-miss names. The bridge
+  serves the shared helpers module at `GET /nd-mem-app-helpers.mjs` and now
+  surfaces daemon tool errors (`isError`) as failed requests.
 
 ### Changed
 - The web-app bridge (`scripts/nd-mem-bridge-server.mjs`) no longer spawns its own MCP

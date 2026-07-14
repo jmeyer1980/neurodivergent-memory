@@ -137,3 +137,30 @@ test("POST /update with only {memoryId, projectId} moves a memory between projec
     if (daemonPid) { try { process.kill(daemonPid); } catch { /* gone */ } }
   }
 });
+
+test("POST /update for a nonexistent memory surfaces the daemon's isError result as a failed request", async () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "ndm-soft-error-"));
+  const bridgePort = await getFreePort();
+  const daemonPort = await getFreePort();
+  const bridge = startBridge(tempDir, bridgePort, daemonPort);
+  let daemonPid;
+  try {
+    await waitFor(`http://127.0.0.1:${bridgePort}/health`);
+
+    // The /update call itself triggers ensureDaemon (daemon starts lazily), so
+    // issue it before probing the daemon's own health endpoint.
+    const res = await fetch(`http://127.0.0.1:${bridgePort}/update`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ memoryId: "memory_999999", projectId: "anywhere" }),
+    });
+    const data = await res.json();
+    assert.equal(res.status, 500);
+    assert.equal(data.ok, false, JSON.stringify(data));
+
+    daemonPid = (await waitFor(`http://127.0.0.1:${daemonPort}/health`).then((r) => r.json())).pid;
+  } finally {
+    bridge.kill();
+    if (daemonPid) { try { process.kill(daemonPid); } catch { /* gone */ } }
+  }
+});

@@ -1,7 +1,7 @@
 # Project Rename / Merge-on-Collision (ND-Mem Web App) — Design
 
 **Date:** 2026-07-13
-**Status:** Approved design, not yet implemented
+**Status:** Shipped locally 2026-07-14 (development branch, unreleased) — see docs/superpowers/plans/2026-07-13-project-rename-merge.md
 **Target:** development branch, build-and-serve-locally (no version bump; unreleased)
 
 ## Problem

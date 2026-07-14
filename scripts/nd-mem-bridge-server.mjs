@@ -110,6 +110,10 @@ async function runMcpTool(toolName, args) {
   });
   const message = await res.json();
   if (message.error) throw new Error(JSON.stringify(message.error));
+  if (message.result?.isError) {
+    const text = Array.isArray(message.result.content) ? message.result.content.map(c => c?.text).filter(Boolean).join(' ') : '';
+    throw new Error(text || 'MCP tool reported an error');
+  }
   return { ok: true, result: message };
 }
 
