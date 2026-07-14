@@ -1,0 +1,338 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ND-Mem MCP App</title>
+  <link rel="preconnect" href="https://api.fontshare.com">
+  <link href="https://api.fontshare.com/v2/css?f[]=satoshi@300,400,500,700,900&f[]=clash-display@400,500,600,700&display=swap" rel="stylesheet">
+  <style>
+    :root,[data-theme="light"]{--bg:#f7f6f2;--surface:#f9f8f5;--surface2:#fbfbf9;--offset:#f3f0ec;--border:#d4d1ca;--text:#28251d;--muted:#7a7974;--faint:#bab9b4;--primary:#01696f;--primaryHi:#cedcd8;--radius:18px;--shadow:0 18px 40px rgba(0,0,0,.12);--font-display:'Clash Display','Inter',sans-serif;--font-body:'Satoshi','Inter',sans-serif}
+    [data-theme="dark"]{--bg:#111318;--surface:#1a1d22;--surface2:#20252d;--offset:#27303a;--border:#37404b;--text:#edf2f4;--muted:#a3b0b8;--faint:#6e7a84;--primary:#60d7d2;--primaryHi:rgba(96,215,210,.14);--shadow:0 22px 52px rgba(0,0,0,.32)}
+    *{box-sizing:border-box;margin:0;padding:0} body{font-family:var(--font-body);background:radial-gradient(circle at top left,rgba(96,215,210,.1),transparent 24%),linear-gradient(180deg,var(--bg),#0d0f13);color:var(--text);min-height:100vh} button,input,select,textarea{font:inherit;color:inherit} button{cursor:pointer} a{color:inherit}
+    .app{display:grid;grid-template-columns:300px 1fr 340px;min-height:100vh}.panel{background:rgba(18,22,28,.78);backdrop-filter:blur(20px);border-right:1px solid rgba(255,255,255,.05);min-height:0}.sidebar,.detail{display:flex;flex-direction:column}.main{display:grid;grid-template-rows:auto auto auto 1fr;min-width:0}
+    .header,.sub,.toolbar,.sidehead,.detailhead{padding:20px 24px;border-bottom:1px solid rgba(255,255,255,.05)} .header{display:flex;justify-content:space-between;gap:16px;align-items:flex-start}.brand h1{font-family:var(--font-display);font-size:2rem;letter-spacing:-.03em}.brand p,.sub p,.sidehead p,.detailhead p{color:var(--muted);line-height:1.55}.row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+    .btn,.pill,input,select,textarea{border:1px solid rgba(255,255,255,.08);border-radius:999px;background:rgba(255,255,255,.04)} .btn{padding:12px 14px;min-height:44px}.btn.primary{background:linear-gradient(180deg,rgba(96,215,210,.24),rgba(96,215,210,.12));border-color:rgba(96,215,210,.28)} .btn:hover{transform:translateY(-1px)} input,select{padding:12px 14px;width:100%;border-radius:14px} textarea{padding:12px 14px;width:100%;border-radius:14px;min-height:120px}
+    .stats{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;padding:0 24px 20px}.stat{padding:16px;border-radius:22px;background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.06)} .stat label{display:block;font-size:.74rem;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin-bottom:6px}.stat strong{font-size:1.3rem}.stat span{display:block;margin-top:4px;color:var(--muted);font-size:.9rem}
+    .carousel-list,.detail-body{overflow:auto;padding:16px}.carousel{padding:16px;border-radius:22px;background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.06);margin-bottom:12px;text-align:left}.carousel.active{border-color:rgba(96,215,210,.34);background:linear-gradient(180deg,rgba(96,215,210,.12),rgba(255,255,255,.03))}.carousel h3{margin-bottom:6px}.chips,.tags{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}.chip{padding:7px 10px;border-radius:999px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08);font-size:.78rem;color:var(--muted)}
+    .ribbon{overflow:auto;padding:16px 24px 24px;display:grid;gap:16px}.deck{border-radius:26px;overflow:hidden;background:linear-gradient(180deg,rgba(255,255,255,.04),rgba(255,255,255,.02));border:1px solid rgba(255,255,255,.06);box-shadow:var(--shadow)} .deckhead{display:flex;justify-content:space-between;align-items:center;padding:16px 18px;border-bottom:1px solid rgba(255,255,255,.06)} .deckhead p{color:var(--muted);font-size:.84rem}
+    .track{display:grid;grid-auto-flow:column;grid-auto-columns:minmax(280px,350px);gap:14px;overflow-x:auto;padding:16px}.card{padding:16px;border-radius:24px;border:1px solid rgba(255,255,255,.08);background:linear-gradient(180deg,rgba(255,255,255,.08),rgba(255,255,255,.03)),radial-gradient(circle at top right,rgba(96,215,210,.18),transparent 38%),rgba(20,25,31,.9);text-align:left;display:flex;flex-direction:column;gap:10px;min-height:270px}.card:hover{border-color:rgba(96,215,210,.3)} .card .id{font-size:.74rem;text-transform:uppercase;letter-spacing:.08em;color:var(--faint)} .card h4{font-size:1rem;line-height:1.25}.card p{color:var(--muted);line-height:1.55}.meta{display:grid;grid-template-columns:repeat(2,1fr);gap:8px}.mini{padding:10px;border-radius:14px;background:rgba(255,255,255,.035);border:1px solid rgba(255,255,255,.05)} .mini label{display:block;font-size:.7rem;color:var(--faint);text-transform:uppercase;letter-spacing:.08em;margin-bottom:4px}.mini span{font-size:.84rem}
+    .detailsec{padding:16px;border-radius:22px;background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.06);margin-bottom:12px}.detailsec h3{margin-bottom:8px}.detailsec p,.detailsec li{color:var(--muted);line-height:1.6}.detailsec ul{list-style:none;display:grid;gap:6px}
+    .modalbg{position:fixed;inset:0;background:rgba(7,10,12,.64);backdrop-filter:blur(10px);display:none;align-items:center;justify-content:center;padding:16px}.modalbg.open{display:flex}.modal{width:min(760px,100%);max-height:88vh;overflow:auto;border-radius:28px;background:linear-gradient(180deg,rgba(27,30,35,.98),rgba(17,19,22,.98));border:1px solid rgba(255,255,255,.08);padding:22px;box-shadow:0 30px 80px rgba(0,0,0,.45)} .modal h2{font-family:var(--font-display);margin-bottom:6px}.modal p{color:var(--muted);margin-bottom:14px}.grid{display:grid;grid-template-columns:repeat(2,1fr);gap:12px}.field label{display:block;margin-bottom:6px;font-size:.74rem;color:var(--muted);text-transform:uppercase;letter-spacing:.08em}.span2{grid-column:span 2}.foot{display:flex;justify-content:space-between;gap:10px;align-items:center;margin-top:14px;padding-top:14px;border-top:1px solid rgba(255,255,255,.07)} .hint{color:var(--faint);font-size:.78rem;line-height:1.5}
+    .toast{position:fixed;right:16px;bottom:16px;display:none;max-width:360px;padding:14px 16px;border-radius:18px;background:rgba(16,20,24,.94);border:1px solid rgba(96,215,210,.24);box-shadow:var(--shadow)} .toast.show{display:block}.live{color:#90f6d8;font-size:.78rem}
+    @media (max-width:1180px){.app{grid-template-columns:1fr}.stats{grid-template-columns:repeat(2,1fr)}} @media (max-width:720px){.stats,.grid{grid-template-columns:1fr}.span2{grid-column:span 1}.track{grid-auto-columns:minmax(250px,88vw)}}
+  </style>
+</head>
+<body>
+  <div class="app">
+    <aside class="panel sidebar">
+      <div class="sidehead"><h2>Projects</h2><p>Auto-discovered from every memory's project_id. Cards group into districts.</p><button class="btn" id="renameProjectBtn" style="margin-top:10px">Rename project…</button></div>
+      <div class="carousel-list" id="carouselList"></div>
+    </aside>
+    <main class="panel main">
+      <div class="header">
+        <div class="brand">
+          <h1>ND-Mem MCP App</h1>
+          <p>Reads <span id="memoryPathText"></span>, listens for changes, and routes writes through MCP.</p>
+        </div>
+        <div class="row">
+          <div class="pill btn"><span class="live" id="pollState">Connecting…</span></div>
+          <button class="btn" id="refreshBtn">Reload snapshot</button>
+          <button class="btn primary" id="newBtn">+ New Card</button>
+          <button class="btn" id="themeBtn">◐</button>
+        </div>
+      </div>
+      <div class="sub"><p id="bridgeState">Bridge not connected yet.</p></div>
+      <div class="stats" id="stats"></div>
+      <div class="toolbar">
+        <div class="grid">
+          <div><input id="searchInput" placeholder="Search titles, content, tags, districts..." /></div>
+          <div class="row"><select id="deckFilter"></select><select id="scopeFilter"><option value="all">All scopes</option><option value="personal">Personal</option><option value="team">Team</option><option value="org">Org</option></select></div>
+        </div>
+      </div>
+      <section class="ribbon" id="ribbon"></section>
+    </main>
+    <aside class="panel detail">
+      <div class="detailhead" style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px"><div><h2>Selected card</h2><p>Metadata, tags, and MCP routing details.</p></div><button class="btn" id="editBtn">Edit</button></div>
+      <div class="detail-body" id="detailBody"></div>
+    </aside>
+  </div>
+
+  <div class="modalbg" id="modalBg">
+    <div class="modal">
+      <h2>New memory card</h2>
+      <p>This form posts to the local bridge, which forwards the save to your stdio MCP server.</p>
+      <div class="grid">
+        <div class="field"><label>Title</label><input id="titleInput" /></div>
+        <div class="field"><label>District</label><select id="districtInput"><option>logical_analysis</option><option>emotional_processing</option><option>practical_execution</option><option>creative_synthesis</option><option>vigilant_monitoring</option></select></div>
+        <div class="field"><label>Project</label><select id="carouselInput"></select></div>
+        <div class="field"><label>Visibility</label><select id="visibilityInput"><option>private</option><option>shared</option><option>global</option></select></div>
+        <div class="field"><label>Intensity</label><input id="intensityInput" type="number" min="0" max="10" value="5" /></div>
+        <div class="field span2"><label>Content</label><textarea id="contentInput"></textarea></div>
+        <div class="field span2"><label>Tags</label><input id="tagsInput" placeholder="topic:..., scope:concept, kind:insight, layer:research, persistence:durable" /></div>
+      </div>
+      <div class="foot"><div class="hint">Path: browser app → localhost bridge → stdio MCP store_memory → memories.json write → polling refresh.</div><div class="row"><button class="btn" id="cancelBtn">Cancel</button><button class="btn primary" id="saveBtn">Send to MCP</button></div></div>
+    </div>
+  </div>
+
+  <div class="modalbg" id="editModalBg">
+    <div class="modal">
+      <h2>Edit memory</h2>
+      <p>Routes to the bridge, which forwards the change to the stdio MCP <strong>update_memory</strong> tool. Only edited fields change.</p>
+      <div class="grid">
+        <div class="field span2"><label>Content</label><textarea id="editContent"></textarea></div>
+        <div class="field"><label>District</label><select id="editDistrict"><option>logical_analysis</option><option>emotional_processing</option><option>practical_execution</option><option>creative_synthesis</option><option>vigilant_monitoring</option></select></div>
+        <div class="field"><label>Project (project_id)</label><input id="editProject" placeholder="blank clears project" /></div>
+        <div class="field"><label>Visibility</label><select id="editVisibility"><option>private</option><option>shared</option><option>global</option></select></div>
+        <div class="field"><label>Intensity (0–1)</label><input id="editIntensity" type="number" min="0" max="1" step="0.1" /></div>
+        <div class="field"><label>Epistemic status</label><select id="editEpistemic"><option value="">(leave unchanged)</option><option value="draft">draft</option><option value="validated">validated</option><option value="outdated">outdated</option></select></div>
+        <div class="field span2"><label>Tags</label><input id="editTags" placeholder="topic:..., scope:concept, kind:insight" /></div>
+      </div>
+      <div class="foot"><div class="hint" id="editHint">Editing memory.</div><div class="row"><button class="btn" id="editCancelBtn">Cancel</button><button class="btn primary" id="editSaveBtn">Save changes</button></div></div>
+    </div>
+  </div>
+  <div class="toast" id="toast"></div>
+
+  <script type="module">
+    try {
+      const helpers = await import('http://localhost:3737/nd-mem-app-helpers.mjs');
+      window.ndMemHelpers = helpers;
+    } catch { /* bridge down — rename flow will explain when clicked */ }
+  </script>
+
+  <script>
+    const BRIDGE = 'http://localhost:3737';
+    // Carousels (projects) and decks (districts) are derived from the live snapshot — never hardcoded.
+    const DISTRICTS = ['logical_analysis','emotional_processing','practical_execution','vigilant_monitoring','creative_synthesis'];
+    const UNASSIGNED = '(no project)';
+    const state = { snapshot:{nextMemoryId:1,memories:{}}, activeCarousel:null, activeMemoryId:null, editingId:null, search:'', deckFilter:'all', scopeFilter:'all', bridgeState:'Connecting…', memoryPath:'', lastChanged:null, pollMs:null };
+    const $ = s => document.querySelector(s);
+    const els = { carouselList:$('#carouselList'), ribbon:$('#ribbon'), detailBody:$('#detailBody'), stats:$('#stats'), memoryPathText:$('#memoryPathText'), bridgeState:$('#bridgeState'), pollState:$('#pollState'), deckFilter:$('#deckFilter'), scopeFilter:$('#scopeFilter'), modalBg:$('#modalBg'), toast:$('#toast'), carouselInput:$('#carouselInput'), renameProjectBtn:$('#renameProjectBtn') };
+
+    function showToast(msg){ els.toast.textContent = msg; els.toast.classList.add('show'); clearTimeout(showToast.t); showToast.t = setTimeout(()=>els.toast.classList.remove('show'),3000); }
+    function normalize(v){ return String(v||'').toLowerCase(); }
+    function esc(v){ return String(v??'').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+    function scopeOf(memory){ const tags=(memory.tags||[]).map(normalize); if(tags.some(t=>t.includes('scope:org')) || memory.visibility==='global') return 'org'; if(tags.some(t=>t.includes('scope:team')) || memory.visibility==='shared') return 'team'; return 'personal'; }
+    function projectOf(memory){ const p = memory.project_id; return (p !== undefined && p !== null && String(p).trim() !== '') ? String(p) : UNASSIGNED; }
+    function deckOf(memory){ return memory.district || 'uncategorized'; }
+    function memories(){ return Object.values(state.snapshot.memories||{}).map(m=>({ ...m, scope:scopeOf(m), carouselId:projectOf(m), deck:deckOf(m) })).sort((a,b)=>new Date(b.created)-new Date(a.created)); }
+    function carousels(){
+      const mems = memories();
+      const counts = {};
+      for(const m of mems) counts[m.carouselId] = (counts[m.carouselId]||0)+1;
+      const ids = Object.keys(counts).sort((a,b)=> (a===UNASSIGNED)-(b===UNASSIGNED) || counts[b]-counts[a] || a.localeCompare(b));
+      return ids.map(id=>{
+        const items = mems.filter(m=>m.carouselId===id);
+        const present = [...new Set(items.map(m=>m.deck))];
+        const deckNames = DISTRICTS.filter(d=>present.includes(d)).concat(present.filter(d=>!DISTRICTS.includes(d)).sort());
+        return { id, name:id, scope: id===UNASSIGNED ? 'personal' : 'team', description:`${items.length} memories across ${deckNames.length} district${deckNames.length===1?'':'s'}.`, items, decks: deckNames.map(d=>({ name:d, items: items.filter(m=>m.deck===d) })) };
+      });
+    }
+    function activeCarousel(){ const list = carousels(); return list.find(c=>c.id===state.activeCarousel) || list[0]; }
+    function filteredDecks(){ const c=activeCarousel(); if(!c) return []; const q=state.search.trim().toLowerCase(); return c.decks.filter(d=>state.deckFilter==='all' || d.name===state.deckFilter).map(d=>({ ...d, items:d.items.filter(m=>{ if(state.scopeFilter!=='all' && m.scope!==state.scopeFilter) return false; if(!q) return true; return `${m.name} ${m.content} ${(m.tags||[]).join(' ')} ${m.district}`.toLowerCase().includes(q); }) })).filter(d=>d.items.length || state.deckFilter!=='all'); }
+    function fmt(v){ try { return new Date(v).toLocaleString([], { month:'short', day:'numeric', hour:'numeric', minute:'2-digit' }); } catch { return '—'; } }
+
+    function renderStats(){ const c=activeCarousel(); if(!c){ els.stats.innerHTML=''; return; } const visible = filteredDecks().reduce((n,d)=>n+d.items.length,0); const stats=[
+      ['Visible cards', visible, c.name + ' ribbon'],
+      ['Districts', c.decks.filter(d=>d.items.length).length, 'Districts with cards'],
+      ['File path', state.memoryPath || 'Unknown', state.pollMs ? 'Polling every ' + state.pollMs + 'ms' : 'No bridge telemetry'],
+      ['Last change', state.lastChanged ? fmt(state.lastChanged) : 'Waiting', 'SSE memory-change events']
+    ];
+      els.stats.innerHTML = stats.map(([a,b,cc])=>`<div class="stat"><label>${esc(a)}</label><strong>${esc(b)}</strong><span>${esc(cc)}</span></div>`).join('');
+    }
+
+    function renderCarousels(){ els.carouselList.innerHTML = carousels().map(c=>`<button class="carousel ${c.id===state.activeCarousel?'active':''}" data-carousel="${esc(c.id)}"><h3>${esc(c.name)}</h3><p>${esc(c.description)}</p><div class="chips"><span class="chip">${esc(c.scope)}</span><span class="chip">${c.items.length} cards</span><span class="chip">${c.decks.filter(d=>d.items.length).length} districts</span></div></button>`).join(''); document.querySelectorAll('[data-carousel]').forEach(el=>el.onclick=()=>{ state.activeCarousel=el.dataset.carousel; state.deckFilter='all'; render(); }); }
+    function renderDeckFilter(){ const c=activeCarousel(); const names = c ? c.decks.map(d=>d.name) : []; els.deckFilter.innerHTML = ['all', ...names].map(v=>`<option value="${esc(v)}">${v==='all'?'All districts':esc(v)}</option>`).join(''); els.deckFilter.value = state.deckFilter; }
+    function renderRibbon(){ const decks=filteredDecks(); if(!decks.length){ els.ribbon.innerHTML = `<div class="deck"><div class="deckhead"><div><h3>No matching cards</h3><p>Change search, scope, or district filters.</p></div></div></div>`; return; } const cname = activeCarousel() ? activeCarousel().name : ''; els.ribbon.innerHTML = decks.map(deck=>`<section class="deck"><div class="deckhead"><div><h3>${esc(deck.name)}</h3><p>${deck.items.length} cards in ${esc(cname)}</p></div><div class="chips">${deck.items.slice(0,4).map((_,i)=>`<span class="chip">${i===0?'active':'card'}</span>`).join('')}</div></div><div class="track">${deck.items.map(m=>`<button class="card" data-memory="${esc(m.id)}"><div class="id">${esc(m.id)}</div><h4>${esc(m.name)}</h4><p>${esc(m.content)}</p><div class="meta"><div class="mini"><label>District</label><span>${esc(m.district)}</span></div><div class="mini"><label>Archetype</label><span>${esc(m.archetype||'—')}</span></div><div class="mini"><label>Intensity</label><span>${esc(m.intensity??'—')}</span></div><div class="mini"><label>Connections</label><span>${(m.connections||[]).length}</span></div></div><div class="tags">${(m.tags||[]).slice(0,4).map(tag=>`<span class="chip">${esc(tag)}</span>`).join('')}</div></button>`).join('')}</div></section>`).join(''); document.querySelectorAll('[data-memory]').forEach(el=>el.onclick=()=>{ state.activeMemoryId=el.dataset.memory; renderDetail(); }); }
+    function renderDetail(){ const m = memories().find(x=>x.id===state.activeMemoryId) || memories()[0]; if(!m){ els.detailBody.innerHTML=''; return; } state.activeMemoryId=m.id; const related=(m.connections||[]).map(id=>state.snapshot.memories[id]).filter(Boolean); els.detailBody.innerHTML = `<div class="detailsec"><h3>${esc(m.name)}</h3><p>${esc(m.content)}</p><div class="tags">${[m.scope,m.carouselId,m.deck].map(v=>`<span class="chip">${esc(v)}</span>`).join('')}</div></div><div class="detailsec"><h3>Metadata</h3><ul><li>ID: ${esc(m.id)}</li><li>Project: ${esc(m.carouselId)}</li><li>District: ${esc(m.district)}</li><li>Archetype: ${esc(m.archetype||'—')}</li><li>Created: ${fmt(m.created)}</li><li>Last accessed: ${fmt(m.last_accessed || m.lastaccessed || m.created)}</li><li>Access count: ${m.access_count ?? m.accesscount ?? 0}</li></ul></div><div class="detailsec"><h3>Tags</h3><div class="tags">${(m.tags||[]).map(t=>`<span class="chip">${esc(t)}</span>`).join('')}</div></div><div class="detailsec"><h3>Connections</h3><ul>${related.length?related.map(r=>`<li>${esc(r.id)} — ${esc(r.name)}</li>`).join(''):'<li>No linked memories yet.</li>'}</ul></div><div class="detailsec"><h3>MCP write path</h3><ul><li>Browser app fetches snapshot from the local bridge.</li><li>The bridge polls ${esc(state.memoryPath) || 'your user memories.json'}.</li><li>New cards POST to /save and route to stdio MCP.</li><li>When memories.json changes, SSE triggers a UI refresh.</li></ul></div>`; }
+    function populateModalSelects(){ const projects = carousels().filter(c=>c.id!==UNASSIGNED).map(c=>c.id); els.carouselInput.innerHTML = projects.map(id=>`<option value="${esc(id)}">${esc(id)}</option>`).join(''); if(state.activeCarousel && state.activeCarousel!==UNASSIGNED) els.carouselInput.value = state.activeCarousel; }
+    function render(){ renderCarousels(); renderDeckFilter(); renderStats(); renderRibbon(); renderDetail(); populateModalSelects(); els.memoryPathText.textContent = state.memoryPath || 'loading…'; els.bridgeState.textContent = state.bridgeState; els.pollState.textContent = state.pollMs ? `Polling ${state.pollMs}ms` : 'Bridge offline';
+      const ac = activeCarousel(); els.renameProjectBtn.style.display = (ac && ac.id!==UNASSIGNED) ? '' : 'none'; }
+
+    async function loadSnapshot(){
+      const res = await fetch(`${BRIDGE}/memories`);
+      if(!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      state.snapshot = data;
+      state.memoryPath = data.path || state.memoryPath;
+      if(!state.activeCarousel){ const first = carousels()[0]; if(first) state.activeCarousel = first.id; }
+      if(!state.activeMemoryId && Object.keys(data.memories||{}).length) state.activeMemoryId = Object.keys(data.memories)[0];
+      state.bridgeState = `Loaded ${Object.keys(data.memories||{}).length} memories from local bridge.`;
+      render();
+    }
+
+    async function loadHealth(){
+      const res = await fetch(`${BRIDGE}/health`);
+      const data = await res.json();
+      state.memoryPath = data.memoryPath;
+      state.pollMs = data.pollMs;
+      state.bridgeState = `Bridge connected on localhost:${data.port}, polling ${data.memoryPath}.`;
+      render();
+    }
+
+    function connectEvents(){
+      const es = new EventSource(`${BRIDGE}/events`);
+      es.addEventListener('hello', e => {
+        const data = JSON.parse(e.data);
+        state.memoryPath = data.path;
+        state.pollMs = data.pollMs;
+        state.bridgeState = `Listening for changes from ${data.path}.`;
+        render();
+      });
+      es.addEventListener('memory-change', async e => {
+        const data = JSON.parse(e.data);
+        state.lastChanged = data.changedAt;
+        await loadSnapshot();
+        showToast(`memory.json changed at ${new Date(data.changedAt).toLocaleTimeString()}`);
+      });
+      es.onerror = () => {
+        state.bridgeState = 'Bridge event stream disconnected.';
+        render();
+      };
+    }
+
+    async function saveMemory(){
+      const title = $('#titleInput').value.trim();
+      const content = $('#contentInput').value.trim();
+      if(!title || !content){ showToast('Title and content are required.'); return; }
+      const projectId = $('#carouselInput').value;
+      const visibility = $('#visibilityInput').value;
+      const tags = $('#tagsInput').value.split(',').map(s=>s.trim()).filter(Boolean);
+      const body = {
+        content: title + '. ' + content,
+        district: $('#districtInput').value,
+        visibility,
+        intensity: Number($('#intensityInput').value || 5),
+        projectId,
+        tags
+      };
+      const res = await fetch(`${BRIDGE}/save`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
+      const data = await res.json();
+      if(!res.ok || !data.ok){ showToast('Save failed through MCP bridge.'); return; }
+      state.bridgeState = 'Save routed to MCP. Waiting for file change refresh…';
+      render();
+      $('#modalBg').classList.remove('open');
+      showToast('Save sent to MCP bridge.');
+    }
+
+    function openEditModal(m){
+      if(!m){ showToast('Select a card first.'); return; }
+      state.editingId = m.id;
+      $('#editContent').value = m.content || '';
+      $('#editDistrict').value = m.district || 'practical_execution';
+      $('#editProject').value = (m.project_id ?? '');
+      $('#editVisibility').value = m.visibility || 'private';
+      $('#editIntensity').value = (m.intensity ?? 0.5);
+      $('#editEpistemic').value = ['draft','validated','outdated'].includes(m.epistemic_status) ? m.epistemic_status : '';
+      $('#editTags').value = (m.tags || []).join(', ');
+      $('#editHint').textContent = `Editing ${m.id}`;
+      $('#editModalBg').classList.add('open');
+    }
+
+    async function updateMemory(){
+      const memoryId = state.editingId;
+      if(!memoryId){ showToast('No memory selected to edit.'); return; }
+      const content = $('#editContent').value.trim();
+      if(!content){ showToast('Content cannot be empty.'); return; }
+      const project = $('#editProject').value.trim();
+      const epistemic = $('#editEpistemic').value;
+      const body = {
+        memoryId,
+        content,
+        district: $('#editDistrict').value,
+        visibility: $('#editVisibility').value,
+        intensity: Number($('#editIntensity').value),
+        projectId: project === '' ? null : project,
+        tags: $('#editTags').value.split(',').map(s=>s.trim()).filter(Boolean)
+      };
+      if(epistemic) body.epistemicStatus = epistemic;
+      const res = await fetch(`${BRIDGE}/update`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
+      const data = await res.json();
+      if(!res.ok || !data.ok){ showToast('Update failed through MCP bridge.'); return; }
+      state.bridgeState = 'Update routed to MCP. Waiting for file change refresh…';
+      render();
+      $('#editModalBg').classList.remove('open');
+      showToast('Update sent to MCP bridge.');
+    }
+
+    function setWriteButtonsDisabled(disabled){
+      for(const id of ['renameProjectBtn','editSaveBtn','saveBtn']){ const el = $('#'+id); if(el) el.disabled = disabled; }
+    }
+
+    async function bulkReassign(ids, target, source){
+      setWriteButtonsDisabled(true);
+      let moved = 0;
+      try {
+        for(const id of ids){
+          showToast(`Moving ${moved+1}/${ids.length} into ${target}…`);
+          let ok = false;
+          try {
+            const res = await fetch(`${BRIDGE}/update`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ memoryId:id, projectId:target }) });
+            const data = await res.json();
+            ok = res.ok && data.ok;
+          } catch { ok = false; }
+          if(!ok){ showToast(`Moved ${moved} of ${ids.length}. Re-run rename to move the rest.`); return; }
+          moved++;
+        }
+        state.activeCarousel = target;
+        await loadSnapshot();
+        showToast(`Moved ${moved} card${moved===1?'':'s'} from ${source} to ${target}.`);
+      } finally {
+        setWriteButtonsDisabled(false);
+      }
+    }
+
+    async function renameProject(){
+      const c = activeCarousel();
+      if(!c || c.id===UNASSIGNED){ showToast('Select a real project first.'); return; }
+      const helpers = window.ndMemHelpers;
+      if(!helpers){ showToast('Helpers not loaded — is the bridge running at ' + BRIDGE + '?'); return; }
+      const typed = prompt(`Rename project "${c.id}" to:`, c.id);
+      if(typed===null) return;
+      const newName = typed.trim();
+      if(!newName || newName===c.id) return;
+      const others = carousels().filter(x=>x.id!==UNASSIGNED && x.id!==c.id);
+      const collision = others.find(o=>helpers.normalizeProjectId(o.id)===helpers.normalizeProjectId(newName));
+      let target = newName;
+      if(collision){
+        if(!confirm(`Project "${collision.id}" already exists (${collision.items.length} cards). Move all ${c.items.length} cards from "${c.id}" into it?`)) return;
+        target = collision.id; // canonical spelling wins, whatever was typed
+      } else {
+        const near = helpers.nearMissOf(newName, others.map(o=>o.id));
+        if(near && confirm(`Did you mean "${near}"? OK = merge into "${near}", Cancel = keep "${newName}".`)){
+          target = near;
+        } else if(!confirm(`Rename all ${c.items.length} cards from "${c.id}" to "${newName}"?`)){
+          return;
+        }
+      }
+      await bulkReassign(c.items.map(m=>m.id), target, c.id);
+    }
+
+    $('#themeBtn').onclick = ()=>document.documentElement.setAttribute('data-theme', document.documentElement.getAttribute('data-theme')==='dark'?'light':'dark');
+    $('#newBtn').onclick = ()=>$('#modalBg').classList.add('open');
+    $('#cancelBtn').onclick = ()=>$('#modalBg').classList.remove('open');
+    $('#saveBtn').onclick = saveMemory;
+    $('#refreshBtn').onclick = loadSnapshot;
+    $('#searchInput').oninput = e => { state.search = e.target.value; renderStats(); renderRibbon(); };
+    els.deckFilter.onchange = e => { state.deckFilter = e.target.value; renderStats(); renderRibbon(); };
+    els.scopeFilter.onchange = e => { state.scopeFilter = e.target.value; renderStats(); renderRibbon(); };
+    $('#modalBg').onclick = e => { if(e.target.id==='modalBg') $('#modalBg').classList.remove('open'); };
+    $('#editBtn').onclick = ()=>openEditModal(memories().find(x=>x.id===state.activeMemoryId));
+    $('#editCancelBtn').onclick = ()=>$('#editModalBg').classList.remove('open');
+    $('#editSaveBtn').onclick = updateMemory;
+    $('#renameProjectBtn').onclick = renameProject;
+    $('#editModalBg').onclick = e => { if(e.target.id==='editModalBg') $('#editModalBg').classList.remove('open'); };
+
+    (async function init(){
+      try {
+        await loadHealth();
+        await loadSnapshot();
+        connectEvents();
+      } catch (error) {
+        state.bridgeState = `Could not reach bridge at ${BRIDGE}. Start the local bridge server first.`;
+        render();
+      }
+    })();
+  </script>
+</body>
+</html>

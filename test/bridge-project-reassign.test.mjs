@@ -59,3 +59,81 @@ test("bridge serves the app helpers module as javascript", async () => {
     bridge.kill();
   }
 });
+
+test("POST /update with only {memoryId, projectId} moves a memory between projects without touching other fields", async () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "ndm-reassign-"));
+  const bridgePort = await getFreePort();
+  const daemonPort = await getFreePort();
+  const memoryFile = path.join(tempDir, "memories.json");
+  const bridge = startBridge(tempDir, bridgePort, daemonPort);
+  let daemonPid;
+  try {
+    await waitFor(`http://127.0.0.1:${bridgePort}/health`);
+    const save = (content, projectId) =>
+      fetch(`http://127.0.0.1:${bridgePort}/save`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ content, district: "practical_execution", tags: ["kind:task", "scope:project"], projectId }),
+      }).then((r) => r.json());
+
+    for (const [content, project] of [
+      ["drift memory one", "drift-a"],
+      ["drift memory two", "drift-a"],
+      ["canonical memory", "drift_b"],
+    ]) {
+      const saved = await save(content, project);
+      assert.equal(saved.ok, true, JSON.stringify(saved));
+    }
+
+    daemonPid = (await waitFor(`http://127.0.0.1:${daemonPort}/health`).then((r) => r.json())).pid;
+
+    // Wait for all three to hit the snapshot, then capture pre-move state.
+    let snapshot;
+    {
+      const deadline = Date.now() + 5000;
+      while (Date.now() < deadline) {
+        if (fs.existsSync(memoryFile)) {
+          snapshot = JSON.parse(fs.readFileSync(memoryFile, "utf8"));
+          if (Object.keys(snapshot.memories).length === 3) break;
+        }
+        await new Promise((r) => setTimeout(r, 100));
+      }
+      assert.equal(Object.keys(snapshot.memories).length, 3, "all three memories persisted");
+    }
+    const driftIds = Object.values(snapshot.memories).filter((m) => m.project_id === "drift-a").map((m) => m.id);
+    assert.equal(driftIds.length, 2);
+    const before = Object.fromEntries(driftIds.map((id) => [id, snapshot.memories[id]]));
+
+    // The merge loop's exact contract: only memoryId + projectId in the body.
+    for (const id of driftIds) {
+      const updated = await fetch(`http://127.0.0.1:${bridgePort}/update`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ memoryId: id, projectId: "drift_b" }),
+      }).then((r) => r.json());
+      assert.equal(updated.ok, true, JSON.stringify(updated));
+    }
+
+    // All three end in drift_b; moved cards keep every other field.
+    {
+      const deadline = Date.now() + 5000;
+      let done = false;
+      while (Date.now() < deadline && !done) {
+        snapshot = JSON.parse(fs.readFileSync(memoryFile, "utf8"));
+        done = Object.values(snapshot.memories).every((m) => m.project_id === "drift_b");
+        if (!done) await new Promise((r) => setTimeout(r, 100));
+      }
+      assert.ok(done, "every memory reassigned to drift_b");
+    }
+    for (const id of driftIds) {
+      const after = snapshot.memories[id];
+      assert.equal(after.content, before[id].content, "content untouched");
+      assert.deepEqual(after.tags, before[id].tags, "tags untouched");
+      assert.equal(after.district, before[id].district, "district untouched");
+      assert.equal(after.visibility, before[id].visibility, "visibility untouched");
+    }
+  } finally {
+    bridge.kill();
+    if (daemonPid) { try { process.kill(daemonPid); } catch { /* gone */ } }
+  }
+});
