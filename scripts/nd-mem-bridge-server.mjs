@@ -124,6 +124,19 @@ app.get('/', (_req, res) => {
   }
 });
 
+// Serves the pure helpers module shared between the web app (loaded as an
+// ES module in the browser) and the node test suite (imported directly).
+const HELPERS_PATH = path.join(process.cwd(), 'scripts', 'nd-mem-app-helpers.mjs');
+app.get('/nd-mem-app-helpers.mjs', (_req, res) => {
+  if (fs.existsSync(HELPERS_PATH)) {
+    res.setHeader('Content-Type', 'text/javascript');
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.send(fs.readFileSync(HELPERS_PATH, 'utf-8'));
+  } else {
+    res.status(404).send('helpers module not found. Ensure scripts/nd-mem-app-helpers.mjs exists.');
+  }
+});
+
 app.post('/update', async (req, res) => {
   const body = req.body || {};
   if (!body.memoryId) return res.status(400).json({ ok: false, error: 'memoryId is required' });
