@@ -3,8 +3,14 @@ import cors from 'cors';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
+import { fileURLToPath } from 'url';
 import { ensureDaemon } from '../build/core/ensure-daemon.js';
 import { resolveDaemonPort } from '../build/core/run-mode.js';
+
+// Resolved from this file's own location, not process.cwd() — the bridge must
+// find its assets the same way regardless of the directory it's launched from.
+const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
+const REPO_ROOT = path.join(SCRIPT_DIR, '..');
 
 const app = express();
 const PORT = Number(process.env.ND_MEM_BRIDGE_PORT || 3737);
@@ -72,7 +78,7 @@ app.get('/events', (req, res) => {
 // the only process that ever opens memories.json. See
 // docs/superpowers/specs/2026-07-13-single-writer-daemon-design.md.
 const DAEMON_PORT = resolveDaemonPort(process.env);
-const DAEMON_ENTRY = process.env.ND_MEM_DAEMON_ENTRY || path.join(process.cwd(), 'build', 'index.js');
+const DAEMON_ENTRY = process.env.ND_MEM_DAEMON_ENTRY || path.join(REPO_ROOT, 'build', 'index.js');
 const DAEMON_LOG = path.join(path.dirname(MEMORY_PATH), 'daemon.log');
 
 // Set once per process the first time a memoryPath mismatch is detected, so the
@@ -117,7 +123,7 @@ async function runMcpTool(toolName, args) {
   return { ok: true, result: message };
 }
 
-const HTML_PATH = path.join(process.cwd(), 'scripts', 'nd-mem-mcp-app-bridge.html');
+const HTML_PATH = path.join(SCRIPT_DIR, 'nd-mem-mcp-app-bridge.html');
 app.get('/', (_req, res) => {
   if (fs.existsSync(HTML_PATH)) {
     res.setHeader('Content-Type', 'text/html');
@@ -130,7 +136,7 @@ app.get('/', (_req, res) => {
 
 // Serves the pure helpers module shared between the web app (loaded as an
 // ES module in the browser) and the node test suite (imported directly).
-const HELPERS_PATH = path.join(process.cwd(), 'scripts', 'nd-mem-app-helpers.mjs');
+const HELPERS_PATH = path.join(SCRIPT_DIR, 'nd-mem-app-helpers.mjs');
 app.get('/nd-mem-app-helpers.mjs', (_req, res) => {
   if (fs.existsSync(HELPERS_PATH)) {
     res.setHeader('Content-Type', 'text/javascript');
