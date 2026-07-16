@@ -124,15 +124,21 @@ test("server_handshake reports no active session when clientInfo carried no name
   });
 });
 
-test("update_memory's memory_agent_id repair field never auto-fills from session state", async () => {
+test("update_memory's memory_agent_id repair field never auto-fills from a different session's bound identity", async () => {
   await withDaemon(async (port) => {
-    const sessionId = await initSession(port, "repair-session-agent");
-    const stored = await postMcp(port, toolCall(2, "store_memory", { content: "memory_agent_id regression guard test" }), sessionId);
+    // Session with no bound identity (empty clientInfo.name) — the resulting memory lands unassigned.
+    const unboundInit = await postMcp(port, {
+      jsonrpc: "2.0", id: 1, method: "initialize",
+      params: { protocolVersion: "2025-03-26", capabilities: {}, clientInfo: { name: "", version: "1.0.0" } },
+    });
+    const stored = await postMcp(port, toolCall(2, "store_memory", { content: "memory_agent_id regression guard test" }), unboundInit.sessionId);
     const idMatch = stored.json.result.content[0].text.match(/ID: (memory_\d+)/);
     assert.ok(idMatch, "expected a memory id in the store_memory response");
-    // No memory_agent_id passed — the repair field must stay untouched (still "repair-session-agent"
-    // from the auto-bound session), never silently overwritten by some other session-derived value.
-    const updated = await postMcp(port, toolCall(3, "update_memory", { memory_id: idMatch[1], content: "updated content, no memory_agent_id" }), sessionId);
-    assert.match(updated.json.result.content[0].text, /Agent: repair-session-agent/, "authorship must be untouched when memory_agent_id isn't passed");
+    assert.match(stored.json.result.content[0].text, /Agent: unassigned/, "precondition: memory must start unassigned for this test to mean anything");
+
+    // A DIFFERENT session, bound to a different identity, updates the memory without memory_agent_id.
+    const boundSessionId = await initSession(port, "different-session-identity");
+    const updated = await postMcp(port, toolCall(3, "update_memory", { memory_id: idMatch[1], content: "updated content, no memory_agent_id" }), boundSessionId);
+    assert.match(updated.json.result.content[0].text, /Agent: unassigned/, "authorship must stay unassigned — memory_agent_id was never passed, so the session's bound identity must not backfill it");
   });
 });
