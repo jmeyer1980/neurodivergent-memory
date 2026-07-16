@@ -144,6 +144,7 @@ jobs:
   rc_release:
     if: github.ref == 'refs/heads/development'
     runs-on: ubuntu-latest
+    environment: npm-release
     permissions:
       contents: write
       packages: write
@@ -428,6 +429,7 @@ jobs:
   release:
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
+    environment: npm-release
     permissions:
       contents: write
       packages: write
