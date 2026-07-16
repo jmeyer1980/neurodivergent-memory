@@ -162,7 +162,11 @@ jobs:
           registry-url: https://registry.npmjs.org
 
       - name: Ensure npm meets the trusted-publishing version floor (>=11.5.1)
-        run: npm install -g npm@latest
+        run: |
+          npm install -g npm@latest
+          echo "npm version in use for the rest of this job:"
+          npm --version
+          which npm
 
       - name: Install dependencies
         run: npm ci
@@ -303,7 +307,7 @@ jobs:
 
           set +e
           publish_log="$(mktemp)"
-          npm publish "${{ steps.pack.outputs.tarball }}" --provenance --access public --tag rc 2> >(tee "$publish_log" >&2)
+          npm publish "${{ steps.pack.outputs.tarball }}" --provenance --access public --tag rc --loglevel verbose 2> >(tee "$publish_log" >&2)
           status=$?
           set -e
 
@@ -442,7 +446,11 @@ jobs:
           registry-url: https://registry.npmjs.org
 
       - name: Ensure npm meets the trusted-publishing version floor (>=11.5.1)
-        run: npm install -g npm@latest
+        run: |
+          npm install -g npm@latest
+          echo "npm version in use for the rest of this job:"
+          npm --version
+          which npm
 
       - name: Install dependencies
         run: npm ci
@@ -680,7 +688,7 @@ jobs:
 
           set +e
           publish_log="$(mktemp)"
-          npm publish "${{ steps.pack.outputs.tarball }}" --provenance --access public 2> >(tee "$publish_log" >&2)
+          npm publish "${{ steps.pack.outputs.tarball }}" --provenance --access public --loglevel verbose 2> >(tee "$publish_log" >&2)
           status=$?
           set -e
 
