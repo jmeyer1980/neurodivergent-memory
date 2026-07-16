@@ -1,5 +1,7 @@
 # Agent Clock-In / Clock-Out Implementation Plan
 
+> **SUPERSEDED 2026-07-16 — do not execute this plan.** Never started (every step below is still unchecked); its spec's safety argument no longer holds now that the single-writer daemon exists. See [`docs/superpowers/specs/2026-07-16-per-connection-mcp-sessions-design.md`](../specs/2026-07-16-per-connection-mcp-sessions-design.md) for the replacement design; a new plan will be written from that spec instead.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Let an agent "clock in" once (`agent_clock_in`) so subsequent memory writes in the same server process default to that agent_id/session_id instead of requiring it on every call, and "clock out" automatically (via a `kind:handoff` tag write or a `close_task` call) or explicitly (`agent_clock_out`).

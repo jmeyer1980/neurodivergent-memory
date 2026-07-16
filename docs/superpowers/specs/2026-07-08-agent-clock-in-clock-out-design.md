@@ -1,7 +1,7 @@
 # Agent Clock-In / Clock-Out Design
 
 **Date:** 2026-07-08
-**Status:** Approved for planning
+**Status:** SUPERSEDED 2026-07-16 — never implemented (see the companion plan, all steps unchecked), and this design's core safety argument ("no shared daemon") was invalidated on 2026-07-13 when the single-writer daemon shipped. Replaced by [`2026-07-16-per-connection-mcp-sessions-design.md`](2026-07-16-per-connection-mcp-sessions-design.md). Do not implement this document as written.
 **Target:** development branch, build-and-serve-locally (not part of a 0.4.0 release cut)
 
 ## Problem
