@@ -1,4 +1,5 @@
 import * as http from "http";
+import * as crypto from "crypto";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import type { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { logger } from "./logger.js";
@@ -8,6 +9,20 @@ export interface DaemonRouteOptions {
   version: string;
   memoryPath: string;
   getMemoryCount: () => number;
+}
+
+interface DaemonSession {
+  transport: StreamableHTTPServerTransport;
+  server: Server;
+  lastActivityAt: number;
+}
+
+const DEFAULT_SESSION_IDLE_MS = 30 * 60 * 1000;
+
+function resolveSessionIdleMs(): number {
+  const raw = process.env.NEURODIVERGENT_MEMORY_SESSION_IDLE_MS;
+  const parsed = raw ? Number.parseInt(raw, 10) : NaN;
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_SESSION_IDLE_MS;
 }
 
 /**
@@ -37,6 +52,29 @@ export function createHttpListener(port: number): Promise<http.Server> {
 export function attachDaemonRoutes(httpServer: http.Server, options: DaemonRouteOptions): void {
   const { createServer, version, memoryPath, getMemoryCount } = options;
 
+  // Real per-connection MCP sessions: each session gets its own long-lived
+  // Server+transport pair, reused across every request that carries its
+  // Mcp-Session-Id. This replaces the old "fresh Server per request" pattern —
+  // that pattern existed only to keep concurrent clients' JSON-RPC ids from
+  // crossing wires on a shared transport, which a persistent per-session
+  // transport still guarantees. It does NOT touch the single-writer
+  // guarantee, which comes from the NeurodivergentMemory singleton's
+  // writeMutex, not from per-request disposal.
+  const sessions = new Map<string, DaemonSession>();
+
+  const idleMs = resolveSessionIdleMs();
+  const sweepInterval = setInterval(() => {
+    const now = Date.now();
+    for (const [sessionId, session] of sessions) {
+      if (now - session.lastActivityAt > idleMs) {
+        sessions.delete(sessionId);
+        void session.transport.close();
+        void session.server.close();
+      }
+    }
+  }, Math.min(idleMs, 60_000));
+  sweepInterval.unref();
+
   httpServer.removeAllListeners("request");
   httpServer.on("request", (req, res) => {
     void handleRequest(req, res);
@@ -50,17 +88,34 @@ export function attachDaemonRoutes(httpServer: http.Server, options: DaemonRoute
         return;
       }
       if (req.method === "POST" && req.url === "/mcp") {
-        // Stateless: a fresh Server + transport per request means concurrent
-        // clients' JSON-RPC ids can never cross wires. All servers share the
-        // one store singleton; its writeMutex serializes mutations.
+        const rawSessionId = req.headers["mcp-session-id"];
+        const sessionId = Array.isArray(rawSessionId) ? rawSessionId[0] : rawSessionId;
+
+        if (sessionId) {
+          const existing = sessions.get(sessionId);
+          if (!existing) {
+            res.writeHead(404, { "Content-Type": "application/json" });
+            res.end(JSON.stringify({ jsonrpc: "2.0", id: null, error: { code: -32001, message: "Session not found or expired" } }));
+            return;
+          }
+          existing.lastActivityAt = Date.now();
+          await existing.transport.handleRequest(req, res);
+          return;
+        }
+
+        // No session header: this request must be an `initialize` call
+        // minting a new session. (A non-initialize call with no session
+        // header is rejected by the transport itself per the MCP spec.)
         const server = createServer();
         const transport = new StreamableHTTPServerTransport({
-          sessionIdGenerator: undefined,
+          sessionIdGenerator: () => crypto.randomUUID(),
           enableJsonResponse: true,
-        });
-        res.on("close", () => {
-          void transport.close();
-          void server.close();
+          onsessioninitialized: (newSessionId) => {
+            sessions.set(newSessionId, { transport, server, lastActivityAt: Date.now() });
+          },
+          onsessionclosed: (closedSessionId) => {
+            sessions.delete(closedSessionId);
+          },
         });
         await server.connect(transport);
         await transport.handleRequest(req, res);
@@ -77,5 +132,5 @@ export function attachDaemonRoutes(httpServer: http.Server, options: DaemonRoute
     }
   }
 
-  logger.info({ pid: process.pid, memoryPath, version }, "Memory daemon routes attached; single writer active");
+  logger.info({ pid: process.pid, memoryPath, version, sessionIdleMs: idleMs }, "Memory daemon routes attached; per-connection sessions active");
 }
