@@ -15,8 +15,6 @@ export interface ProxyOptions {
   logFile?: string;
 }
 
-const FALLBACK_PROTOCOL_VERSION = "2024-11-05";
-
 // Set once per process the first time a memoryPath mismatch is detected, so the
 // warning doesn't spam the log on every forwarded request.
 let memoryPathMismatchWarned = false;
@@ -51,6 +49,12 @@ export async function runStdioProxy(options: ProxyOptions): Promise<void> {
   const logFile =
     options.logFile ?? path.join(resolvePersistenceLocation().dir, "daemon.log");
 
+  // This process is genuinely one process per client — the proxy's half of
+  // the original per-process assumption still holds. It just needs to carry
+  // a real session id to the shared daemon instead of pretending every call
+  // is independent.
+  let sessionId: string | undefined;
+
   // Warm start (non-blocking): most sessions' first real call skips the spawn wait.
   void ensureDaemon({ port, entryPath: options.entryPath, logFile }).catch((err) => {
     logger.warn({ err }, "Proxy warm-start of daemon failed; will retry per request");
@@ -76,35 +80,26 @@ export async function runStdioProxy(options: ProxyOptions): Promise<void> {
       return;
     }
 
-    if (msg.method === "initialize" && msg.id !== undefined) {
-      const requested = msg.params?.protocolVersion;
-      write({
-        jsonrpc: "2.0",
-        id: msg.id,
-        result: {
-          protocolVersion: typeof requested === "string" ? requested : FALLBACK_PROTOCOL_VERSION,
-          capabilities: { tools: {}, resources: {}, prompts: {} },
-          serverInfo: { name: options.serverName, version: options.serverVersion },
-        },
-      });
-      return;
-    }
-
-    // Notifications carry no id and the daemon is stateless — drop them.
+    // Notifications carry no id and the daemon is stateless per MCP-message —
+    // drop them (the daemon's session, once minted, doesn't need them).
     if (msg.id === undefined) return;
 
     try {
       const health = await ensureDaemon({ port, entryPath: options.entryPath, logFile });
       warnOnMemoryPathMismatch(health.memoryPath, health.pid);
+      const headers: Record<string, string> = {
+        "content-type": "application/json",
+        accept: "application/json, text/event-stream",
+        "mcp-protocol-version": "2025-03-26",
+      };
+      if (sessionId) headers["mcp-session-id"] = sessionId;
       const res = await fetch(`http://127.0.0.1:${port}/mcp`, {
         method: "POST",
-        headers: {
-          "content-type": "application/json",
-          accept: "application/json, text/event-stream",
-          "mcp-protocol-version": "2025-03-26",
-        },
+        headers,
         body: JSON.stringify(msg),
       });
+      const returnedSessionId = res.headers.get("mcp-session-id");
+      if (returnedSessionId) sessionId = returnedSessionId;
       const text = await res.text();
       let response: unknown;
       try {
