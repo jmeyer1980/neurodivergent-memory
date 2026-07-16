@@ -161,6 +161,9 @@ jobs:
           cache: npm
           registry-url: https://registry.npmjs.org
 
+      - name: Ensure npm meets the trusted-publishing version floor (>=11.5.1)
+        run: npm install -g npm@latest
+
       - name: Install dependencies
         run: npm ci
 
@@ -305,12 +308,13 @@ jobs:
           set -e
 
           if [ "$status" -ne 0 ] && grep -q "EOTP" "$publish_log"; then
-            echo "::error::npm publish failed with EOTP (2FA challenge). Use an npm Automation token for NPM_TOKEN (recommended), or configure npm Trusted Publishing for this repo."
+            echo "::error::npm publish failed with EOTP (2FA challenge). This account requires OIDC trusted publishing — verify the trusted publisher config on npmjs.com matches this repo/workflow/job exactly, and that npm CLI is >=11.5.1 (see the version-floor step above)."
           fi
 
           exit "$status"
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        # No NODE_AUTH_TOKEN: this account disallows publish tokens entirely.
+        # Publishing authenticates via OIDC trusted publishing instead — the
+        # npm CLI auto-detects the id-token: write permission granted above.
 
       - name: Log in to Docker Hub
         uses: docker/login-action@v4
@@ -436,6 +440,9 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
           registry-url: https://registry.npmjs.org
+
+      - name: Ensure npm meets the trusted-publishing version floor (>=11.5.1)
+        run: npm install -g npm@latest
 
       - name: Install dependencies
         run: npm ci
@@ -678,12 +685,13 @@ jobs:
           set -e
 
           if [ "$status" -ne 0 ] && grep -q "EOTP" "$publish_log"; then
-            echo "::error::npm publish failed with EOTP (2FA challenge). Use an npm Automation token for NPM_TOKEN (recommended), or configure npm Trusted Publishing for this repo."
+            echo "::error::npm publish failed with EOTP (2FA challenge). This account requires OIDC trusted publishing — verify the trusted publisher config on npmjs.com matches this repo/workflow/job exactly, and that npm CLI is >=11.5.1 (see the version-floor step above)."
           fi
 
           exit "$status"
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        # No NODE_AUTH_TOKEN: this account disallows publish tokens entirely.
+        # Publishing authenticates via OIDC trusted publishing instead — the
+        # npm CLI auto-detects the id-token: write permission granted above.
 
       - name: Log in to Docker Hub
         uses: docker/login-action@v4
