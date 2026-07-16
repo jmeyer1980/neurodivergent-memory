@@ -9,6 +9,8 @@ export interface DaemonRouteOptions {
   version: string;
   memoryPath: string;
   getMemoryCount: () => number;
+  bindAgentSession: (server: Server, agentId: string, sessionId: string, source: "client_info" | "override") => void;
+  clearAgentSession: (server: Server) => void;
 }
 
 interface DaemonSession {
@@ -63,7 +65,7 @@ export function createHttpListener(port: number): Promise<http.Server> {
 }
 
 export function attachDaemonRoutes(httpServer: http.Server, options: DaemonRouteOptions): void {
-  const { createServer, version, memoryPath, getMemoryCount } = options;
+  const { createServer, version, memoryPath, getMemoryCount, bindAgentSession, clearAgentSession } = options;
 
   // Real per-connection MCP sessions: each session gets its own long-lived
   // Server+transport pair, reused across every request that carries its
@@ -81,6 +83,7 @@ export function attachDaemonRoutes(httpServer: http.Server, options: DaemonRoute
     for (const [sessionId, session] of sessions) {
       if (now - session.lastActivityAt > idleMs) {
         sessions.delete(sessionId);
+        clearAgentSession(session.server);
         void session.transport.close();
         void session.server.close();
       }
@@ -145,10 +148,24 @@ export function attachDaemonRoutes(httpServer: http.Server, options: DaemonRoute
             },
             onsessionclosed: (closedSessionId) => {
               sessions.delete(closedSessionId);
+              clearAgentSession(server);
             },
           });
           await server.connect(transport);
           await transport.handleRequest(req, res, parsedBody);
+          // NOTE: clientInfo is deliberately read here, not inside onsessioninitialized above.
+          // The SDK's onsessioninitialized callback fires as soon as the session id is minted,
+          // which happens BEFORE the transport dispatches the message to the Server's onmessage
+          // handler — the handler that actually processes the `initialize` request and populates
+          // getClientVersion(). Binding inside onsessioninitialized would always see `undefined`.
+          // By the time handleRequest's promise resolves, the initialize request has been fully
+          // handled, so clientInfo is reliably available here.
+          if (transport.sessionId) {
+            const clientInfo = server.getClientVersion();
+            if (clientInfo?.name) {
+              bindAgentSession(server, clientInfo.name, transport.sessionId, "client_info");
+            }
+          }
           return;
         }
 

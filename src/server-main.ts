@@ -4617,6 +4617,35 @@ function resolveStoredAgentId(agentId: string | undefined | null, fieldPath = "a
   return normalizeOptionalAgentId(agentId, fieldPath) ?? DEFAULT_AGENT_ID;
 }
 
+export interface ActiveAgentSession {
+  agent_id: string;
+  session_id: string;
+  bound_at: string;
+  source: "client_info" | "override";
+}
+
+// Keyed by the per-session Server instance (Task 1 gives each MCP session its
+// own long-lived Server), never by a process-global variable — this is what
+// keeps concurrent sessions from clobbering each other's identity.
+const activeAgentSessions = new WeakMap<Server, ActiveAgentSession>();
+
+export function bindAgentSession(server: Server, agentId: string, sessionId: string, source: ActiveAgentSession["source"]): void {
+  activeAgentSessions.set(server, { agent_id: agentId, session_id: sessionId, bound_at: new Date().toISOString(), source });
+}
+
+export function clearAgentSession(server: Server): void {
+  activeAgentSessions.delete(server);
+}
+
+function getActiveAgentSession(server: Server): ActiveAgentSession | undefined {
+  return activeAgentSessions.get(server);
+}
+
+/** Explicit arg wins; otherwise falls back to the calling session's bound identity, then to the "unassigned" default (applied later, inside the store). */
+function resolveEffectiveAgentId(agentId: string | undefined | null, server: Server, fieldPath = "agent_id"): string | undefined {
+  return normalizeOptionalAgentId(agentId, fieldPath) ?? getActiveAgentSession(server)?.agent_id;
+}
+
 function normalizeProjectId(projectId: string | undefined | null): string | undefined {
   if (typeof projectId !== "string") {
     return undefined;
@@ -5482,10 +5511,12 @@ function buildRegisteredToolDescriptors(): ToolDescriptor[] {
       },
       {
         name: "server_handshake",
-        description: "Return runtime server identity and version details so clients can confirm the active build.",
+        description: "Return runtime server identity, version, and current session identity. Pass agent_id to override the identity auto-bound from this session's clientInfo.",
         inputSchema: {
           type: "object",
-          properties: {}
+          properties: {
+            agent_id: { type: "string", description: "Optional. Overrides this session's auto-bound agent_id (from clientInfo.name) for every subsequent call in this session." }
+          }
         }
       },
       {
@@ -5878,7 +5909,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
  * Handler for memory tools.
  * Implements storing, retrieving, connecting, searching, traversing, and managing memories.
  */
-server.setRequestHandler(CallToolRequestSchema, async (request) => {
+server.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
   switch (request.params.name) {
     case "mirror_list_tools": {
       return buildListToolsResult();
@@ -5896,7 +5927,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         }
         validateTagsField(tags, "tags");
         if (status !== undefined) validateKanbanStatus(status);
-        const normalizedAgentId = normalizeOptionalAgentId(agent_id);
+        const normalizedAgentId = resolveEffectiveAgentId(agent_id, server);
         const shouldCheckWipLimit =
           configuredWipLimit > 0 &&
           district === "practical_execution" &&
@@ -5934,7 +5965,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
               normalizedAgentId,
               project_id,
               epistemic_status,
-              session_id,
+              session_id ?? getActiveAgentSession(server)?.session_id,
               status,
               current_slice,
               why_now,
@@ -5979,7 +6010,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
     case "retrieve_memory": {
       const { memory_id, district, agent_id } = request.params.arguments as any;
-      const retrieval = memorySystem.retrieveMemory(memory_id, { district, agent_id });
+      const normalizedAgentId = resolveEffectiveAgentId(agent_id, server);
+      const retrieval = memorySystem.retrieveMemory(memory_id, { district, agent_id: normalizedAgentId });
       const memory = retrieval?.memory;
 
       if (!memory) {
@@ -6021,7 +6053,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           }
         }
         validateTagsField(tags, "tags");
-        const normalizedActorAgentId = normalizeOptionalAgentId(agent_id);
+        const normalizedActorAgentId = resolveEffectiveAgentId(agent_id, server);
         const updates: MemoryUpdatePayload = {};
         if (content !== undefined) updates.content = content;
         if (district !== undefined) updates.district = district;
@@ -6101,7 +6133,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       const { memory_id_1, memory_id_2, bidirectional = true, agent_id } = request.params.arguments as any;
 
       try {
-        const normalizedAgentId = normalizeOptionalAgentId(agent_id);
+        const normalizedAgentId = resolveEffectiveAgentId(agent_id, server);
         await runMutatingTool(
           "connect_memories",
           () => memorySystem.connectMemories(memory_id_1, memory_id_2, bidirectional, normalizedAgentId),
@@ -6387,9 +6419,10 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     case "share_memory": {
       const { memory_id, target_agent_id, target_project_id, new_visibility, agent_id } = request.params.arguments as any;
       try {
+        const normalizedAgentId = resolveEffectiveAgentId(agent_id, server);
         const result = await runMutatingTool(
           "share_memory",
-          () => memorySystem.shareMemory(memory_id, target_agent_id, target_project_id, new_visibility, agent_id),
+          () => memorySystem.shareMemory(memory_id, target_agent_id, target_project_id, new_visibility, normalizedAgentId),
         );
         return {
           content: [{
@@ -6556,6 +6589,16 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     }
 
     case "server_handshake": {
+      const { agent_id: overrideAgentId } = request.params.arguments as any;
+      if (overrideAgentId) {
+        const existing = getActiveAgentSession(server);
+        bindAgentSession(server, overrideAgentId, existing?.session_id ?? extra.sessionId ?? "unknown", "override");
+      }
+      const currentSession = getActiveAgentSession(server);
+      const sessionLine = currentSession
+        ? `Active session: agent_id=${currentSession.agent_id}, session_id=${currentSession.session_id}, bound at ${currentSession.bound_at} (${currentSession.source})`
+        : "Active session: none (no identity bound — this client's clientInfo.name was empty, and no agent_id override has been set)";
+
       const quickstart = [
         "",
         "📋 Quick start (read this once per session)",
@@ -6564,6 +6607,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         "3. Tags (`topic:X`, `scope:X`, `kind:X`, `layer:X`) are optional enrichment, not a requirement. Add them when a memory is meant to be durable or cross-session searchable; skip them for quick task-log notes. A bare `store_memory({content})` call is a complete, valid write.",
         "4. Before starting work, call `search_memories` for the current task and `memory_stats` for an overview — don't assume prior context persists.",
         "5. Use `connect_memories` to link related entries so future sessions can follow the thread instead of rediscovering it.",
+        "6. Your session's agent_id is auto-bound from your client's clientInfo.name (see \"Active session\" above) — you don't need to pass agent_id on every call. Pass agent_id to server_handshake once if you need to override it.",
         "In short: write early, write often, and don't let metadata decisions slow you down — content is the only thing that has to be right on the first try.",
       ].join("\n");
 
@@ -6578,6 +6622,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             `PID: ${process.pid}`,
             `Node.js: ${process.version}`,
             "Transport: stdio",
+            sessionLine,
             quickstart,
           ].join("\n"),
         }],
@@ -6634,7 +6679,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     case "distill_memory": {
       const { memory_id, agent_id } = request.params.arguments as any;
       try {
-        const normalizedAgentId = normalizeOptionalAgentId(agent_id);
+        const normalizedAgentId = resolveEffectiveAgentId(agent_id, server);
         const result = await runMutatingTool(
           "distill_memory",
           () => memorySystem.distillMemory(memory_id, normalizedAgentId),
@@ -6964,7 +7009,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           );
         }
 
-        const normalizedActorAgentId = normalizeOptionalAgentId(agent_id);
+        const normalizedActorAgentId = resolveEffectiveAgentId(agent_id, server);
         await runMutatingTool("close_task", () => memorySystem.updateMemory(
           memory_id,
           { publication_state: "closed" },
