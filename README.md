@@ -710,6 +710,30 @@ npm run inspector
 
 The Inspector will provide a URL to access debugging tools in your browser.
 
+## Web App (Bridge UI)
+
+For visually browsing, creating, editing, and reorganizing memories outside of an MCP client, `scripts/nd-mem-bridge-server.mjs` serves a local browser UI (`scripts/nd-mem-mcp-app-bridge.html`) backed by the same single-writer daemon your MCP clients use — reads and writes go through the identical store, so the web app and your AI agent always see the same live data.
+
+Start it (works from any directory once dependencies are installed):
+
+```bash
+node scripts/nd-mem-bridge-server.mjs
+```
+
+Then open **`http://localhost:3737/`** in a browser.
+
+> **Important:** Open the URL above, not the `.html` file directly. Loading `nd-mem-mcp-app-bridge.html` via `file://` (double-clicking it, or "Open File" in a browser) silently breaks the page's helper-module import — the page still loads, but project rename/merge fails with a misleading "helpers not loaded" error even though the bridge is running.
+
+The web app polls the memory snapshot for external changes and pushes live updates over server-sent events, and supports renaming a project across all its memories, merging into an existing project on a name collision, and a "did you mean" prompt for near-miss project names.
+
+Configuration (all optional):
+
+| Env var | Default | Purpose |
+|---|---|---|
+| `ND_MEM_BRIDGE_PORT` | `3737` | Port the web app/API is served on |
+| `ND_MEM_FILE` | auto-discovered | Memory snapshot file the bridge reads for its own `/health`/`/memories` responses |
+| `ND_MEM_POLL_MS` | `1500` | How often the bridge polls the snapshot file for external changes |
+
 ## Agent Workflow Setup
 
 This repository ships a reusable **agent customization kit** whose authoring source lives at [`.github/agent-kit/`](.github/agent-kit/).

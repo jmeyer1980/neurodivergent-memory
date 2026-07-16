@@ -5,6 +5,7 @@
 Running locally on the development branch; not part of a release cut (version stays 0.3.9). The 0.4.0 version number remains reserved for the Council & Multi-Agent Orchestration milestone per the roadmap.
 
 ### Added
+
 - **Single-writer daemon architecture.** `build/index.js` now dispatches three modes:
   `--daemon` (sole process that opens `memories.json`, serving MCP over Streamable HTTP
   on `127.0.0.1:3838`, port overridable via `NEURODIVERGENT_MEMORY_DAEMON_PORT`),
@@ -17,10 +18,40 @@ Running locally on the development branch; not part of a release cut (version st
   canonical spelling, with a "did you mean" guard for near-miss names. The bridge
   serves the shared helpers module at `GET /nd-mem-app-helpers.mjs` and now
   surfaces daemon tool errors (`isError`) as failed requests.
+- **Per-connection MCP sessions with automatic agent-identity binding.** The daemon
+  now gives every handshaking MCP client (Claude Code, VS Code, etc.) a real,
+  persistent session keyed by `Mcp-Session-Id`, and auto-binds `agent_id` from the
+  session's `initialize` `clientInfo.name` — no more passing `agent_id` on every
+  `store_memory`/`update_memory`/etc. call to get correct attribution.
+  `server_handshake` accepts an optional `agent_id` to override the auto-bound
+  identity and reports the session's current binding in its response. A session's
+  identity clears automatically on a `kind:handoff`-tagged write, on `close_task`,
+  or after an idle timeout (`NEURODIVERGENT_MEMORY_SESSION_IDLE_MS`, default 30
+  minutes) — without closing the connection itself. Callers that never handshake at
+  all (the web-app bridge, bare direct HTTP calls) fall back to the exact prior
+  stateless per-request behavior, unaffected. See
+  `docs/superpowers/specs/2026-07-16-per-connection-mcp-sessions-design.md`.
 
 ### Changed
+
 - The web-app bridge (`scripts/nd-mem-bridge-server.mjs`) no longer spawns its own MCP
   child; `/save` and `/update` forward to the shared daemon (`routedTo: "daemon-http"`).
+
+### Fixed
+
+- `scripts/nd-mem-bridge-server.mjs` resolved its HTML/helpers/daemon-entry paths off
+  `process.cwd()` instead of its own file location, so launching it via absolute path
+  from any directory other than the repo root 404'd with "Bridge UI not found". Now
+  resolved via `import.meta.url`, so it works launched from anywhere.
+- `store_memory`, `update_memory`, and `import_memories` never validated that `tags`
+  was actually an array of strings, letting malformed payloads reach the store and
+  crash `prepare_packetized_synthesis_context` with `tag.startsWith is not a
+  function` on any non-string tag. Now rejected at the write boundary with a clear
+  validation error; `collectTopTopics` also defensively skips non-string tags for
+  any data that reached the snapshot outside the MCP write path.
+- `stdio-proxy` now recovers from an idle-timed-out session instead of hanging: a
+  swept session's `404` is retried once with no session header, falling through to
+  the stateless path, rather than relaying an uncorrelatable `id: null` response.
 
 ## [0.3.9] - 2026-04-16
 
