@@ -87,26 +87,48 @@ export async function runStdioProxy(options: ProxyOptions): Promise<void> {
     try {
       const health = await ensureDaemon({ port, entryPath: options.entryPath, logFile });
       warnOnMemoryPathMismatch(health.memoryPath, health.pid);
-      const headers: Record<string, string> = {
-        "content-type": "application/json",
-        accept: "application/json, text/event-stream",
-        "mcp-protocol-version": "2025-03-26",
+
+      const forwardOnce = async () => {
+        const headers: Record<string, string> = {
+          "content-type": "application/json",
+          accept: "application/json, text/event-stream",
+          "mcp-protocol-version": "2025-03-26",
+        };
+        if (sessionId) headers["mcp-session-id"] = sessionId;
+        const res = await fetch(`http://127.0.0.1:${port}/mcp`, {
+          method: "POST",
+          headers,
+          body: JSON.stringify(msg),
+        });
+        const returnedSessionId = res.headers.get("mcp-session-id");
+        if (returnedSessionId) sessionId = returnedSessionId;
+        const text = await res.text();
+        let response: unknown;
+        try {
+          response = JSON.parse(text);
+        } catch {
+          throw new Error(`daemon returned non-JSON (HTTP ${res.status}): ${text.slice(0, 200)}`);
+        }
+        return { status: res.status, response };
       };
-      if (sessionId) headers["mcp-session-id"] = sessionId;
-      const res = await fetch(`http://127.0.0.1:${port}/mcp`, {
-        method: "POST",
-        headers,
-        body: JSON.stringify(msg),
-      });
-      const returnedSessionId = res.headers.get("mcp-session-id");
-      if (returnedSessionId) sessionId = returnedSessionId;
-      const text = await res.text();
-      let response: unknown;
-      try {
-        response = JSON.parse(text);
-      } catch {
-        throw new Error(`daemon returned non-JSON (HTTP ${res.status}): ${text.slice(0, 200)}`);
+
+      const sentSessionId = sessionId;
+      let { status, response } = await forwardOnce();
+
+      // The daemon sweeps sessions idle past NEURODIVERGENT_MEMORY_SESSION_IDLE_MS
+      // and answers a swept session id with 404 + `id: null` in the JSON-RPC body.
+      // Relaying that straight through would wedge the caller two ways: it can
+      // never correlate a null id to its pending request (so the call just
+      // hangs from its point of view), and we'd keep attaching the same dead
+      // session id to every future call too. Clear it and retry ONCE with no
+      // session header, falling through to the daemon's stateless fallback path
+      // (Task 1) — that yields a properly `id`'d response, just with no bound
+      // identity (`Agent: unassigned` for a memory write).
+      if (status === 404 && sentSessionId) {
+        sessionId = undefined;
+        ({ status, response } = await forwardOnce());
       }
+
       write(response);
     } catch (err) {
       write({

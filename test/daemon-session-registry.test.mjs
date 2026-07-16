@@ -76,6 +76,7 @@ async function withDaemon(envOverrides, fn) {
     await fn(daemonPort, () => stderr);
   } finally {
     daemon.kill();
+    fs.rmSync(tempDir, { recursive: true, force: true });
   }
 }
 
