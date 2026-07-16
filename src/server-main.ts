@@ -4225,7 +4225,10 @@ function collectTopTopics(memories: MemoryNPC[], limit = 8): string[] {
 
   for (const memory of memories) {
     for (const tag of memory.tags) {
-      if (!tag.startsWith("topic:")) continue;
+      // Defensive: tags are validated string[] on every write path, but this reads
+      // every stored memory unconditionally, including any that reached the snapshot
+      // file outside those paths (direct edits, restores, sync-memories.ts).
+      if (typeof tag !== "string" || !tag.startsWith("topic:")) continue;
       counts.set(tag, (counts.get(tag) ?? 0) + 1);
     }
   }
@@ -4666,6 +4669,18 @@ function validateKanbanStatus(status: string): asserts status is KanbanStatus {
       NM_ERRORS.INPUT_VALIDATION_FAILED,
       `Invalid status: "${status}". Expected one of: ${KANBAN_STATUSES.join(", ")}.`,
       `Provide a valid kanban status: ${KANBAN_STATUSES.join(", ")}.`,
+    );
+  }
+}
+
+/** Rejects malformed tags at the write boundary so non-string entries can never reach storage — every downstream reader (search tokenizing, WIP tag checks, packetized-synthesis topic counting) assumes tags: string[]. */
+function validateTagsField(tags: unknown, fieldPath = "tags"): asserts tags is string[] | undefined {
+  if (tags === undefined) return;
+  if (!Array.isArray(tags) || tags.some(tag => typeof tag !== "string")) {
+    throw createNMError(
+      NM_ERRORS.INPUT_VALIDATION_FAILED,
+      `Invalid ${fieldPath}: expected an array of strings.`,
+      `Provide ${fieldPath} as a flat JSON array of strings (e.g. ["topic:x", "kind:y"]), or omit it.`,
     );
   }
 }
@@ -5879,6 +5894,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             "To clear kanban fields on an existing memory, use update_memory instead.",
           );
         }
+        validateTagsField(tags, "tags");
         if (status !== undefined) validateKanbanStatus(status);
         const normalizedAgentId = normalizeOptionalAgentId(agent_id);
         const shouldCheckWipLimit =
@@ -6004,6 +6020,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             );
           }
         }
+        validateTagsField(tags, "tags");
         const normalizedActorAgentId = normalizeOptionalAgentId(agent_id);
         const updates: MemoryUpdatePayload = {};
         if (content !== undefined) updates.content = content;
@@ -6570,6 +6587,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     case "import_memories": {
       const { entries, file_path, dry_run = false, dedupe = "none", preserve_ids = false, merge_connections = false, agent_id } = request.params.arguments as any;
       try {
+        if (Array.isArray(entries)) {
+          entries.forEach((entry: any, index: number) => validateTagsField(entry?.tags, `entries[${index}].tags`));
+        }
         const normalizedAgentId = normalizeOptionalAgentId(agent_id);
         const executeImport = () => memorySystem.importMemories(entries, normalizedAgentId, {
           file_path,
