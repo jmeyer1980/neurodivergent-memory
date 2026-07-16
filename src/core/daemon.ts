@@ -25,6 +25,19 @@ function resolveSessionIdleMs(): number {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_SESSION_IDLE_MS;
 }
 
+function readJsonBody(req: http.IncomingMessage): Promise<unknown> {
+  return new Promise((resolve, reject) => {
+    let data = "";
+    req.on("data", (chunk) => { data += chunk; });
+    req.on("end", () => {
+      if (!data) { resolve(undefined); return; }
+      try { resolve(JSON.parse(data)); }
+      catch (err) { reject(err); }
+    });
+    req.on("error", reject);
+  });
+}
+
 /**
  * Bind 127.0.0.1:port FIRST, before the store exists. The exclusive port bind
  * is the singleton lock: a second daemon gets EADDRINUSE and exits 0 without
@@ -103,22 +116,49 @@ export function attachDaemonRoutes(httpServer: http.Server, options: DaemonRoute
           return;
         }
 
-        // No session header: this request must be an `initialize` call
-        // minting a new session. (A non-initialize call with no session
-        // header is rejected by the transport itself per the MCP spec.)
-        const server = createServer();
-        const transport = new StreamableHTTPServerTransport({
-          sessionIdGenerator: () => crypto.randomUUID(),
+        // No session header. Two callers reach this branch: a real MCP
+        // client's `initialize` call (wants a session), and a caller that
+        // never establishes a session at all — the bridge's runMcpTool,
+        // pre-Task-3 stdio-proxy forwarding, and any bare direct HTTP
+        // caller all send tools/call with no handshake. The SDK's stateful
+        // transport mode rejects any non-initialize request with no
+        // session (400), so those callers need the exact old stateless
+        // per-request behavior preserved — read the body once to tell
+        // the two cases apart.
+        const parsedBody = await readJsonBody(req);
+        const isInitialize = typeof parsedBody === "object" && parsedBody !== null && (parsedBody as { method?: unknown }).method === "initialize";
+
+        if (isInitialize) {
+          const server = createServer();
+          const transport = new StreamableHTTPServerTransport({
+            sessionIdGenerator: () => crypto.randomUUID(),
+            enableJsonResponse: true,
+            onsessioninitialized: (newSessionId) => {
+              sessions.set(newSessionId, { transport, server, lastActivityAt: Date.now() });
+            },
+            onsessionclosed: (closedSessionId) => {
+              sessions.delete(closedSessionId);
+            },
+          });
+          await server.connect(transport);
+          await transport.handleRequest(req, res, parsedBody);
+          return;
+        }
+
+        // Stateless fallback: today's exact pre-Task-1 behavior for callers
+        // that never hand shake — a throwaway Server+transport pair, closed
+        // when the response ends.
+        const statelessServer = createServer();
+        const statelessTransport = new StreamableHTTPServerTransport({
+          sessionIdGenerator: undefined,
           enableJsonResponse: true,
-          onsessioninitialized: (newSessionId) => {
-            sessions.set(newSessionId, { transport, server, lastActivityAt: Date.now() });
-          },
-          onsessionclosed: (closedSessionId) => {
-            sessions.delete(closedSessionId);
-          },
         });
-        await server.connect(transport);
-        await transport.handleRequest(req, res);
+        res.on("close", () => {
+          void statelessTransport.close();
+          void statelessServer.close();
+        });
+        await statelessServer.connect(statelessTransport);
+        await statelessTransport.handleRequest(req, res, parsedBody);
         return;
       }
       res.writeHead(404, { "Content-Type": "application/json" });

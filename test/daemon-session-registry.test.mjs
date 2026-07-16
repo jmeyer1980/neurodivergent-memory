@@ -116,3 +116,12 @@ test("an idle session is swept and its resources freed after the configured time
     assert.equal(afterIdle.status, 404, "swept session should no longer be found");
   });
 });
+
+test("a bare tools/call with no initialize and no session header still works (stateless fallback for non-handshaking callers like the bridge)", async () => {
+  await withDaemon({}, async (port) => {
+    const res = await postMcp(port, { jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "storage_diagnostics", arguments: {} } });
+    assert.equal(res.status, 200);
+    assert.ok(!res.json.error, `unexpected error: ${JSON.stringify(res.json)}`);
+    assert.equal(res.sessionId, null, "a stateless fallback call must not mint or return a session id");
+  });
+});
