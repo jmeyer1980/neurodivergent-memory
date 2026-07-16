@@ -37,12 +37,12 @@ function warnOnMemoryPathMismatch(daemonMemoryPath: string | undefined, daemonPi
 }
 
 /**
- * Proxy mode: this process NEVER opens the store. It answers `initialize`
- * locally (the daemon is stateless per request) and forwards every other
- * request to the daemon over HTTP. If the daemon is unreachable and cannot be
- * spawned, requests get a JSON-RPC error — there is deliberately no local
- * fallback, because a silent fallback would re-create the multi-writer bug
- * this design exists to kill.
+ * Proxy mode: this process NEVER opens the store. It forwards every request —
+ * including `initialize` — to the daemon over HTTP, capturing the real session
+ * id the daemon mints and attaching it to every subsequent call. If the daemon
+ * is unreachable and cannot be spawned, requests get a JSON-RPC error — there
+ * is deliberately no local fallback, because a silent fallback would re-create
+ * the multi-writer bug this design exists to kill.
  */
 export async function runStdioProxy(options: ProxyOptions): Promise<void> {
   const port = options.port ?? resolveDaemonPort();
