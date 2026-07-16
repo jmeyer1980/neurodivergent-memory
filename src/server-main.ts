@@ -5979,6 +5979,11 @@ server.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
         const cooldownLine = storeResult.cooldown_duration_ms
           ? `\n${memorySystem.buildCrossDistrictCooldownWarning(storeResult.matched_memory_id ?? memory.id, storeResult.cooldown_duration_ms)}`
           : "";
+        let sessionClearedLine = "";
+        if (memory.tags.includes("kind:handoff") && getActiveAgentSession(server)) {
+          clearAgentSession(server);
+          sessionClearedLine = "\n🕐 Session identity cleared (handoff tag detected)";
+        }
         const repeatLines = [
           `repeat_detected: ${storeResult.repeat_detected ? "true" : "false"}`,
           storeResult.matched_memory_id ? `matched_memory_id: ${storeResult.matched_memory_id}` : undefined,
@@ -5991,7 +5996,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
         return {
           content: [{
             type: "text",
-            text: `🧠 Stored memory "${memory.name}" in ${districtLabel}${inferredNote}\nID: ${memory.id}\nArchetype: ${memory.archetype}\nAgent: ${memory.agent_id ?? "unassigned"}\nProject: ${memory.project_id ?? "unset"}\nSession: ${memory.session_id ?? "unset"}\nStatus: ${memory.status ?? "unset"}\nEpistemic status: ${memory.epistemic_status ?? "unset"}\nVisibility: ${memory.visibility ?? "private"}\n${repeatLines}${warningLine}${repeatWarningLine}${cooldownLine}`
+            text: `🧠 Stored memory "${memory.name}" in ${districtLabel}${inferredNote}\nID: ${memory.id}\nArchetype: ${memory.archetype}\nAgent: ${memory.agent_id ?? "unassigned"}\nProject: ${memory.project_id ?? "unset"}\nSession: ${memory.session_id ?? "unset"}\nStatus: ${memory.status ?? "unset"}\nEpistemic status: ${memory.epistemic_status ?? "unset"}\nVisibility: ${memory.visibility ?? "private"}\n${repeatLines}${warningLine}${repeatWarningLine}${cooldownLine}${sessionClearedLine}`
           }]
         };
       } catch (error) {
@@ -6088,10 +6093,15 @@ server.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
         const cooldownLine = updateResult.cooldown_duration_ms
           ? `\n${memorySystem.buildCrossDistrictCooldownWarning(memory_id, updateResult.cooldown_duration_ms)}`
           : "";
+        let sessionClearedLine = "";
+        if (memory.tags.includes("kind:handoff") && getActiveAgentSession(server)) {
+          clearAgentSession(server);
+          sessionClearedLine = "\n🕐 Session identity cleared (handoff tag detected)";
+        }
         return {
           content: [{
             type: "text",
-            text: `✏️ Updated memory "${memory.name}" (${memory_id})\nDistrict: ${memory.district}\nAgent: ${memory.agent_id ?? DEFAULT_AGENT_ID}\nProject: ${memory.project_id ?? 'unset'}\nSession: ${memory.session_id ?? 'unset'}\nStatus: ${memory.status ?? 'unset'}\nEpistemic status: ${memory.epistemic_status ?? 'unset'}\nVisibility: ${memory.visibility ?? 'private'}\nTags: ${memory.tags.join(', ')}${cooldownLine}`
+            text: `✏️ Updated memory "${memory.name}" (${memory_id})\nDistrict: ${memory.district}\nAgent: ${memory.agent_id ?? DEFAULT_AGENT_ID}\nProject: ${memory.project_id ?? 'unset'}\nSession: ${memory.session_id ?? 'unset'}\nStatus: ${memory.status ?? 'unset'}\nEpistemic status: ${memory.epistemic_status ?? 'unset'}\nVisibility: ${memory.visibility ?? 'private'}\nTags: ${memory.tags.join(', ')}${cooldownLine}${sessionClearedLine}`
           }]
         };
       } catch (error) {
@@ -7015,6 +7025,11 @@ server.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
           { publication_state: "closed" },
           { agent_id: normalizedActorAgentId },
         ));
+        let sessionClearedLine = "";
+        if (getActiveAgentSession(server)) {
+          clearAgentSession(server);
+          sessionClearedLine = "\n🕐 Session identity cleared (close_task)";
+        }
         return {
           content: [{
             type: "text",
@@ -7022,7 +7037,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
               `🔒 close_task: ${currentState} → closed.`,
               `memory_id: ${memory_id}`,
               `lifecycle_state: closed`,
-            ].join("\n"),
+            ].join("\n") + sessionClearedLine,
           }],
         };
       } catch (error) {
