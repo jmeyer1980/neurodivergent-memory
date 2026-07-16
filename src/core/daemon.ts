@@ -125,7 +125,14 @@ export function attachDaemonRoutes(httpServer: http.Server, options: DaemonRoute
         // session (400), so those callers need the exact old stateless
         // per-request behavior preserved — read the body once to tell
         // the two cases apart.
-        const parsedBody = await readJsonBody(req);
+        let parsedBody: unknown;
+        try {
+          parsedBody = await readJsonBody(req);
+        } catch {
+          res.writeHead(400, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ jsonrpc: "2.0", id: null, error: { code: -32700, message: "Parse error: Invalid JSON" } }));
+          return;
+        }
         const isInitialize = typeof parsedBody === "object" && parsedBody !== null && (parsedBody as { method?: unknown }).method === "initialize";
 
         if (isInitialize) {

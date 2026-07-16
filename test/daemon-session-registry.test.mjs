@@ -125,3 +125,20 @@ test("a bare tools/call with no initialize and no session header still works (st
     assert.equal(res.sessionId, null, "a stateless fallback call must not mint or return a session id");
   });
 });
+
+test("malformed JSON on /mcp returns 400 with Parse error code -32700, not 500", async () => {
+  await withDaemon({}, async (port) => {
+    const res = await fetch(`http://127.0.0.1:${port}/mcp`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "mcp-protocol-version": "2025-03-26",
+      },
+      body: "not valid json at all",
+    });
+    const json = await res.json();
+    assert.equal(res.status, 400, "malformed JSON should return 400, not 500");
+    assert.equal(json.error.code, -32700, "error code should be -32700 (Parse error)");
+    assert.match(json.error.message, /Invalid JSON/, "error message should mention Invalid JSON");
+  });
+});
