@@ -7,6 +7,7 @@ import {
   nearestIndex, rotationForIndex, snapTarget,
   LEVELS, nextLevel, createHistory, pushView, popView, atWall,
   itemIdsForView, reconcileView, reconcilePop,
+  routeGesture,
 } from '../scripts/nd-mem-rolodex-helpers.mjs';
 
 // Fixture: alpha has 3 memories in 2 districts, beta has 2 (one custom district),
@@ -183,4 +184,29 @@ test('reconcilePop skips dead views and repairs survivors (rule 4)', () => {
   assert.equal(restored.centeredId, 'beta'); // beta still exists (mem_6 remains)
   assert.equal(atWall(h), true);
   assert.equal(reconcilePop(h, snap4), null); // exhausted stack -> caller shows root
+});
+
+test('routeGesture implements the spec input map', () => {
+  const at = (level, insideReader = false) => ({ level, insideReader });
+  assert.equal(routeGesture('wheel', at('projects')), 'spin');
+  assert.equal(routeGesture('wheel', at('memories', true)), 'scrollContent');
+  assert.equal(routeGesture('vswipe', at('memories', true)), 'scrollContent');
+  assert.equal(routeGesture('vswipe', at('memories')), 'spin');
+  assert.equal(routeGesture('hdrag', at('memories', true)), 'spin');
+  for (const zoomIn of ['ctrlWheelUp', 'pinchSpread', 'enter']) {
+    assert.equal(routeGesture(zoomIn, at('memories', true)), 'dive', zoomIn);
+  }
+  for (const out of ['ctrlWheelDown', 'pinchTogether', 'rightClick', 'esc', 'back']) {
+    assert.equal(routeGesture(out, at('projects')), 'zoomOut', out);
+    assert.equal(routeGesture(out, at('memories', true)), 'zoomOut', out);
+  }
+  // Clicks are level-dependent: memories cards are a reading surface.
+  assert.equal(routeGesture('clickCentered', at('projects')), 'dive');
+  assert.equal(routeGesture('clickCentered', at('districts')), 'dive');
+  assert.equal(routeGesture('clickCentered', at('memories')), 'none');
+  assert.equal(routeGesture('clickOther', at('projects')), 'centerThenDive');
+  assert.equal(routeGesture('clickOther', at('memories')), 'centerOnly');
+  assert.equal(routeGesture('arrowLeft', at('districts')), 'stepPrev');
+  assert.equal(routeGesture('arrowRight', at('districts')), 'stepNext');
+  assert.equal(routeGesture('bogus', at('projects')), 'none');
 });

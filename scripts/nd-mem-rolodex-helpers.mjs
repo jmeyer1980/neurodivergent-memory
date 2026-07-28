@@ -179,3 +179,23 @@ export function reconcilePop(history, snapshot) {
   }
   return null;
 }
+
+// ---------- gesture routing (spec input map) ----------
+// insideReader is only true when the pointer is inside the front card's
+// scrollable reader area, which only exists at the memories level.
+
+export function routeGesture(kind, ctx) {
+  const { level, insideReader } = ctx;
+  switch (kind) {
+    case 'wheel': return insideReader ? 'scrollContent' : 'spin';
+    case 'vswipe': return insideReader ? 'scrollContent' : 'spin';
+    case 'hdrag': return 'spin';
+    case 'ctrlWheelUp': case 'pinchSpread': case 'enter': return 'dive';
+    case 'ctrlWheelDown': case 'pinchTogether': case 'rightClick': case 'esc': case 'back': return 'zoomOut';
+    case 'clickCentered': return level === 'memories' ? 'none' : 'dive';
+    case 'clickOther': return level === 'memories' ? 'centerOnly' : 'centerThenDive';
+    case 'arrowLeft': return 'stepPrev';
+    case 'arrowRight': return 'stepNext';
+    default: return 'none';
+  }
+}
