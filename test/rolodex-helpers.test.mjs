@@ -5,6 +5,7 @@ import {
   projectOf, districtOf, deriveProjects, deriveDistricts, deriveMemories,
   anglePerCard, drumRadius, normalizeAngle, shortestDelta,
   nearestIndex, rotationForIndex, snapTarget,
+  LEVELS, nextLevel, createHistory, pushView, popView, atWall,
 } from '../scripts/nd-mem-rolodex-helpers.mjs';
 
 // Fixture: alpha has 3 memories in 2 districts, beta has 2 (one custom district),
@@ -98,4 +99,25 @@ test('nearestIndex / rotationForIndex / snapTarget agree', () => {
   assert.equal(snapTarget(-449, 4), -450);
   assert.equal(snapTarget(-451, 4), -450);
   assert.equal(snapTarget(3601, 4), 3600);
+});
+
+test('nextLevel cycles projects -> districts -> memories -> projects', () => {
+  assert.deepEqual(LEVELS, ['projects', 'districts', 'memories']);
+  assert.equal(nextLevel('projects'), 'districts');
+  assert.equal(nextLevel('districts'), 'memories');
+  assert.equal(nextLevel('memories'), 'projects');
+});
+
+test('history stack: push copies, pop restores exact view, empty stack is the wall', () => {
+  const h = createHistory();
+  assert.equal(atWall(h), true);
+  assert.equal(popView(h), null);
+  const view = { level: 'memories', projectId: 'alpha', districtId: 'practical_execution', centeredId: 'mem_3', rotation: -180, itemIds: ['mem_3', 'mem_1'] };
+  pushView(h, view);
+  view.centeredId = 'mutated-after-push';
+  assert.equal(atWall(h), false);
+  const popped = popView(h);
+  assert.equal(popped.centeredId, 'mem_3'); // copy, not reference
+  assert.equal(popped.rotation, -180);
+  assert.equal(atWall(h), true);
 });

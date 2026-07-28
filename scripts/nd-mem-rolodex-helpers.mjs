@@ -104,3 +104,30 @@ export function snapTarget(rotation, count) {
   const idx = nearestIndex(rotation, count);
   return rotation + shortestDelta(rotation, rotationForIndex(idx, count));
 }
+
+// ---------- levels & history ----------
+// A "view" is { level, projectId, districtId, centeredId, rotation, itemIds }.
+// itemIds records the drum's item ids at push time so a later pop can find a
+// nearest neighbor if the centered item has since been deleted.
+
+export const LEVELS = ['projects', 'districts', 'memories'];
+
+export function nextLevel(level) {
+  return LEVELS[(LEVELS.indexOf(level) + 1) % LEVELS.length];
+}
+
+export function createHistory() {
+  return [];
+}
+
+export function pushView(history, view) {
+  history.push({ ...view, itemIds: [...(view.itemIds || [])] });
+}
+
+export function popView(history) {
+  return history.length ? history.pop() : null;
+}
+
+export function atWall(history) {
+  return history.length === 0;
+}
