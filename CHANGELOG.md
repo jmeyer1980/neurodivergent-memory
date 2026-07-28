@@ -32,6 +32,13 @@ Running locally on the development branch; not part of a release cut (version st
   stateless per-request behavior, unaffected. See
   `docs/superpowers/specs/2026-07-16-per-connection-mcp-sessions-design.md`.
 
+- **Bridge auto-open.** `scripts/nd-mem-bridge-server.mjs` can now open the web UI in
+  the default browser once the server is listening: `--open`/`-o` opens immediately,
+  no flag prompts `[Y/n]` in an interactive terminal, and `--no-open` suppresses both.
+  `ND_MEM_BRIDGE_OPEN=1`/`0` is the env-var equivalent. Non-interactive runs (tests,
+  spawned children) never open a browser. The launch uses `execFile` with an argument
+  array — no shell interpolation.
+
 ### Changed
 
 - The web-app bridge (`scripts/nd-mem-bridge-server.mjs`) no longer spawns its own MCP

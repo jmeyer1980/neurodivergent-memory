@@ -4,6 +4,8 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { execFile } from 'child_process';
+import * as readline from 'readline';
 import { ensureDaemon } from '../build/core/ensure-daemon.js';
 import { resolveDaemonPort } from '../build/core/run-mode.js';
 
@@ -200,4 +202,55 @@ app.post('/save', async (req, res) => {
   }
 });
 
-app.listen(PORT, () => console.log(JSON.stringify({ ok: true, port: PORT, memoryPath: MEMORY_PATH, pollMs: POLL_MS })));
+// --open / -o (or ND_MEM_BRIDGE_OPEN=1) opens the UI in the default browser as
+// soon as the server is listening; --no-open (or ND_MEM_BRIDGE_OPEN=0) never
+// opens and never prompts. With neither, an interactive terminal gets a Y/n
+// confirmation, while non-interactive runs (tests, spawned children) must stay
+// headless — a browser popping up mid-test-suite is never wanted.
+const argv = process.argv.slice(2);
+const OPEN_ENV = (process.env.ND_MEM_BRIDGE_OPEN || '').toLowerCase();
+const NEVER_OPEN = argv.includes('--no-open') || ['0', 'false', 'no'].includes(OPEN_ENV);
+const AUTO_OPEN = !NEVER_OPEN && (argv.includes('--open') || argv.includes('-o') || ['1', 'true', 'yes'].includes(OPEN_ENV));
+
+// execFile with an argument array — no shell, so nothing in the URL is ever
+// interpreted as a command. On Windows, rundll32's FileProtocolHandler opens
+// the default browser without needing the cmd-builtin `start`.
+function openInBrowser(url) {
+  const [cmd, args] =
+    process.platform === 'win32' ? ['rundll32', ['url.dll,FileProtocolHandler', url]]
+      : process.platform === 'darwin' ? ['open', [url]]
+      : ['xdg-open', [url]];
+  execFile(cmd, args, (error) => {
+    if (error) console.error('Bridge: failed to open browser URL:', error.message);
+    else console.error(`Bridge: opened ${url} in the default browser.`);
+  });
+}
+
+function maybeOpenBridgeUI() {
+  if (NEVER_OPEN) return;
+  if (!AUTO_OPEN && !process.stdin.isTTY) return;
+  if (!fs.existsSync(HTML_PATH)) {
+    console.error('Bridge: not opening browser — scripts/nd-mem-mcp-app-bridge.html is missing.');
+    return;
+  }
+  const url = `http://localhost:${PORT}/`;
+  if (AUTO_OPEN) {
+    openInBrowser(url);
+    return;
+  }
+  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+  rl.question(`Open bridge UI at ${url} [Y/n]? `, (answer) => {
+    rl.close();
+    const normalized = answer.trim().toLowerCase();
+    if (normalized === '' || normalized === 'y' || normalized === 'yes') {
+      openInBrowser(url);
+    } else {
+      console.log('Skipped opening bridge UI.');
+    }
+  });
+}
+
+app.listen(PORT, () => {
+  console.log(JSON.stringify({ ok: true, port: PORT, memoryPath: MEMORY_PATH, pollMs: POLL_MS }));
+  maybeOpenBridgeUI();
+});

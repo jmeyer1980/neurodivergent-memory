@@ -720,7 +720,14 @@ Start it (works from any directory once dependencies are installed):
 node scripts/nd-mem-bridge-server.mjs
 ```
 
-Then open **`http://localhost:3737/`** in a browser.
+Then open **`http://localhost:3737/`** in a browser — or let the bridge open it for you:
+
+```bash
+node scripts/nd-mem-bridge-server.mjs --open     # open the UI immediately, no prompt (alias: -o)
+node scripts/nd-mem-bridge-server.mjs --no-open  # never open, never prompt
+```
+
+With no flag, an interactive terminal asks `Open bridge UI at http://localhost:3737/ [Y/n]?` once the server is listening; non-interactive runs (tests, spawned child processes) never open a browser. `ND_MEM_BRIDGE_OPEN=1`/`0` is the env-var equivalent of `--open`/`--no-open`.
 
 > **Important:** Open the URL above, not the `.html` file directly. Loading `nd-mem-mcp-app-bridge.html` via `file://` (double-clicking it, or "Open File" in a browser) silently breaks the page's helper-module import — the page still loads, but project rename/merge fails with a misleading "helpers not loaded" error even though the bridge is running.
 
