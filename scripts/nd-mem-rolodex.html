@@ -166,9 +166,59 @@
       state.velocity = 0;
     }
 
-    // Stubs — Task 8 implements these.
-    function dive(){ }
-    function zoomOut(){ }
+    // ---------- dive / zoom out ----------
+    const ZOOM_MS = 700;
+
+    function transitionTo(view, dir){ // dir: 'in' pushes camera through the card, 'out' pulls it back
+      state.transitioning = true;
+      const enterCls = dir === 'in' ? 'zoom-in' : 'zoom-out';
+      const exitCls = dir === 'in' ? 'zoom-out' : 'zoom-in';
+      els.scene.classList.add(enterCls);
+      setTimeout(() => {
+        state.view = { ...view };
+        buildDrum();
+        els.scene.classList.remove(enterCls);
+        els.scene.classList.add(exitCls);
+        void els.scene.offsetWidth; // reflow so the exit state applies before removal animates it
+        els.scene.classList.remove(exitCls);
+        setTimeout(() => { state.transitioning = false; }, REDUCED ? 0 : ZOOM_MS);
+      }, REDUCED ? 0 : ZOOM_MS);
+    }
+
+    function dive(){
+      if (state.transitioning || !state.items.length) return;
+      const front = centeredItem();
+      if (!front) return;
+      H.pushView(state.history, currentViewSnapshot());
+      const level = H.nextLevel(state.view.level);
+      let next;
+      if (state.view.level === 'projects') next = { level, projectId: front.id, districtId: null, centeredId: null, rotation: 0, itemIds: [] };
+      else if (state.view.level === 'districts') next = { level, projectId: state.view.projectId, districtId: front.id, centeredId: null, rotation: 0, itemIds: [] };
+      else next = { level, projectId: null, districtId: null, centeredId: null, rotation: 0, itemIds: [] }; // memories wraps to projects
+      transitionTo(next, 'in');
+    }
+
+    function bounce(){
+      const now = performance.now();
+      if (now - state.lastBounceAt < 500) return;
+      state.lastBounceAt = now;
+      if (REDUCED) { showToast('This is the first view — nothing further back.'); return; }
+      els.scene.classList.add('bouncing');
+      els.stage.classList.add('bounce');
+      setTimeout(() => { els.scene.classList.remove('bouncing'); els.stage.classList.remove('bounce'); }, 460);
+    }
+
+    function zoomOut(){
+      if (state.transitioning) return;
+      if (H.atWall(state.history)) { bounce(); return; }
+      const restored = H.reconcilePop(state.history, state.snapshot);
+      if (!restored) {
+        transitionTo({ level: 'projects', projectId: null, districtId: null, centeredId: null, rotation: 0, itemIds: [] }, 'out');
+        showToast('Earlier views no longer exist — back to all projects.');
+        return;
+      }
+      transitionTo(restored, 'out');
+    }
 
     // ---------- animation loop ----------
     function tick(){
