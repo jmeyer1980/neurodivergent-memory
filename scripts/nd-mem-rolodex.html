@@ -7,15 +7,15 @@
   <link rel="preconnect" href="https://api.fontshare.com">
   <link href="https://api.fontshare.com/v2/css?f[]=satoshi@300,400,500,700,900&f[]=clash-display@400,500,600,700&display=swap" rel="stylesheet">
   <style>
-    :root,[data-theme="light"]{--bg:#f7f6f2;--border:#d4d1ca;--text:#28251d;--muted:#7a7974;--faint:#bab9b4;--primary:#01696f;--cardW:340px;--cardH:230px;--font-display:'Clash Display','Inter',sans-serif;--font-body:'Satoshi','Inter',sans-serif}
-    [data-theme="dark"]{--bg:#111318;--border:#37404b;--text:#edf2f4;--muted:#a3b0b8;--faint:#6e7a84;--primary:#60d7d2}
+    :root,[data-theme="light"]{--bg:#f7f6f2;--border:#d4d1ca;--text:#28251d;--muted:#7a7974;--faint:#8d8c86;--primary:#01696f;--cardW:340px;--cardH:230px;--font-display:'Clash Display','Inter',sans-serif;--font-body:'Satoshi','Inter',sans-serif;--surface:rgba(255,255,255,.75);--surfaceBorder:rgba(0,0,0,.12);--bgEnd:#efece6;--overlayBg:rgba(250,249,246,.96);--cardWash:linear-gradient(180deg,rgba(255,255,255,.55),rgba(255,255,255,.3))}
+    [data-theme="dark"]{--bg:#111318;--border:#37404b;--text:#edf2f4;--muted:#a3b0b8;--faint:#6e7a84;--primary:#60d7d2;--surface:rgba(16,20,24,.72);--surfaceBorder:rgba(255,255,255,.1);--bgEnd:#0d0f13;--overlayBg:rgba(20,24,29,.96);--cardWash:linear-gradient(180deg,rgba(255,255,255,.08),rgba(255,255,255,.03))}
     *{box-sizing:border-box;margin:0;padding:0}
     html,body{height:100%;overflow:hidden;overscroll-behavior:none}
-    body{font-family:var(--font-body);color:var(--text);background:radial-gradient(circle at top left,rgba(96,215,210,.1),transparent 24%),linear-gradient(180deg,var(--bg),#0d0f13);user-select:none}
+    body{font-family:var(--font-body);color:var(--text);background:radial-gradient(circle at top left,rgba(96,215,210,.1),transparent 24%),linear-gradient(180deg,var(--bg),var(--bgEnd));user-select:none}
     button{font:inherit;color:inherit;cursor:pointer}
     #chrome{position:fixed;inset:0 0 auto 0;z-index:10;display:flex;justify-content:space-between;align-items:center;gap:12px;padding:14px 18px;pointer-events:none}
     #chrome .cluster{display:flex;gap:10px;align-items:center;pointer-events:auto}
-    .pill{padding:9px 14px;border-radius:999px;border:1px solid rgba(255,255,255,.1);background:rgba(16,20,24,.72);backdrop-filter:blur(10px);font-size:.82rem;color:var(--muted)}
+    .pill{padding:9px 14px;border-radius:999px;border:1px solid var(--surfaceBorder);background:var(--surface);backdrop-filter:blur(10px);font-size:.82rem;color:var(--muted)}
     .pill strong{color:var(--text);font-weight:500}
     a.pill{text-decoration:none}
     #backBtn{font-size:1rem;line-height:1}
@@ -30,22 +30,22 @@
     @keyframes wallbounce{0%{transform:translateZ(0)}35%{transform:translateZ(-90px)}100%{transform:translateZ(0)}}
     #drum{position:relative;width:var(--cardW);height:var(--cardH);transform-style:preserve-3d}
     #stage[data-level="memories"]{--cardH:460px}
-    .card3d{position:absolute;inset:0;display:flex;flex-direction:column;gap:10px;padding:18px;border-radius:24px;border:1px solid rgba(255,255,255,.09);background:linear-gradient(180deg,rgba(255,255,255,.08),rgba(255,255,255,.03)),radial-gradient(circle at top right,rgba(96,215,210,.16),transparent 38%),rgba(20,25,31,.92);box-shadow:0 18px 40px rgba(0,0,0,.35);backface-visibility:hidden;transition:opacity .3s,box-shadow .3s,border-color .3s;opacity:.55}
+    .card3d{position:absolute;inset:0;display:flex;flex-direction:column;gap:10px;padding:18px;border-radius:24px;border:1px solid var(--surfaceBorder);background:var(--cardWash),radial-gradient(circle at top right,rgba(96,215,210,.16),transparent 38%),var(--surface);box-shadow:0 18px 40px rgba(0,0,0,.35);backface-visibility:hidden;transition:opacity .3s,box-shadow .3s,border-color .3s;opacity:.55}
     .card3d.front{opacity:1;border-color:rgba(96,215,210,.4);box-shadow:0 24px 60px rgba(0,0,0,.5),0 0 30px rgba(96,215,210,.12)}
     .card3d .kicker{font-size:.7rem;text-transform:uppercase;letter-spacing:.1em;color:var(--faint)}
     .card3d h2{font-family:var(--font-display);font-size:1.15rem;line-height:1.2}
     .card3d p{color:var(--muted);line-height:1.5;font-size:.9rem;overflow:hidden}
     .chips{display:flex;gap:8px;flex-wrap:wrap}
-    .chip{padding:6px 10px;border-radius:999px;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.08);font-size:.74rem;color:var(--muted)}
+    .chip{padding:6px 10px;border-radius:999px;background:rgba(255,255,255,.05);border:1px solid var(--surfaceBorder);font-size:.74rem;color:var(--muted)}
     #hud{position:fixed;inset:auto 0 0 0;z-index:10;display:flex;justify-content:center;padding:16px;pointer-events:none}
     #overlay{position:fixed;inset:0;z-index:20;display:none;align-items:center;justify-content:center;background:rgba(7,10,12,.7)}
     #overlay.open{display:flex}
-    #overlay .box{max-width:420px;text-align:center;padding:28px;border-radius:24px;background:rgba(20,24,29,.96);border:1px solid rgba(255,255,255,.1)}
+    #overlay .box{max-width:420px;text-align:center;padding:28px;border-radius:24px;background:var(--overlayBg);border:1px solid var(--surfaceBorder)}
     #overlay h2{font-family:var(--font-display);margin-bottom:10px}
     #overlay p{color:var(--muted);margin-bottom:16px;line-height:1.55}
     .btn{padding:11px 16px;border-radius:999px;border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.05)}
     .btn.primary{background:linear-gradient(180deg,rgba(96,215,210,.24),rgba(96,215,210,.12));border-color:rgba(96,215,210,.3)}
-    #toast{position:fixed;right:16px;bottom:16px;z-index:30;display:none;max-width:360px;padding:13px 16px;border-radius:16px;background:rgba(16,20,24,.94);border:1px solid rgba(96,215,210,.26)}
+    #toast{position:fixed;right:16px;bottom:16px;z-index:30;display:none;max-width:360px;padding:13px 16px;border-radius:16px;background:var(--overlayBg);border:1px solid rgba(96,215,210,.26)}
     #toast.show{display:block}
     @media (prefers-reduced-motion: reduce){#scene{transition:none}#scene.bouncing,#stage.bounce::after{animation:none}.card3d{transition:none}}
   </style>
@@ -194,15 +194,19 @@
       return state.view.level === 'memories' && !!(target instanceof Element && target.closest('.reader-scroll'));
     }
     els.stage.addEventListener('wheel', (e) => {
+      // deltaMode 1 = lines, 2 = pages. Firefox reports line deltas for real
+      // mouse wheels, which are ~50x smaller than the pixel deltas this spin
+      // rate assumes, so normalize to pixels before using deltaY for anything.
+      const dy = e.deltaY * (e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? window.innerHeight : 1);
       if (e.ctrlKey) {
         e.preventDefault();
-        (H.routeGesture(e.deltaY < 0 ? 'ctrlWheelUp' : 'ctrlWheelDown', ctx(e)) === 'dive' ? dive : zoomOut)();
+        (H.routeGesture(dy < 0 ? 'ctrlWheelUp' : 'ctrlWheelDown', ctx(e)) === 'dive' ? dive : zoomOut)();
         return;
       }
       const action = H.routeGesture('wheel', ctx(e));
       if (action === 'scrollContent') return; // native scroll of the reader div
       e.preventDefault();
-      state.velocity += e.deltaY * 0.02;
+      state.velocity = Math.max(-30, Math.min(30, state.velocity + dy * 0.02));
     }, { passive: false });
     function ctx(e){ return { level: state.view.level, insideReader: insideReader(e.target) }; }
 
@@ -210,6 +214,10 @@
     const pointers = new Map();
     let pinchStart = 0, dragMoved = 0;
     els.stage.addEventListener('pointerdown', (e) => {
+      // Capture so a drag that wanders over the fixed chrome bar (or off the
+      // window) keeps delivering pointermove/pointerup to the stage. Without it
+      // the release is never seen and state.dragging stays stuck true.
+      try { els.stage.setPointerCapture(e.pointerId); } catch {}
       pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
       if (pointers.size === 2) {
         const [a, b] = [...pointers.values()];
@@ -244,14 +252,25 @@
       if (pointers.size < 2) pinchStart = 0;
       if (!pointers.size) state.dragging = false;
     }
-    els.stage.addEventListener('pointerup', releasePointer);
-    els.stage.addEventListener('pointercancel', releasePointer);
+    // Bound to window, not the stage: a release outside the stage must still
+    // clear state.dragging, or tick() short-circuits forever and the drum
+    // freezes until reload. lostpointercapture covers capture stolen by the UA.
+    window.addEventListener('pointerup', releasePointer);
+    window.addEventListener('pointercancel', releasePointer);
+    window.addEventListener('lostpointercapture', releasePointer);
 
     // ---------- input: click, context menu, keys ----------
     els.stage.addEventListener('click', (e) => {
       if (dragMoved > 8 || state.transitioning) return; // a drag, not a click
-      const card = e.target instanceof Element ? e.target.closest('.card3d[data-idx]') : null;
-      if (!card || e.target.closest('button, a, .reader-scroll')) return;
+      // An active pointer capture can retarget the click to #stage, which would
+      // hide the card that was actually clicked, so fall back to a hit test.
+      let hit = e.target instanceof Element ? e.target : null;
+      if (!hit || !hit.closest('.card3d[data-idx]')) {
+        const under = document.elementFromPoint(e.clientX, e.clientY);
+        if (under instanceof Element) hit = under;
+      }
+      const card = hit ? hit.closest('.card3d[data-idx]') : null;
+      if (!card || hit.closest('button, a, .reader-scroll')) return;
       const idx = Number(card.dataset.idx);
       const kind = idx === state.frontIndex ? 'clickCentered' : 'clickOther';
       const action = H.routeGesture(kind, { level: state.view.level, insideReader: false });
@@ -271,6 +290,9 @@
     });
     $('#themeBtn').addEventListener('click', () => document.documentElement.setAttribute('data-theme', document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark'));
     window.addEventListener('keydown', (e) => {
+      // A focused control owns its own keys: Enter must activate the "Classic
+      // view" link and the Retry button, and text fields need Backspace.
+      if (e.target instanceof Element && e.target.closest('a, button, input, textarea, select')) return;
       if (document.querySelector('.modalbg.open')) return; // modal owns keys (Task 9)
       const map = { Escape: 'esc', Backspace: 'back', ArrowLeft: 'arrowLeft', ArrowRight: 'arrowRight', Enter: 'enter' };
       const kind = map[e.key];
