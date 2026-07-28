@@ -6,6 +6,7 @@ import {
   anglePerCard, drumRadius, normalizeAngle, shortestDelta,
   nearestIndex, rotationForIndex, snapTarget,
   LEVELS, nextLevel, createHistory, pushView, popView, atWall,
+  itemIdsForView, reconcileView, reconcilePop,
 } from '../scripts/nd-mem-rolodex-helpers.mjs';
 
 // Fixture: alpha has 3 memories in 2 districts, beta has 2 (one custom district),
@@ -120,4 +121,52 @@ test('history stack: push copies, pop restores exact view, empty stack is the wa
   assert.equal(popped.centeredId, 'mem_3'); // copy, not reference
   assert.equal(popped.rotation, -180);
   assert.equal(atWall(h), true);
+});
+
+const memView = { level: 'memories', projectId: 'alpha', districtId: 'practical_execution', centeredId: 'mem_1', rotation: -180, itemIds: ['mem_3', 'mem_1'] };
+
+test('itemIdsForView derives per level', () => {
+  assert.deepEqual(itemIdsForView(SNAP, { level: 'projects' }), ['alpha', 'beta', UNASSIGNED]);
+  assert.deepEqual(itemIdsForView(SNAP, { level: 'districts', projectId: 'beta' }), ['logical_analysis', 'weird_custom']);
+  assert.deepEqual(itemIdsForView(SNAP, memView), ['mem_3', 'mem_1']);
+});
+
+test('reconcileView keeps a surviving centered item (rule 1)', () => {
+  const r = reconcileView(memView, memView.itemIds, SNAP);
+  assert.equal(r.status, 'kept');
+  assert.equal(r.view.centeredId, 'mem_1');
+});
+
+test('reconcileView snaps to nearest prior neighbor when centered item vanished (rule 2)', () => {
+  const snap2 = structuredClone(SNAP);
+  delete snap2.memories.mem_1;
+  const r = reconcileView(memView, ['mem_3', 'mem_1'], snap2);
+  assert.equal(r.status, 'neighbor');
+  assert.equal(r.view.centeredId, 'mem_3');
+  // Unknown prior ordering still lands on something valid.
+  const r2 = reconcileView({ ...memView, itemIds: [] }, [], snap2);
+  assert.equal(r2.status, 'neighbor');
+  assert.equal(r2.view.centeredId, 'mem_3');
+});
+
+test('reconcileView reports an emptied context (rule 3)', () => {
+  const snap3 = structuredClone(SNAP);
+  delete snap3.memories.mem_1;
+  delete snap3.memories.mem_3;
+  const r = reconcileView(memView, memView.itemIds, snap3);
+  assert.equal(r.status, 'invalid');
+  assert.equal(r.view, null);
+});
+
+test('reconcilePop skips dead views and repairs survivors (rule 4)', () => {
+  const snap4 = structuredClone(SNAP);
+  delete snap4.memories.mem_4; // kills beta/weird_custom
+  const h = createHistory();
+  pushView(h, { level: 'projects', projectId: null, districtId: null, centeredId: 'beta', rotation: -90, itemIds: ['alpha', 'beta', UNASSIGNED] });
+  pushView(h, { level: 'memories', projectId: 'beta', districtId: 'weird_custom', centeredId: 'mem_4', rotation: 0, itemIds: ['mem_4'] });
+  const restored = reconcilePop(h, snap4);
+  assert.equal(restored.level, 'projects'); // memories view was dead, popped through
+  assert.equal(restored.centeredId, 'beta'); // beta still exists (mem_6 remains)
+  assert.equal(atWall(h), true);
+  assert.equal(reconcilePop(h, snap4), null); // exhausted stack -> caller shows root
 });

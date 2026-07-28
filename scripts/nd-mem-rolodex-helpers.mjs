@@ -131,3 +131,38 @@ export function popView(history) {
 export function atWall(history) {
   return history.length === 0;
 }
+
+// ---------- refresh & pop reconciliation (spec rules 1-4) ----------
+
+export function itemIdsForView(snapshot, view) {
+  if (view.level === 'projects') return deriveProjects(snapshot).map(p => p.id);
+  if (view.level === 'districts') return deriveDistricts(snapshot, view.projectId).map(d => d.id);
+  return deriveMemories(snapshot, view.projectId, view.districtId).map(m => m.id);
+}
+
+export function reconcileView(view, prevIds, snapshot) {
+  const ids = itemIdsForView(snapshot, view);
+  if (!ids.length) return { status: 'invalid', view: null, ids };
+  if (view.centeredId != null && ids.includes(view.centeredId)) {
+    return { status: 'kept', view: { ...view, itemIds: ids }, ids };
+  }
+  let neighbor = null;
+  const prevIndex = (prevIds || []).indexOf(view.centeredId);
+  if (prevIndex !== -1) {
+    for (let offset = 1; offset < prevIds.length && neighbor === null; offset++) {
+      for (const cand of [prevIds[prevIndex - offset], prevIds[prevIndex + offset]]) {
+        if (cand != null && ids.includes(cand)) { neighbor = cand; break; }
+      }
+    }
+  }
+  return { status: 'neighbor', view: { ...view, centeredId: neighbor ?? ids[0], itemIds: ids }, ids };
+}
+
+export function reconcilePop(history, snapshot) {
+  while (history.length) {
+    const candidate = history.pop();
+    const result = reconcileView(candidate, candidate.itemIds || [], snapshot);
+    if (result.status !== 'invalid') return result.view;
+  }
+  return null;
+}
