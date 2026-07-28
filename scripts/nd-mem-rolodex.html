@@ -177,10 +177,16 @@
       setTimeout(() => {
         state.view = { ...view };
         buildDrum();
+        // Jump to the exit pose with transitions off. A forced reflow alone is
+        // not enough: it starts a transition toward the exit pose, and removing
+        // the class one statement later cancels it a couple of percent in, so
+        // the return would animate from the *enter* pose — backwards.
+        els.scene.style.transition = 'none';
         els.scene.classList.remove(enterCls);
         els.scene.classList.add(exitCls);
-        void els.scene.offsetWidth; // reflow so the exit state applies before removal animates it
-        els.scene.classList.remove(exitCls);
+        void els.scene.offsetWidth; // commit the exit pose with no transition running
+        els.scene.style.transition = '';
+        els.scene.classList.remove(exitCls); // now transitions exit pose -> identity
         setTimeout(() => { state.transitioning = false; }, REDUCED ? 0 : ZOOM_MS);
       }, REDUCED ? 0 : ZOOM_MS);
     }
@@ -256,6 +262,11 @@
       const action = H.routeGesture('wheel', ctx(e));
       if (action === 'scrollContent') return; // native scroll of the reader div
       e.preventDefault();
+      // preventDefault stays above this guard so the page never scrolls or
+      // zooms mid-transition. Banking velocity here would not: tick() is gated
+      // while transitioning, so notches spun over the ~700ms the new drum is
+      // already visible would all release at once as a multi-card lurch.
+      if (state.transitioning) return;
       state.velocity = Math.max(-30, Math.min(30, state.velocity + dy * 0.02));
     }, { passive: false });
     function ctx(e){ return { level: state.view.level, insideReader: insideReader(e.target) }; }
