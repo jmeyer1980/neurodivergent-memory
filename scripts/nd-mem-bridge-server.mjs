@@ -125,29 +125,25 @@ async function runMcpTool(toolName, args) {
   return { ok: true, result: message };
 }
 
-const HTML_PATH = path.join(SCRIPT_DIR, 'nd-mem-mcp-app-bridge.html');
-app.get('/', (_req, res) => {
-  if (fs.existsSync(HTML_PATH)) {
-    res.setHeader('Content-Type', 'text/html');
-    res.setHeader('Access-Control-Allow-Origin', '*');
-    res.send(fs.readFileSync(HTML_PATH, 'utf-8'));
-  } else {
-    res.status(404).send('Bridge UI not found. Ensure scripts/nd-mem-mcp-app-bridge.html exists.');
-  }
-});
-
-// Serves the pure helpers module shared between the web app (loaded as an
-// ES module in the browser) and the node test suite (imported directly).
-const HELPERS_PATH = path.join(SCRIPT_DIR, 'nd-mem-app-helpers.mjs');
-app.get('/nd-mem-app-helpers.mjs', (_req, res) => {
-  if (fs.existsSync(HELPERS_PATH)) {
-    res.setHeader('Content-Type', 'text/javascript');
-    res.setHeader('Access-Control-Allow-Origin', '*');
-    res.send(fs.readFileSync(HELPERS_PATH, 'utf-8'));
-  } else {
-    res.status(404).send('helpers module not found. Ensure scripts/nd-mem-app-helpers.mjs exists.');
-  }
-});
+// One handler shape for every sibling file the bridge serves. Paths resolve
+// off SCRIPT_DIR so launching the bridge from any cwd works.
+function serveSibling(route, filename, contentType) {
+  const filePath = path.join(SCRIPT_DIR, filename);
+  app.get(route, (_req, res) => {
+    if (fs.existsSync(filePath)) {
+      res.setHeader('Content-Type', contentType);
+      res.setHeader('Access-Control-Allow-Origin', '*');
+      res.send(fs.readFileSync(filePath, 'utf-8'));
+    } else {
+      res.status(404).send(`${filename} not found. Ensure scripts/${filename} exists.`);
+    }
+  });
+}
+const HTML_PATH = path.join(SCRIPT_DIR, 'nd-mem-mcp-app-bridge.html'); // openBridgeUI checks this
+serveSibling('/', 'nd-mem-mcp-app-bridge.html', 'text/html');
+serveSibling('/nd-mem-app-helpers.mjs', 'nd-mem-app-helpers.mjs', 'text/javascript');
+serveSibling('/rolodex', 'nd-mem-rolodex.html', 'text/html');
+serveSibling('/nd-mem-rolodex-helpers.mjs', 'nd-mem-rolodex-helpers.mjs', 'text/javascript');
 
 app.post('/update', async (req, res) => {
   const body = req.body || {};
