@@ -133,6 +133,19 @@ export function atWall(history) {
 }
 
 // ---------- refresh & pop reconciliation (spec rules 1-4) ----------
+//
+// PRECONDITION FOR CONSUMERS: reconcileView/reconcilePop carry the view's
+// `rotation` through unchanged, as a hint only. It is NOT reconciled and may
+// contradict the returned `centeredId`, because the drum's item count and
+// ordering can both change between renders (e.g. centered on 'mem_1' at
+// rotation -180 of a 2-card drum; a new memory arrives, the drum becomes 3
+// cards, and -180 no longer faces 'mem_1'). After ANY reconciliation the
+// consumer MUST recompute the angle from the centered id against the returned
+// ids, never trusting view.rotation:
+//
+//   rotationForIndex(ids.indexOf(view.centeredId), ids.length)
+//
+// The authoritative outputs of a reconcile are `centeredId` and `itemIds`.
 
 export function itemIdsForView(snapshot, view) {
   if (view.level === 'projects') return deriveProjects(snapshot).map(p => p.id);

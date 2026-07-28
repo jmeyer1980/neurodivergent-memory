@@ -149,6 +149,20 @@ test('reconcileView snaps to nearest prior neighbor when centered item vanished 
   assert.equal(r2.view.centeredId, 'mem_3');
 });
 
+test('reconcileView carries rotation through unchanged and refreshes itemIds', () => {
+  // Documented precondition: rotation is a hint, NOT reconciled. It may point at
+  // the wrong card once the drum's count/ordering changes, so consumers must
+  // recompute it from centeredId. Pin the pass-through so a future "helpful"
+  // rotation fix-up can't land silently.
+  const snap2 = structuredClone(SNAP);
+  delete snap2.memories.mem_1;
+  const r = reconcileView(memView, memView.itemIds, snap2);
+  assert.equal(r.status, 'neighbor');
+  assert.equal(r.view.rotation, memView.rotation); // -180, stale for a 1-card drum
+  assert.deepEqual(r.view.itemIds, ['mem_3']); // refreshed to the surviving ids
+  assert.deepEqual(r.ids, ['mem_3']);
+});
+
 test('reconcileView reports an emptied context (rule 3)', () => {
   const snap3 = structuredClone(SNAP);
   delete snap3.memories.mem_1;
