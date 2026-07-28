@@ -37,6 +37,26 @@
     .card3d p{color:var(--muted);line-height:1.5;font-size:.9rem;overflow:hidden}
     .chips{display:flex;gap:8px;flex-wrap:wrap}
     .chip{padding:6px 10px;border-radius:999px;background:rgba(255,255,255,.05);border:1px solid var(--surfaceBorder);font-size:.74rem;color:var(--muted)}
+    .card3d .reader-scroll{display:none;flex:1;min-height:0;overflow:auto;padding-right:6px;line-height:1.6;color:var(--text);font-size:.92rem;white-space:pre-wrap;user-select:text;touch-action:pan-y;overscroll-behavior:contain}
+    .card3d.front .reader-scroll{display:block}
+    .card3d.front .preview{display:none}
+    .card3d .meta{display:none;grid-template-columns:repeat(2,1fr);gap:8px}
+    .card3d.front .meta{display:grid}
+    .mini{padding:8px 10px;border-radius:12px;background:rgba(255,255,255,.04);border:1px solid var(--surfaceBorder)}
+    .mini label{display:block;font-size:.66rem;color:var(--faint);text-transform:uppercase;letter-spacing:.08em;margin-bottom:3px}
+    .mini span{font-size:.8rem}
+    .card3d .actions{display:none;justify-content:flex-end}
+    .card3d.front .actions{display:flex}
+    .modalbg{position:fixed;inset:0;z-index:40;background:rgba(7,10,12,.66);backdrop-filter:blur(10px);display:none;align-items:center;justify-content:center;padding:16px}
+    .modalbg.open{display:flex}
+    .modal{width:min(680px,100%);max-height:88vh;overflow:auto;border-radius:26px;background:var(--cardWash),var(--overlayBg);border:1px solid var(--surfaceBorder);padding:22px;user-select:text}
+    .modal h2{font-family:var(--font-display);margin-bottom:12px}
+    .grid{display:grid;grid-template-columns:repeat(2,1fr);gap:12px}
+    .field label{display:block;margin-bottom:6px;font-size:.72rem;color:var(--muted);text-transform:uppercase;letter-spacing:.08em}
+    .field input,.field select,.field textarea{width:100%;padding:11px 13px;border-radius:13px;border:1px solid var(--surfaceBorder);background:var(--surface);font:inherit;color:inherit}
+    .field textarea{min-height:140px}
+    .span2{grid-column:span 2}
+    .foot{display:flex;justify-content:flex-end;gap:10px;margin-top:16px}
     #hud{position:fixed;inset:auto 0 0 0;z-index:10;display:flex;justify-content:center;padding:16px;pointer-events:none}
     #overlay{position:fixed;inset:0;z-index:20;display:none;align-items:center;justify-content:center;background:rgba(7,10,12,.7)}
     #overlay.open{display:flex}
@@ -45,7 +65,7 @@
     #overlay p{color:var(--muted);margin-bottom:16px;line-height:1.55}
     .btn{padding:11px 16px;border-radius:999px;border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.05)}
     .btn.primary{background:linear-gradient(180deg,rgba(96,215,210,.24),rgba(96,215,210,.12));border-color:rgba(96,215,210,.3)}
-    #toast{position:fixed;right:16px;bottom:16px;z-index:30;display:none;max-width:360px;padding:13px 16px;border-radius:16px;background:var(--overlayBg);border:1px solid rgba(96,215,210,.26)}
+    #toast{position:fixed;right:16px;bottom:16px;z-index:50;display:none;max-width:360px;padding:13px 16px;border-radius:16px;background:var(--overlayBg);border:1px solid rgba(96,215,210,.26)}
     #toast.show{display:block}
     @media (prefers-reduced-motion: reduce){#scene{transition:none}#scene.bouncing,#stage.bounce::after{animation:none}.card3d{transition:none}}
   </style>
@@ -67,6 +87,21 @@
   <div id="stage" data-level="projects"><div id="scene"><div id="drum"></div></div></div>
   <div id="hud"><span class="pill">Scroll to spin · click to dive · right-click / Esc to zoom out · Ctrl+scroll zooms</span></div>
   <div id="overlay"><div class="box"><h2>Bridge offline</h2><p id="overlayMsg">Could not reach the bridge. Start it with <code>node scripts/nd-mem-bridge-server.mjs</code> and retry.</p><button class="btn primary" id="retryBtn">Retry</button></div></div>
+  <div class="modalbg" id="editModalBg">
+    <div class="modal">
+      <h2>Edit memory</h2>
+      <div class="grid">
+        <div class="field span2"><label>Content</label><textarea id="editContent"></textarea></div>
+        <div class="field"><label>District</label><select id="editDistrict"></select></div>
+        <div class="field"><label>Project (blank clears)</label><input id="editProject" /></div>
+        <div class="field"><label>Visibility</label><select id="editVisibility"><option>private</option><option>shared</option><option>global</option></select></div>
+        <div class="field"><label>Intensity (0–1)</label><input id="editIntensity" type="number" min="0" max="1" step="0.1" /></div>
+        <div class="field"><label>Epistemic status</label><select id="editEpistemic"><option value="">(leave unchanged)</option><option value="draft">draft</option><option value="validated">validated</option><option value="outdated">outdated</option></select></div>
+        <div class="field"><label>Tags (comma separated)</label><input id="editTags" /></div>
+      </div>
+      <div class="foot"><button class="btn" id="editCancelBtn">Cancel</button><button class="btn primary" id="editSaveBtn">Save changes</button></div>
+    </div>
+  </div>
   <div id="toast"></div>
 
   <script type="module">
@@ -90,6 +125,7 @@
       transitioning: false,
       frontIndex: -1,
       lastBounceAt: 0,
+      editingId: null,
     };
 
     function esc(v){ return String(v ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
@@ -111,7 +147,14 @@
       const d = item.data;
       if (item.kind === 'project') return `<span class="kicker">Project</span><h2>${esc(d.id)}</h2><div class="chips"><span class="chip">${d.memoryCount} memories</span><span class="chip">${d.districtCount} district${d.districtCount === 1 ? '' : 's'}</span></div>`;
       if (item.kind === 'district') return `<span class="kicker">District</span><h2>${esc(d.id)}</h2><div class="chips"><span class="chip">${d.memoryCount} memories</span>${d.topTags.map(t => `<span class="chip">${esc(t)}</span>`).join('')}</div>`;
-      return `<span class="kicker">${esc(d.id)}</span><h2>${esc(d.name || '(untitled)')}</h2><p>${esc(d.content)}</p><div class="chips">${(d.tags || []).slice(0, 3).map(t => `<span class="chip">${esc(t)}</span>`).join('')}</div>`;
+      const metaRow = (label, value) => `<div class="mini"><label>${label}</label><span>${esc(value)}</span></div>`;
+      return `<span class="kicker">${esc(d.id)} · ${esc(d.district || 'uncategorized')}</span>`
+        + `<h2>${esc(d.name || '(untitled)')}</h2>`
+        + `<p class="preview">${esc(d.content)}</p>`
+        + `<div class="reader-scroll">${esc(d.content)}</div>`
+        + `<div class="meta">${metaRow('Intensity', d.intensity ?? '—')}${metaRow('Visibility', d.visibility || 'private')}${metaRow('Created', fmt(d.created))}${metaRow('Tags', (d.tags || []).length)}</div>`
+        + `<div class="chips">${(d.tags || []).slice(0, 4).map(t => `<span class="chip">${esc(t)}</span>`).join('')}</div>`
+        + `<div class="actions"><button class="btn" data-edit="${esc(d.id)}">Edit</button></div>`;
     }
 
     function buildDrum(){
@@ -354,7 +397,8 @@
       // A focused control owns its own keys: Enter must activate the "Classic
       // view" link and the Retry button, and text fields need Backspace.
       if (e.target instanceof Element && e.target.closest('a, button, input, textarea, select')) return;
-      if (document.querySelector('.modalbg.open')) return; // modal owns keys (Task 9)
+      const openModal = document.querySelector('.modalbg.open');
+      if (openModal) { if (e.key === 'Escape') openModal.classList.remove('open'); return; }
       const map = { Escape: 'esc', Backspace: 'back', ArrowLeft: 'arrowLeft', ArrowRight: 'arrowRight', Enter: 'enter' };
       const kind = map[e.key];
       if (!kind) return;
@@ -366,6 +410,74 @@
       else if (action === 'stepNext') stepBy(1);
     });
     els.backBtn.addEventListener('click', () => zoomOut());
+
+    // ---------- edit modal ----------
+    const CANONICAL = H.CANONICAL_DISTRICTS;
+    function openEditModal(m){
+      state.editingId = m.id;
+      const districts = CANONICAL.includes(m.district) || !m.district ? CANONICAL : [m.district, ...CANONICAL];
+      $('#editDistrict').innerHTML = districts.map(d => `<option value="${esc(d)}">${esc(d)}</option>`).join('');
+      $('#editContent').value = m.content || '';
+      $('#editDistrict').value = m.district || 'practical_execution';
+      $('#editProject').value = m.project_id ?? '';
+      $('#editVisibility').value = m.visibility || 'private';
+      $('#editIntensity').value = m.intensity ?? 0.5;
+      $('#editEpistemic').value = ['draft', 'validated', 'outdated'].includes(m.epistemic_status) ? m.epistemic_status : '';
+      $('#editTags').value = (m.tags || []).join(', ');
+      $('#editModalBg').classList.add('open');
+      $('#editContent').focus(); // must follow .open — a display:none field cannot take focus
+    }
+    async function submitEdit(){
+      const content = $('#editContent').value.trim();
+      if (!content) { showToast('Content cannot be empty.'); return; }
+      const project = $('#editProject').value.trim();
+      const body = {
+        memoryId: state.editingId,
+        content,
+        district: $('#editDistrict').value,
+        visibility: $('#editVisibility').value,
+        intensity: Number($('#editIntensity').value),
+        projectId: project === '' ? null : project,
+        tags: $('#editTags').value.split(',').map(s => s.trim()).filter(Boolean),
+      };
+      const epistemic = $('#editEpistemic').value;
+      if (epistemic) body.epistemicStatus = epistemic;
+      try {
+        const res = await fetch(`${BRIDGE}/update`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+        const data = await res.json();
+        if (!res.ok || !data.ok) throw new Error('update failed');
+        $('#editModalBg').classList.remove('open');
+        showToast('Update routed through the bridge.');
+      } catch {
+        showToast('Update failed — the modal is untouched, fix and retry.');
+      }
+    }
+    els.stage.addEventListener('click', (e) => {
+      if (dragMoved > 8 || state.transitioning) return; // a drag-spin that ended over the button, not a click
+      // Same retargeting caveat as the card handler above: an active pointer
+      // capture can deliver the click to #stage, hiding the button that was hit.
+      let hit = e.target instanceof Element ? e.target : null;
+      if (!hit || !hit.closest('[data-edit]')) {
+        const under = document.elementFromPoint(e.clientX, e.clientY);
+        if (under instanceof Element) hit = under;
+      }
+      const btn = hit ? hit.closest('[data-edit]') : null;
+      if (!btn) return;
+      const m = H.deriveMemories(state.snapshot, state.view.projectId, state.view.districtId).find(x => x.id === btn.dataset.edit);
+      if (m) openEditModal(m);
+    });
+    $('#editCancelBtn').addEventListener('click', () => $('#editModalBg').classList.remove('open'));
+    $('#editSaveBtn').addEventListener('click', submitEdit);
+    $('#editModalBg').addEventListener('click', (e) => { if (e.target.id === 'editModalBg') $('#editModalBg').classList.remove('open'); });
+    // Esc has to close the modal from inside it too: the window handler bails
+    // out for any focused field, and the modal opens with the textarea focused.
+    // stopPropagation keeps that handler from seeing an already-closed modal
+    // and treating the same Esc as a zoom-out.
+    $('#editModalBg').addEventListener('keydown', (e) => {
+      if (e.key !== 'Escape') return;
+      e.stopPropagation();
+      $('#editModalBg').classList.remove('open');
+    });
 
     // ---------- data ----------
     async function loadSnapshot(){
