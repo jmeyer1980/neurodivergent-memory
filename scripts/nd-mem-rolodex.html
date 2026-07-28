@@ -2,9 +2,309 @@
 <html lang="en" data-theme="dark">
 <head>
   <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>ND-Mem Rolodex</title>
+  <link rel="preconnect" href="https://api.fontshare.com">
+  <link href="https://api.fontshare.com/v2/css?f[]=satoshi@300,400,500,700,900&f[]=clash-display@400,500,600,700&display=swap" rel="stylesheet">
+  <style>
+    :root,[data-theme="light"]{--bg:#f7f6f2;--border:#d4d1ca;--text:#28251d;--muted:#7a7974;--faint:#bab9b4;--primary:#01696f;--cardW:340px;--cardH:230px;--font-display:'Clash Display','Inter',sans-serif;--font-body:'Satoshi','Inter',sans-serif}
+    [data-theme="dark"]{--bg:#111318;--border:#37404b;--text:#edf2f4;--muted:#a3b0b8;--faint:#6e7a84;--primary:#60d7d2}
+    *{box-sizing:border-box;margin:0;padding:0}
+    html,body{height:100%;overflow:hidden;overscroll-behavior:none}
+    body{font-family:var(--font-body);color:var(--text);background:radial-gradient(circle at top left,rgba(96,215,210,.1),transparent 24%),linear-gradient(180deg,var(--bg),#0d0f13);user-select:none}
+    button{font:inherit;color:inherit;cursor:pointer}
+    #chrome{position:fixed;inset:0 0 auto 0;z-index:10;display:flex;justify-content:space-between;align-items:center;gap:12px;padding:14px 18px;pointer-events:none}
+    #chrome .cluster{display:flex;gap:10px;align-items:center;pointer-events:auto}
+    .pill{padding:9px 14px;border-radius:999px;border:1px solid rgba(255,255,255,.1);background:rgba(16,20,24,.72);backdrop-filter:blur(10px);font-size:.82rem;color:var(--muted)}
+    .pill strong{color:var(--text);font-weight:500}
+    a.pill{text-decoration:none}
+    #backBtn{font-size:1rem;line-height:1}
+    #levelName{font-family:var(--font-display);text-transform:uppercase;letter-spacing:.14em;font-size:.74rem}
+    #stage{position:fixed;inset:0;perspective:1400px;overflow:hidden;touch-action:none}
+    #stage.bounce::after{content:'';position:absolute;inset:0;pointer-events:none;box-shadow:inset 0 0 120px rgba(96,215,210,.35);animation:edgeflash .45s ease}
+    @keyframes edgeflash{from{opacity:1}to{opacity:0}}
+    #scene{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;transform-style:preserve-3d;transition:transform .7s cubic-bezier(.4,0,.2,1),opacity .55s ease}
+    #scene.zoom-in{transform:translateZ(900px);opacity:0}
+    #scene.zoom-out{transform:translateZ(-700px) scale(.6);opacity:0}
+    #scene.bouncing{animation:wallbounce .45s ease}
+    @keyframes wallbounce{0%{transform:translateZ(0)}35%{transform:translateZ(-90px)}100%{transform:translateZ(0)}}
+    #drum{position:relative;width:var(--cardW);height:var(--cardH);transform-style:preserve-3d}
+    #stage[data-level="memories"]{--cardH:460px}
+    .card3d{position:absolute;inset:0;display:flex;flex-direction:column;gap:10px;padding:18px;border-radius:24px;border:1px solid rgba(255,255,255,.09);background:linear-gradient(180deg,rgba(255,255,255,.08),rgba(255,255,255,.03)),radial-gradient(circle at top right,rgba(96,215,210,.16),transparent 38%),rgba(20,25,31,.92);box-shadow:0 18px 40px rgba(0,0,0,.35);backface-visibility:hidden;transition:opacity .3s,box-shadow .3s,border-color .3s;opacity:.55}
+    .card3d.front{opacity:1;border-color:rgba(96,215,210,.4);box-shadow:0 24px 60px rgba(0,0,0,.5),0 0 30px rgba(96,215,210,.12)}
+    .card3d .kicker{font-size:.7rem;text-transform:uppercase;letter-spacing:.1em;color:var(--faint)}
+    .card3d h2{font-family:var(--font-display);font-size:1.15rem;line-height:1.2}
+    .card3d p{color:var(--muted);line-height:1.5;font-size:.9rem;overflow:hidden}
+    .chips{display:flex;gap:8px;flex-wrap:wrap}
+    .chip{padding:6px 10px;border-radius:999px;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.08);font-size:.74rem;color:var(--muted)}
+    #hud{position:fixed;inset:auto 0 0 0;z-index:10;display:flex;justify-content:center;padding:16px;pointer-events:none}
+    #overlay{position:fixed;inset:0;z-index:20;display:none;align-items:center;justify-content:center;background:rgba(7,10,12,.7)}
+    #overlay.open{display:flex}
+    #overlay .box{max-width:420px;text-align:center;padding:28px;border-radius:24px;background:rgba(20,24,29,.96);border:1px solid rgba(255,255,255,.1)}
+    #overlay h2{font-family:var(--font-display);margin-bottom:10px}
+    #overlay p{color:var(--muted);margin-bottom:16px;line-height:1.55}
+    .btn{padding:11px 16px;border-radius:999px;border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.05)}
+    .btn.primary{background:linear-gradient(180deg,rgba(96,215,210,.24),rgba(96,215,210,.12));border-color:rgba(96,215,210,.3)}
+    #toast{position:fixed;right:16px;bottom:16px;z-index:30;display:none;max-width:360px;padding:13px 16px;border-radius:16px;background:rgba(16,20,24,.94);border:1px solid rgba(96,215,210,.26)}
+    #toast.show{display:block}
+    @media (prefers-reduced-motion: reduce){#scene{transition:none}#scene.bouncing,#stage.bounce::after{animation:none}.card3d{transition:none}}
+  </style>
 </head>
 <body>
-  <p>ND-Mem Rolodex — under construction. <a href="/">Classic view</a></p>
+  <div id="chrome">
+    <div class="cluster">
+      <button class="pill" id="backBtn" title="Zoom out (Esc / right-click)">⤺</button>
+      <span class="pill" id="crumb"><strong>All projects</strong></span>
+      <span class="pill" id="levelName">Projects</span>
+    </div>
+    <div class="cluster">
+      <span class="pill" id="position">—</span>
+      <span class="pill" id="connState">Connecting…</span>
+      <button class="pill" id="themeBtn" title="Toggle theme">◐</button>
+      <a class="pill" href="/">Classic view</a>
+    </div>
+  </div>
+  <div id="stage" data-level="projects"><div id="scene"><div id="drum"></div></div></div>
+  <div id="hud"><span class="pill">Scroll to spin · click to dive · right-click / Esc to zoom out · Ctrl+scroll zooms</span></div>
+  <div id="overlay"><div class="box"><h2>Bridge offline</h2><p id="overlayMsg">Could not reach the bridge. Start it with <code>node scripts/nd-mem-bridge-server.mjs</code> and retry.</p><button class="btn primary" id="retryBtn">Retry</button></div></div>
+  <div id="toast"></div>
+
+  <script type="module">
+    const BRIDGE = location.protocol.startsWith('http') ? location.origin : 'http://localhost:3737';
+    const H = await import(BRIDGE + '/nd-mem-rolodex-helpers.mjs');
+    const REDUCED = matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const CARD_W = 340;
+
+    const $ = s => document.querySelector(s);
+    const els = { stage: $('#stage'), scene: $('#scene'), drum: $('#drum'), crumb: $('#crumb'), levelName: $('#levelName'), position: $('#position'), connState: $('#connState'), backBtn: $('#backBtn'), overlay: $('#overlay'), overlayMsg: $('#overlayMsg'), retryBtn: $('#retryBtn'), toast: $('#toast') };
+
+    const state = {
+      snapshot: { memories: {} },
+      view: { level: 'projects', projectId: null, districtId: null, centeredId: null, rotation: 0, itemIds: [] },
+      history: H.createHistory(),
+      items: [],           // [{id, kind, data}] for the current drum
+      rotation: 0,         // live continuous rotation (deg)
+      velocity: 0,
+      radius: 260,
+      dragging: false,
+      transitioning: false,
+      frontIndex: -1,
+      lastBounceAt: 0,
+    };
+
+    function esc(v){ return String(v ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+    function showToast(msg){ els.toast.textContent = msg; els.toast.classList.add('show'); clearTimeout(showToast.t); showToast.t = setTimeout(() => els.toast.classList.remove('show'), 3200); }
+    function fmt(v){ try { return new Date(v).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }); } catch { return '—'; } }
+
+    function itemsForView(view){
+      if (view.level === 'projects') return H.deriveProjects(state.snapshot).map(p => ({ id: p.id, kind: 'project', data: p }));
+      if (view.level === 'districts') return H.deriveDistricts(state.snapshot, view.projectId).map(d => ({ id: d.id, kind: 'district', data: d }));
+      return H.deriveMemories(state.snapshot, view.projectId, view.districtId).map(m => ({ id: m.id, kind: 'memory', data: m }));
+    }
+
+    function currentViewSnapshot(){
+      return { ...state.view, centeredId: centeredItem()?.id ?? null, rotation: state.rotation, itemIds: state.items.map(i => i.id) };
+    }
+    function centeredItem(){ return state.frontIndex >= 0 ? state.items[state.frontIndex] : null; }
+
+    function cardFace(item){
+      const d = item.data;
+      if (item.kind === 'project') return `<span class="kicker">Project</span><h2>${esc(d.id)}</h2><div class="chips"><span class="chip">${d.memoryCount} memories</span><span class="chip">${d.districtCount} district${d.districtCount === 1 ? '' : 's'}</span></div>`;
+      if (item.kind === 'district') return `<span class="kicker">District</span><h2>${esc(d.id)}</h2><div class="chips"><span class="chip">${d.memoryCount} memories</span>${d.topTags.map(t => `<span class="chip">${esc(t)}</span>`).join('')}</div>`;
+      return `<span class="kicker">${esc(d.id)}</span><h2>${esc(d.name || '(untitled)')}</h2><p>${esc(d.content)}</p><div class="chips">${(d.tags || []).slice(0, 3).map(t => `<span class="chip">${esc(t)}</span>`).join('')}</div>`;
+    }
+
+    function buildDrum(){
+      state.items = itemsForView(state.view);
+      const n = state.items.length;
+      state.radius = H.drumRadius(CARD_W, n);
+      els.stage.dataset.level = state.view.level;
+      const theta = H.anglePerCard(n);
+      if (!n) {
+        els.drum.innerHTML = `<div class="card3d front placeholder"><span class="kicker">Empty</span><h2>${state.view.level === 'projects' ? 'No memories yet' : 'Nothing here'}</h2><p>Store a memory through MCP or the classic app and it will appear.</p></div>`;
+        state.rotation = 0; state.velocity = 0; state.frontIndex = -1;
+        applyDrumTransform(); updateChrome(); return;
+      }
+      els.drum.innerHTML = state.items.map((item, i) =>
+        `<div class="card3d" data-idx="${i}" style="transform:rotateY(${i * theta}deg) translateZ(${state.radius}px)">${cardFace(item)}</div>`).join('');
+      const idx = Math.max(0, state.items.findIndex(i => i.id === state.view.centeredId));
+      state.rotation = H.rotationForIndex(idx, n);
+      state.velocity = 0;
+      applyDrumTransform();
+      updateFrontCard(true);
+    }
+
+    function applyDrumTransform(){
+      els.drum.style.transform = `translateZ(${-state.radius}px) rotateY(${state.rotation}deg)`;
+    }
+
+    function updateFrontCard(force = false){
+      const n = state.items.length;
+      const idx = H.nearestIndex(state.rotation, n);
+      if (!force && idx === state.frontIndex) return;
+      state.frontIndex = idx;
+      els.drum.querySelectorAll('.card3d').forEach((el, i) => el.classList.toggle('front', i === idx));
+      state.view.centeredId = centeredItem()?.id ?? null;
+      updateChrome();
+    }
+
+    function updateChrome(){
+      const { level, projectId, districtId } = state.view;
+      els.levelName.textContent = level[0].toUpperCase() + level.slice(1);
+      els.crumb.innerHTML = level === 'projects' ? '<strong>All projects</strong>'
+        : level === 'districts' ? `<strong>${esc(projectId)}</strong>`
+        : `<strong>${esc(projectId)}</strong> ▸ ${esc(districtId)}`;
+      els.position.textContent = state.items.length ? `card ${state.frontIndex + 1} / ${state.items.length}` : '—';
+    }
+
+    function stepBy(n){
+      const count = state.items.length;
+      if (!count || state.transitioning) return;
+      const target = H.rotationForIndex(((state.frontIndex + n) % count + count) % count, count);
+      state.rotation += H.shortestDelta(state.rotation, target);
+      if (REDUCED) applyDrumTransform();
+      state.velocity = 0;
+    }
+
+    // Stubs — Task 8 implements these.
+    function dive(){ }
+    function zoomOut(){ }
+
+    // ---------- animation loop ----------
+    function tick(){
+      if (!state.transitioning && !state.dragging && state.items.length) {
+        if (Math.abs(state.velocity) > 0.02) {
+          state.rotation += state.velocity;
+          state.velocity *= 0.93;
+        } else {
+          state.velocity = 0;
+          const target = H.snapTarget(state.rotation, state.items.length);
+          const d = target - state.rotation;
+          if (Math.abs(d) > 0.05) state.rotation += REDUCED ? d : d * 0.14;
+          else state.rotation = target;
+        }
+        applyDrumTransform();
+        updateFrontCard();
+      }
+      requestAnimationFrame(tick);
+    }
+
+    // ---------- input: wheel ----------
+    function insideReader(target){
+      return state.view.level === 'memories' && !!(target instanceof Element && target.closest('.reader-scroll'));
+    }
+    els.stage.addEventListener('wheel', (e) => {
+      if (e.ctrlKey) {
+        e.preventDefault();
+        (H.routeGesture(e.deltaY < 0 ? 'ctrlWheelUp' : 'ctrlWheelDown', ctx(e)) === 'dive' ? dive : zoomOut)();
+        return;
+      }
+      const action = H.routeGesture('wheel', ctx(e));
+      if (action === 'scrollContent') return; // native scroll of the reader div
+      e.preventDefault();
+      state.velocity += e.deltaY * 0.02;
+    }, { passive: false });
+    function ctx(e){ return { level: state.view.level, insideReader: insideReader(e.target) }; }
+
+    // ---------- input: pointer (drag spin, pinch, long-press) ----------
+    const pointers = new Map();
+    let pinchStart = 0, dragMoved = 0;
+    els.stage.addEventListener('pointerdown', (e) => {
+      pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (pointers.size === 2) {
+        const [a, b] = [...pointers.values()];
+        pinchStart = Math.hypot(a.x - b.x, a.y - b.y);
+      } else if (pointers.size === 1) {
+        dragMoved = 0;
+        if (!insideReader(e.target)) { state.dragging = true; state.velocity = 0; }
+      }
+    });
+    els.stage.addEventListener('pointermove', (e) => {
+      const prev = pointers.get(e.pointerId);
+      if (!prev) return;
+      const dx = e.clientX - prev.x, dy = e.clientY - prev.y;
+      pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (pointers.size === 2 && pinchStart > 0) {
+        const [a, b] = [...pointers.values()];
+        const ratio = Math.hypot(a.x - b.x, a.y - b.y) / pinchStart;
+        if (ratio > 1.25) { pinchStart = 0; dive(); }
+        else if (ratio < 0.8) { pinchStart = 0; zoomOut(); }
+        return;
+      }
+      if (state.dragging) {
+        dragMoved += Math.abs(dx) + Math.abs(dy);
+        state.rotation += dx * 0.22;
+        state.velocity = dx * 0.22;
+        applyDrumTransform();
+        updateFrontCard();
+      }
+    });
+    function releasePointer(e){
+      pointers.delete(e.pointerId);
+      if (pointers.size < 2) pinchStart = 0;
+      if (!pointers.size) state.dragging = false;
+    }
+    els.stage.addEventListener('pointerup', releasePointer);
+    els.stage.addEventListener('pointercancel', releasePointer);
+
+    // ---------- input: click, context menu, keys ----------
+    els.stage.addEventListener('click', (e) => {
+      if (dragMoved > 8 || state.transitioning) return; // a drag, not a click
+      const card = e.target instanceof Element ? e.target.closest('.card3d[data-idx]') : null;
+      if (!card || e.target.closest('button, a, .reader-scroll')) return;
+      const idx = Number(card.dataset.idx);
+      const kind = idx === state.frontIndex ? 'clickCentered' : 'clickOther';
+      const action = H.routeGesture(kind, { level: state.view.level, insideReader: false });
+      if (action === 'none') return;
+      if (idx !== state.frontIndex) {
+        const target = H.rotationForIndex(idx, state.items.length);
+        state.rotation += H.shortestDelta(state.rotation, target);
+        state.velocity = 0;
+        applyDrumTransform(); updateFrontCard();
+      }
+      if (action === 'dive' || action === 'centerThenDive') dive();
+    });
+    window.addEventListener('contextmenu', (e) => {
+      if (document.querySelector('.modalbg.open')) return; // modal text fields keep the native menu
+      e.preventDefault();
+      if (!state.transitioning) zoomOut();
+    });
+    $('#themeBtn').addEventListener('click', () => document.documentElement.setAttribute('data-theme', document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark'));
+    window.addEventListener('keydown', (e) => {
+      if (document.querySelector('.modalbg.open')) return; // modal owns keys (Task 9)
+      const map = { Escape: 'esc', Backspace: 'back', ArrowLeft: 'arrowLeft', ArrowRight: 'arrowRight', Enter: 'enter' };
+      const kind = map[e.key];
+      if (!kind) return;
+      e.preventDefault();
+      const action = H.routeGesture(kind, { level: state.view.level, insideReader: false });
+      if (action === 'zoomOut') zoomOut();
+      else if (action === 'dive') dive();
+      else if (action === 'stepPrev') stepBy(-1);
+      else if (action === 'stepNext') stepBy(1);
+    });
+    els.backBtn.addEventListener('click', () => zoomOut());
+
+    // ---------- data ----------
+    async function loadSnapshot(){
+      const res = await fetch(`${BRIDGE}/memories`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      state.snapshot = await res.json();
+    }
+    async function init(){
+      try {
+        const health = await (await fetch(`${BRIDGE}/health`)).json();
+        await loadSnapshot();
+        els.connState.textContent = `Bridge :${health.port}`;
+        els.overlay.classList.remove('open');
+        buildDrum();
+      } catch {
+        els.connState.textContent = 'Offline';
+        els.overlay.classList.add('open');
+      }
+    }
+    els.retryBtn.addEventListener('click', init);
+    await init();
+    tick();
+  </script>
 </body>
 </html>
