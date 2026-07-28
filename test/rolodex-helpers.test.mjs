@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import {
   UNASSIGNED, UNCATEGORIZED, CANONICAL_DISTRICTS,
   projectOf, districtOf, deriveProjects, deriveDistricts, deriveMemories,
+  anglePerCard, drumRadius, normalizeAngle, shortestDelta,
+  nearestIndex, rotationForIndex, snapTarget,
 } from '../scripts/nd-mem-rolodex-helpers.mjs';
 
 // Fixture: alpha has 3 memories in 2 districts, beta has 2 (one custom district),
@@ -55,4 +57,45 @@ test('derivations tolerate an empty snapshot', () => {
   assert.deepEqual(deriveProjects({ memories: {} }), []);
   assert.deepEqual(deriveProjects({}), []);
   assert.equal(CANONICAL_DISTRICTS.length, 5);
+});
+
+test('anglePerCard and normalizeAngle basics', () => {
+  assert.equal(anglePerCard(8), 45);
+  assert.equal(anglePerCard(0), 0);
+  assert.equal(normalizeAngle(370), 10);
+  assert.equal(normalizeAngle(-90), 270);
+  assert.equal(normalizeAngle(360), 0);
+});
+
+test('drumRadius floors at minRadius and grows with count', () => {
+  assert.equal(drumRadius(340, 1), 260);
+  assert.equal(drumRadius(340, 2), 260);
+  assert.equal(drumRadius(340, 3), 260); // computed ~98 < floor
+  const r12 = drumRadius(340, 12);
+  assert.ok(r12 > 600 && r12 < 700, `expected ~634, got ${r12}`); // (340/2)/tan(pi/12)
+  assert.equal(drumRadius(340, 12, 700), 700);
+});
+
+test('shortestDelta picks the short way around', () => {
+  assert.equal(shortestDelta(0, 90), 90);
+  assert.equal(shortestDelta(0, 270), -90);
+  assert.equal(shortestDelta(350, 10), 20);
+  assert.equal(shortestDelta(10, 350), -20);
+  assert.equal(shortestDelta(0, 180), 180);
+});
+
+test('nearestIndex / rotationForIndex / snapTarget agree', () => {
+  // 4 cards, theta 90. Card i is centered when rotation ≈ -i*90 (mod 360).
+  assert.equal(nearestIndex(0, 4), 0);
+  assert.equal(nearestIndex(-90, 4), 1);
+  assert.equal(nearestIndex(-100, 4), 1);
+  assert.equal(nearestIndex(-44, 4), 0);
+  assert.equal(nearestIndex(-46, 4), 1);
+  assert.equal(nearestIndex(270, 4), 1); // 270 ≡ -90
+  assert.equal(nearestIndex(0, 0), -1);
+  assert.equal(rotationForIndex(2, 4), -180);
+  // snapTarget stays near the continuous rotation, not the normalized one
+  assert.equal(snapTarget(-449, 4), -450);
+  assert.equal(snapTarget(-451, 4), -450);
+  assert.equal(snapTarget(3601, 4), 3600);
 });

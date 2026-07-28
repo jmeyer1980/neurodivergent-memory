@@ -64,3 +64,43 @@ export function deriveMemories(snapshot, projectId, districtId) {
     .filter(m => projectOf(m) === projectId && districtOf(m) === districtId)
     .sort((a, b) => new Date(b.created) - new Date(a.created) || a.id.localeCompare(b.id));
 }
+
+// ---------- cylinder math ----------
+
+export function anglePerCard(count) {
+  return count > 0 ? 360 / count : 0;
+}
+
+// Radius that keeps adjacent cards from overlapping; floored so 1-2 card
+// drums never sit at radius 0 (which would z-fight the camera).
+export function drumRadius(cardWidth, count, minRadius = 260) {
+  if (count < 3) return minRadius;
+  return Math.max(minRadius, Math.round((cardWidth / 2) / Math.tan(Math.PI / count)));
+}
+
+export function normalizeAngle(deg) {
+  return ((deg % 360) + 360) % 360;
+}
+
+export function shortestDelta(fromDeg, toDeg) {
+  let d = normalizeAngle(toDeg - fromDeg);
+  if (d > 180) d -= 360;
+  return d;
+}
+
+export function nearestIndex(rotation, count) {
+  if (count <= 0) return -1;
+  const theta = 360 / count;
+  return Math.round(normalizeAngle(-rotation) / theta) % count;
+}
+
+export function rotationForIndex(index, count) {
+  if (count <= 0) return 0;
+  return -index * (360 / count);
+}
+
+export function snapTarget(rotation, count) {
+  if (count <= 0) return rotation;
+  const idx = nearestIndex(rotation, count);
+  return rotation + shortestDelta(rotation, rotationForIndex(idx, count));
+}
