@@ -446,6 +446,13 @@
         const res = await fetch(`${BRIDGE}/update`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
         const data = await res.json();
         if (!res.ok || !data.ok) throw new Error('update failed');
+        // The snapshot is otherwise only fetched at init, so both the card and a
+        // reopened modal would keep showing pre-edit values — and a second edit of
+        // the same memory would re-POST that stale content, silently reverting the
+        // first. Refresh failure is caught separately: the save already succeeded,
+        // so a stale card is acceptable but a stuck modal (or a false failure
+        // toast from the outer catch) is not.
+        try { await loadSnapshot(); buildDrum(); } catch {}
         $('#editModalBg').classList.remove('open');
         showToast('Update routed through the bridge.');
       } catch {
