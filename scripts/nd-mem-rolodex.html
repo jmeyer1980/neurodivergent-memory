@@ -144,6 +144,7 @@
       rotation: 0,         // live continuous rotation (deg)
       velocity: 0,
       radius: 260,
+      layout: H.drumLayout(340, 0),
       dragging: false,
       transitioning: false,
       frontIndex: -1,
@@ -198,9 +199,14 @@
       // readable content. The CSS var and the radius math share this one number.
       const cardW = state.view.level === 'memories' ? Math.min(560, Math.round(window.innerWidth * 0.92)) : 340;
       els.stage.style.setProperty('--cardW', cardW + 'px');
-      state.radius = H.drumRadius(cardW, n);
+      // One descriptor drives placement, hit-testing, snapping and clamping,
+      // so fan and cylinder never need a branch at the call site. It is
+      // assigned before the empty-drum return below, because updateFrontCard
+      // reads it even when there is nothing to show.
+      state.layout = H.drumLayout(cardW, n);
+      state.radius = state.layout.radius;
       els.stage.dataset.level = state.view.level;
-      const theta = H.anglePerCard(n);
+      els.stage.dataset.layout = state.layout.mode;
       // Gestures are authored in degrees, but a degree buys wildly different
       // amounts of travel depending on drum size: one card is 30deg at n=12 and
       // 0.99deg at n=364, so a fixed degree gain that feels right on a small
@@ -208,7 +214,7 @@
       // angle so a gesture moves a comparable number of CARDS instead. The
       // ceiling keeps 2-3 card drums from whipping past the item you aimed at;
       // the floor keeps a 364-card drum from needing 364 notches to lap it.
-      state.gestureGain = Math.min(3, Math.max(0.2, theta / 30));
+      state.gestureGain = Math.min(3, Math.max(0.2, state.layout.step / 30));
       state.stepTarget = null;
       if (!n) {
         // translateZ puts the placeholder on the camera plane, where real cards
@@ -218,9 +224,9 @@
         applyDrumTransform(); updateChrome(); return;
       }
       els.drum.innerHTML = state.items.map((item, i) =>
-        `<div class="card3d" data-idx="${i}" style="transform:rotateY(${i * theta}deg) translateZ(${state.radius}px)">${cardFace(item)}</div>`).join('');
+        `<div class="card3d" data-idx="${i}" style="transform:rotateY(${state.layout.angles[i]}deg) translateZ(${state.radius}px)">${cardFace(item)}</div>`).join('');
       const idx = Math.max(0, state.items.findIndex(i => i.id === state.view.centeredId));
-      state.rotation = H.rotationForIndex(idx, n);
+      state.rotation = H.rotationForCard(idx, state.layout);
       state.velocity = 0;
       state.frontEl = null; // the old element is gone with the innerHTML it lived in
       applyDrumTransform();
@@ -240,8 +246,7 @@
     }
 
     function updateFrontCard(force = false){
-      const n = state.items.length;
-      const idx = H.nearestIndex(state.rotation, n);
+      const idx = H.indexAtRotation(state.rotation, state.layout);
       if (!force && idx === state.frontIndex) return;
       state.frontIndex = idx;
       // Cards are appended in item order, so children[idx] is the card for item idx.
@@ -312,8 +317,14 @@
     function stepBy(n){
       const count = state.items.length;
       if (!count || state.transitioning) return;
-      const target = H.rotationForIndex(((state.frontIndex + n) % count + count) % count, count);
-      const goal = state.rotation + H.shortestDelta(state.rotation, target);
+      // A fan has ends: stepping past them is a no-op rather than a wrap.
+      const raw = state.frontIndex + n;
+      const idx = state.layout.mode === 'fan'
+        ? Math.min(count - 1, Math.max(0, raw))
+        : ((raw % count) + count) % count;
+      if (idx === state.frontIndex) return;
+      const target = H.rotationForCard(idx, state.layout);
+      const goal = state.layout.mode === 'fan' ? target : state.rotation + H.shortestDelta(state.rotation, target);
       state.velocity = 0;
       // One card is ~1deg on a 364-card drum. Assigning the rotation outright
       // moved the drum by a hair in a single frame, which reads as "the arrow
@@ -461,10 +472,14 @@
           else { state.rotation = state.stepTarget; state.stepTarget = null; }
         } else if (Math.abs(state.velocity) > 0.02) {
           state.rotation += state.velocity;
+          // A fan cannot spin past its end cards; kill the momentum at the
+          // rail so it settles instead of grinding against the clamp.
+          const clamped = H.clampRotation(state.rotation, state.layout);
+          if (clamped !== state.rotation) { state.rotation = clamped; state.velocity = 0; }
           state.velocity *= 0.93;
         } else {
           state.velocity = 0;
-          const target = H.snapTarget(state.rotation, state.items.length);
+          const target = H.snapRotation(state.rotation, state.layout);
           const d = target - state.rotation;
           if (Math.abs(d) > 0.05) state.rotation += REDUCED ? d : d * 0.14;
           else state.rotation = target;
@@ -572,7 +587,7 @@
         // the new view as a lurch. The placeholder has no drum to spin at all.
         if (state.transitioning || !state.items.length) return;
         const spin = dx * 0.22 * state.gestureGain;
-        state.rotation += spin;
+        state.rotation = H.clampRotation(state.rotation + spin, state.layout);
         state.velocity = Math.max(-30, Math.min(30, spin)); // same rail as the wheel
         applyDrumTransform();
         updateFrontCard();
@@ -608,7 +623,7 @@
       const styles = getComputedStyle(els.stage);
       const cardW = parseFloat(styles.getPropertyValue('--cardW')) || 340;
       const cardH = parseFloat(styles.getPropertyValue('--cardH')) || 230;
-      const theta = H.anglePerCard(n);
+      const angles = state.layout.angles;
       // Screen position + depth of the point localX along card face at angle a:
       // the card transform is rotateY(a) translateZ(radius) inside a drum at
       // translateZ(-radius), so (localX, 0, 0) lands at the coordinates below.
@@ -621,7 +636,7 @@
       };
       let best = -1, bestZ = -Infinity;
       for (let i = 0; i < n; i++) {
-        const a = (state.rotation + i * theta) * Math.PI / 180;
+        const a = (state.rotation + angles[i]) * Math.PI / 180;
         if (Math.cos(a) <= 0.05) continue; // facing away or edge-on: not clickable
         const L = project(-cardW / 2, a), R = project(cardW / 2, a);
         const lo = Math.min(L.sx, R.sx), hi = Math.max(L.sx, R.sx);
@@ -658,8 +673,8 @@
       const action = H.routeGesture(kind, { level: state.view.level, insideReader: false });
       if (action === 'none') return;
       if (idx !== state.frontIndex) {
-        const target = H.rotationForIndex(idx, state.items.length);
-        state.rotation += H.shortestDelta(state.rotation, target);
+        const target = H.rotationForCard(idx, state.layout);
+        state.rotation = state.layout.mode === 'fan' ? target : state.rotation + H.shortestDelta(state.rotation, target);
         state.velocity = 0;
         state.stepTarget = null; // centering on a clicked card overrides a pending arrow step
         applyDrumTransform(); updateFrontCard();
