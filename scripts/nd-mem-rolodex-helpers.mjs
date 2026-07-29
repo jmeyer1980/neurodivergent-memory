@@ -295,7 +295,7 @@ export function routeGesture(kind, ctx) {
 
 export function createNavTree(rootView) {
   return {
-    nodes: [{ id: 0, parentId: null, view: { ...rootView }, childIds: [] }],
+    nodes: [{ id: 0, parentId: null, view: { ...rootView, itemIds: [...(rootView.itemIds || [])] }, childIds: [] }],
     cursor: 0,
     nextId: 1,
   };

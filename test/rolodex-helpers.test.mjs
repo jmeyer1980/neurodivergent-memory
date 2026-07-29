@@ -306,6 +306,13 @@ test('a fresh tree is one root node at the wall', () => {
   assert.equal(navCursor(t).view.level, 'projects');
 });
 
+test('createNavTree copies the root view, caller mutations do not leak in', () => {
+  const ids = ['alpha', 'beta'];
+  const t = createNavTree({ ...ROOT_VIEW, centeredId: 'alpha', itemIds: ids });
+  ids.push('gamma');
+  assert.deepEqual(navNode(t, 0).view.itemIds, ['alpha', 'beta']);
+});
+
 test('dive appends a child and advances the cursor; depth counts ancestors', () => {
   const t = createNavTree(ROOT_VIEW);
   navPush(t, v('districts', 'alpha', null));
