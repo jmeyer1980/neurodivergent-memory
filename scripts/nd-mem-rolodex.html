@@ -68,7 +68,7 @@
     #minimap{position:fixed;left:0;top:64px;bottom:64px;z-index:9;display:flex;flex-direction:column;justify-content:flex-end;align-items:flex-start;gap:8px;padding:10px;pointer-events:none}
     #minimap>*{pointer-events:auto}
     #mapToggle{font-size:.7rem;letter-spacing:.08em;text-transform:uppercase;padding:6px 10px}
-    #mapBody{max-height:100%;overflow:auto;border-radius:16px;border:1px solid var(--surfaceBorder);background:var(--surface);backdrop-filter:blur(10px);padding:6px}
+    #mapBody{max-height:100%;max-width:180px;overflow:auto;border-radius:16px;border:1px solid var(--surfaceBorder);background:var(--surface);backdrop-filter:blur(10px);padding:6px}
     #minimap.collapsed #mapBody{display:none}
     #mapBody svg{display:block}
     #mapBody .edge{stroke:var(--faint);stroke-width:1.5;opacity:.45}
@@ -276,6 +276,7 @@
           `<circle class="node${n.onPath ? ' on' : ''}${n.isCursor ? ' cursor' : ''}" data-node="${n.id}" cx="${n.x}" cy="${n.y}" r="5"><title>${esc(n.label)} (0^${n.depth})</title></circle>`).join('');
         els.mapBody.innerHTML = `<svg width="${laid.width}" height="${laid.height}" viewBox="0 0 ${laid.width} ${laid.height}">${edges}${nodes}</svg>`;
         els.mapBody.scrollTop = 0; // deepest row is at the top; keep the frontier in view
+        els.mapBody.scrollLeft = els.mapBody.scrollWidth; // newest column (rightmost) is the frontier; keep it in view
       } catch (err) {
         console.error('minimap layout failed', err);
         els.minimap.style.display = 'none';
