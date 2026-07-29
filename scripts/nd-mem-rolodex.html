@@ -115,7 +115,9 @@
     const state = {
       snapshot: { memories: {} },
       view: { level: 'projects', projectId: null, districtId: null, centeredId: null, rotation: 0, itemIds: [] },
-      history: H.createHistory(),
+      // Supersedes the history stack: the cursor's ancestor chain behaves
+      // exactly as the stack did, and abandoned branches stay for the minimap.
+      tree: H.createNavTree({ level: 'projects', projectId: null, districtId: null, centeredId: null, rotation: 0, itemIds: [] }),
       items: [],           // [{id, kind, data}] for the current drum
       rotation: 0,         // live continuous rotation (deg)
       velocity: 0,
@@ -237,9 +239,10 @@
       updateChrome();
     }
 
+    function depthNow(){ return H.navDepth(state.tree); }
     function updateChrome(){
       const { level, projectId, districtId } = state.view;
-      els.levelName.textContent = level[0].toUpperCase() + level.slice(1);
+      els.levelName.textContent = `${level[0].toUpperCase() + level.slice(1)} · 0^${depthNow()}`;
       els.crumb.innerHTML = level === 'projects' ? '<strong>All projects</strong>'
         : level === 'districts' ? `<strong>${esc(projectId)}</strong>`
         : `<strong>${esc(projectId)}</strong> ▸ ${esc(districtId)}`;
@@ -304,12 +307,16 @@
       if (state.transitioning || !state.items.length) return;
       const front = centeredItem();
       if (!front) return;
-      H.pushView(state.history, currentViewSnapshot());
+      // Record where we are leaving from before descending, so backing out
+      // returns to this exact rotation and centered card.
+      H.navSetCursorView(state.tree, currentViewSnapshot());
       const level = H.nextLevel(state.view.level);
       let next;
       if (state.view.level === 'projects') next = { level, projectId: front.id, districtId: null, centeredId: null, rotation: 0, itemIds: [] };
       else if (state.view.level === 'districts') next = { level, projectId: state.view.projectId, districtId: front.id, centeredId: null, rotation: 0, itemIds: [] };
       else next = { level, projectId: null, districtId: null, centeredId: null, rotation: 0, itemIds: [] }; // memories wraps to projects
+      // The wrap is an ordinary child: one tree, one depth, no loop counter.
+      H.navPush(state.tree, next);
       transitionTo(next, 'in');
     }
 
@@ -325,8 +332,11 @@
 
     function zoomOut(){
       if (state.transitioning) return;
-      if (H.atWall(state.history)) { bounce(); return; }
-      const restored = H.reconcilePop(state.history, state.snapshot);
+      if (H.navAtWall(state.tree)) { bounce(); return; }
+      // Keep this view current before leaving it, so re-diving here later
+      // restores the card you were on rather than the one you arrived on.
+      H.navSetCursorView(state.tree, currentViewSnapshot());
+      const restored = H.navReconcileBack(state.tree, state.snapshot);
       if (!restored) {
         transitionTo({ level: 'projects', projectId: null, districtId: null, centeredId: null, rotation: 0, itemIds: [] }, 'out');
         showToast('Earlier views no longer exist — back to all projects.');
@@ -711,11 +721,12 @@
       const hadCentered = hadItems && before.centeredId != null;
       const result = H.reconcileView(before, prevIds, state.snapshot);
       if (result.status === 'invalid') {
-        const restored = H.reconcilePop(state.history, state.snapshot);
+        const restored = H.navReconcileBack(state.tree, state.snapshot);
         state.view = restored ?? { level: 'projects', projectId: null, districtId: null, centeredId: null, rotation: 0, itemIds: [] };
         if (hadItems) showToast(restored ? 'This view emptied — zoomed out to the last valid one.' : 'This view emptied — back to all projects.');
       } else {
         state.view = result.view;
+        H.navSetCursorView(state.tree, result.view);
         if (result.status === 'neighbor' && hadCentered) showToast('The centered card was removed — showing its neighbor.');
       }
       buildDrum();
