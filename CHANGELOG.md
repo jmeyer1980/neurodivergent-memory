@@ -45,13 +45,14 @@ Running locally on the development branch; not part of a release cut (version st
   prior view, a wall-bounce at the first view, a front-card reader with
   pointer-aware scroll routing, and edit routed through `/update`. Pure
   CSS 3D + vanilla JS (`scripts/nd-mem-rolodex.html`), logic unit-tested in
-  `scripts/nd-mem-rolodex-helpers.mjs`. The bridge's static file handlers are
-  consolidated into one helper.
+  `scripts/nd-mem-rolodex-helpers.mjs`.
 
 ### Changed
 
 - The web-app bridge (`scripts/nd-mem-bridge-server.mjs`) no longer spawns its own MCP
   child; `/save` and `/update` forward to the shared daemon (`routedTo: "daemon-http"`).
+- The web-app bridge's static file handlers (`/`, helpers, `/rolodex`) are consolidated
+  into one `serveSibling` helper.
 
 ### Fixed
 

@@ -129,6 +129,7 @@
       gestureGain: 1,       // gesture degrees are scaled by this so a gesture moves a constant number of CARDS
       lastBounceAt: 0,
       editingId: null,
+      editingDistrict: null, // district the edit modal was seeded with, to detect a real change
     };
 
     function esc(v){ return String(v ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
@@ -352,7 +353,12 @@
 
     // ---------- input: wheel ----------
     function insideReader(target){
-      return state.view.level === 'memories' && !!(target instanceof Element && target.closest('.reader-scroll'));
+      if (state.view.level !== 'memories' || !(target instanceof Element)) return false;
+      // A reader with nothing to scroll must not swallow the wheel: short
+      // memories would otherwise sit in a dead zone the size of the front card,
+      // where scrolling does nothing at all.
+      const el = target.closest('.reader-scroll');
+      return !!el && el.scrollHeight > el.clientHeight;
     }
     els.stage.addEventListener('wheel', (e) => {
       // deltaMode 1 = lines, 2 = pages. Firefox reports line deltas for real
@@ -376,6 +382,14 @@
       state.velocity = Math.max(-30, Math.min(30, state.velocity + dy * 0.02 * state.gestureGain));
     }, { passive: false });
     function ctx(e){ return { level: state.view.level, insideReader: insideReader(e.target) }; }
+    // The stage covers most of the window but not the chrome bar or the HUD, and
+    // Ctrl+wheel there browser-zooms the whole app — which a fixed-position 3D
+    // scene does not survive gracefully. Suppress it document-wide (the modal is
+    // exempt: zooming a text form is legitimate). The stage's own handler still
+    // runs and preventDefaults again; calling it twice is harmless.
+    document.addEventListener('wheel', (e) => {
+      if (e.ctrlKey && !document.querySelector('.modalbg.open')) e.preventDefault();
+    }, { passive: false });
 
     // ---------- input: pointer (drag spin, pinch, long-press) ----------
     const pointers = new Map();
@@ -391,7 +405,11 @@
         pinchStart = Math.hypot(a.x - b.x, a.y - b.y);
       } else if (pointers.size === 1) {
         dragMoved = 0;
-        if (!insideReader(e.target)) { state.dragging = true; state.velocity = 0; state.stepTarget = null; }
+        // A horizontal drag spins at every level, reader included (spec: hdrag ->
+        // spin). Only a mouse is exempt inside the reader, where press-and-drag is
+        // how text gets selected; touch has no such conflict — it scrolls the
+        // reader vertically via touch-action:pan-y and spins horizontally here.
+        if (!insideReader(e.target) || e.pointerType !== 'mouse') { state.dragging = true; state.velocity = 0; state.stepTarget = null; }
       }
     });
     els.stage.addEventListener('pointermove', (e) => {
@@ -407,9 +425,14 @@
         return;
       }
       if (state.dragging) {
-        dragMoved += Math.abs(dx) + Math.abs(dy); // outside the guard: a drag that
-        // crossed the click threshold must still suppress the click it ends with
-        if (!state.items.length) return; // the empty-state placeholder has no drum to spin
+        // Accumulated above the guard below: a drag that crossed the click
+        // threshold must still suppress the click it ends with, even if the
+        // rotation it asked for was refused.
+        dragMoved += Math.abs(dx) + Math.abs(dy);
+        // Mirror the wheel's transition guard: a drag mid-zoom rotates the drum
+        // the swap is about to replace, and banks a velocity that releases into
+        // the new view as a lurch. The placeholder has no drum to spin at all.
+        if (state.transitioning || !state.items.length) return;
         const spin = dx * 0.22 * state.gestureGain;
         state.rotation += spin;
         state.velocity = Math.max(-30, Math.min(30, spin)); // same rail as the wheel
@@ -461,9 +484,13 @@
     });
     $('#themeBtn').addEventListener('click', () => document.documentElement.setAttribute('data-theme', document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark'));
     window.addEventListener('keydown', (e) => {
-      // A focused control owns its own keys: Enter must activate the "Classic
-      // view" link and the Retry button, and text fields need Backspace.
-      if (e.target instanceof Element && e.target.closest('a, button, input, textarea, select')) return;
+      // A text field owns every key it receives. A focused link or button only
+      // owns its activation keys — bailing on all of them meant that once the
+      // theme toggle or ⤺ button had focus (i.e. right after clicking one), Esc,
+      // Backspace and the arrows stopped driving the drum entirely.
+      const t = e.target instanceof Element ? e.target : null;
+      if (t && t.closest('input, textarea, select')) return;
+      if (t && t.closest('a, button') && (e.key === 'Enter' || e.key === ' ')) return;
       const openModal = document.querySelector('.modalbg.open');
       if (openModal) { if (e.key === 'Escape') openModal.classList.remove('open'); return; }
       const map = { Escape: 'esc', Backspace: 'back', ArrowLeft: 'arrowLeft', ArrowRight: 'arrowRight', Enter: 'enter' };
@@ -491,6 +518,10 @@
       $('#editIntensity').value = m.intensity ?? 0.5;
       $('#editEpistemic').value = ['draft', 'validated', 'outdated'].includes(m.epistemic_status) ? m.epistemic_status : '';
       $('#editTags').value = (m.tags || []).join(', ');
+      // Remember what the select was seeded with, not m.district: a district-less
+      // memory is *displayed* as practical_execution, and submitting that value
+      // unchanged would silently refile it. Only a real edit differs from this.
+      state.editingDistrict = $('#editDistrict').value;
       $('#editModalBg').classList.add('open');
       $('#editContent').focus(); // must follow .open — a display:none field cannot take focus
     }
@@ -501,12 +532,18 @@
       const body = {
         memoryId: state.editingId,
         content,
-        district: $('#editDistrict').value,
         visibility: $('#editVisibility').value,
-        intensity: Number($('#editIntensity').value),
         projectId: project === '' ? null : project,
         tags: $('#editTags').value.split(',').map(s => s.trim()).filter(Boolean),
       };
+      // The bridge forwards only the keys present, leaving everything else
+      // untouched, so an untouched control must send nothing. An emptied number
+      // field reads as '' and would post intensity: NaN; an unchanged district
+      // select would post the placeholder value shown for district-less memories.
+      const intensity = $('#editIntensity').value.trim();
+      if (intensity !== '') body.intensity = Number(intensity);
+      const district = $('#editDistrict').value;
+      if (district !== state.editingDistrict) body.district = district;
       const epistemic = $('#editEpistemic').value;
       if (epistemic) body.epistemicStatus = epistemic;
       try {

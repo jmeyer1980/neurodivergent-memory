@@ -748,7 +748,7 @@ rolodex carousels nested three deep. Spin through projects, dive into one to
 spin its districts, dive again to read memories card by card — the front card
 is the reader (scroll inside it to read, outside it to spin). Diving past the
 memories level wraps back to project selection; zooming out (right-click,
-Esc/Backspace, the ⤺ button, Ctrl+scroll-down, or pinch) walks back through
+Esc/Backspace, the ⤺ button, Ctrl+scroll-down, or pinch in) walks back through
 the exact views you came from, and bounces off the wall when you reach the
 first view of the session. Editing the front card routes through the same
 bridge `/update` endpoint as the classic app; creating memories and project
