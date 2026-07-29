@@ -519,7 +519,7 @@
     els.stage.addEventListener('click', (e) => {
       if (dragMoved > 8 || state.transitioning) return; // a drag, not a click
       // DOM resolution first — it works for the flat front card and carries
-      // the button/reader guards — then the geometric fallback for the side
+      // the button guard — then the geometric fallback for the side
       // cards Chromium cannot hit-test. pressTarget survives the capture
       // retargeting; isConnected covers a drum rebuilt (SSE) mid-press.
       let hit = (pressTarget && pressTarget.isConnected) ? pressTarget
