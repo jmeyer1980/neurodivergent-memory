@@ -263,19 +263,32 @@
       const exitCls = dir === 'in' ? 'zoom-out' : 'zoom-in';
       els.scene.classList.add(enterCls);
       setTimeout(() => {
-        state.view = { ...view };
-        buildDrum();
-        // Jump to the exit pose with transitions off. A forced reflow alone is
-        // not enough: it starts a transition toward the exit pose, and removing
-        // the class one statement later cancels it a couple of percent in, so
-        // the return would animate from the *enter* pose — backwards.
-        els.scene.style.transition = 'none';
-        els.scene.classList.remove(enterCls);
-        els.scene.classList.add(exitCls);
-        void els.scene.offsetWidth; // commit the exit pose with no transition running
-        els.scene.style.transition = '';
-        els.scene.classList.remove(exitCls); // now transitions exit pose -> identity
-        setTimeout(() => { state.transitioning = false; }, REDUCED ? 0 : ZOOM_MS);
+        // state.transitioning is cleared by the inner timeout this body schedules,
+        // so anything that throws before it (a buildDrum failure on a malformed
+        // snapshot, say) would leave the flag stuck true — and every gesture,
+        // tick() included, is gated on it. The page would look alive and ignore
+        // all input until reload. Fail loud in the console, unstick the flag, and
+        // leave the scene in its neutral pose.
+        try {
+          state.view = { ...view };
+          buildDrum();
+          // Jump to the exit pose with transitions off. A forced reflow alone is
+          // not enough: it starts a transition toward the exit pose, and removing
+          // the class one statement later cancels it a couple of percent in, so
+          // the return would animate from the *enter* pose — backwards.
+          els.scene.style.transition = 'none';
+          els.scene.classList.remove(enterCls);
+          els.scene.classList.add(exitCls);
+          void els.scene.offsetWidth; // commit the exit pose with no transition running
+          els.scene.style.transition = '';
+          els.scene.classList.remove(exitCls); // now transitions exit pose -> identity
+          setTimeout(() => { state.transitioning = false; }, REDUCED ? 0 : ZOOM_MS);
+        } catch (err) {
+          console.error(err);
+          els.scene.style.transition = '';
+          els.scene.classList.remove(enterCls, exitCls);
+          state.transitioning = false;
+        }
       }, REDUCED ? 0 : ZOOM_MS);
     }
 
@@ -500,15 +513,17 @@
         const res = await fetch(`${BRIDGE}/update`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
         const data = await res.json();
         if (!res.ok || !data.ok) throw new Error('update failed');
+        $('#editModalBg').classList.remove('open');
+        showToast('Update routed through the bridge.');
         // The snapshot is otherwise only fetched at init, so both the card and a
         // reopened modal would keep showing pre-edit values — and a second edit of
         // the same memory would re-POST that stale content, silently reverting the
-        // first. Refresh failure is caught separately: the save already succeeded,
-        // so a stale card is acceptable but a stuck modal (or a false failure
-        // toast from the outer catch) is not.
+        // first. This runs last so a reconcile toast ("centered card was removed",
+        // "this view emptied") lands after the success toast and survives, instead
+        // of being overwritten by it. Refresh failure is caught separately: the
+        // save already succeeded, so a stale card is acceptable but a stuck modal
+        // (or a false failure toast from the outer catch) is not.
         try { await loadSnapshot(); refreshAndReconcile(); } catch {}
-        $('#editModalBg').classList.remove('open');
-        showToast('Update routed through the bridge.');
       } catch {
         showToast('Update failed — the modal is untouched, fix and retry.');
       }
@@ -552,31 +567,45 @@
         await loadSnapshot();
         els.connState.textContent = `Bridge :${health.port}`;
         els.overlay.classList.remove('open');
-        buildDrum();
+        // Retry runs init() again after the bridge came back, possibly against a
+        // store that moved on. Reconciling (rather than rebuilding blind) keeps
+        // the level, history and centered card the user left behind.
+        refreshAndReconcile();
       } catch {
         els.connState.textContent = 'Offline';
         els.overlay.classList.add('open');
       }
     }
     // ---------- live refresh (spec: preserve level, rotation, history, centered-by-id) ----------
-    // Every path that reloads the snapshot must reconcile through here, never
-    // through a bare buildDrum(): if the centered item has left the view,
+    // Every path that reloads the snapshot reconciles through here rather than
+    // calling buildDrum() directly: if the centered item has left the view,
     // buildDrum's `Math.max(0, findIndex(...))` silently re-centers on card 0 and
     // updateFrontCard rewrites view.centeredId, so neighbor selection and its
     // toast are skipped — and the SSE pass that follows a local save would then
-    // find an already-valid centeredId and report 'kept'. Callers own the await
-    // on loadSnapshot(); this stays synchronous so it cannot interleave.
+    // find an already-valid centeredId and report 'kept'. Exactly two bare
+    // buildDrum() calls are deliberate: transitionTo's midpoint view-swap (the
+    // view is brand new, there is no prior centering to preserve) and this
+    // function's own transitioning branch (that swap owns the view; reconciling
+    // against the outgoing one would fight it). Callers own the await on
+    // loadSnapshot(); this stays synchronous so it cannot interleave.
     function refreshAndReconcile(){
       if (state.transitioning) { buildDrum(); return; }
       const prevIds = state.items.map(i => i.id);
-      const result = H.reconcileView(currentViewSnapshot(), prevIds, state.snapshot);
+      const before = currentViewSnapshot();
+      // A cold load, a Retry and an SSE hello-resync all reconcile from an empty
+      // drum with no centered card. Nothing was removed and nothing emptied —
+      // there was never anything on screen — so both toasts need a real prior
+      // drum (and, for the neighbor case, a real prior centering) to report on.
+      const hadItems = prevIds.length > 0;
+      const hadCentered = hadItems && before.centeredId != null;
+      const result = H.reconcileView(before, prevIds, state.snapshot);
       if (result.status === 'invalid') {
         const restored = H.reconcilePop(state.history, state.snapshot);
         state.view = restored ?? { level: 'projects', projectId: null, districtId: null, centeredId: null, rotation: 0, itemIds: [] };
-        showToast(restored ? 'This view emptied — zoomed out to the last valid one.' : 'This view emptied — back to all projects.');
+        if (hadItems) showToast(restored ? 'This view emptied — zoomed out to the last valid one.' : 'This view emptied — back to all projects.');
       } else {
         state.view = result.view;
-        if (result.status === 'neighbor') showToast('The centered card was removed — showing its neighbor.');
+        if (result.status === 'neighbor' && hadCentered) showToast('The centered card was removed — showing its neighbor.');
       }
       buildDrum();
     }
@@ -588,7 +617,13 @@
         refreshAndReconcile();
       });
       es.onerror = () => { els.connState.textContent = 'Stream lost — retrying…'; };
-      es.addEventListener('hello', () => { els.connState.textContent = 'Live'; });
+      // hello also fires on every reconnect, and memory-change events raised while
+      // the stream was down were never delivered, so the page would sit on a stale
+      // snapshot that nothing else refetches. Resync on every hello.
+      es.addEventListener('hello', async () => {
+        els.connState.textContent = 'Live';
+        try { await loadSnapshot(); refreshAndReconcile(); } catch {}
+      });
     }
     connectEvents();
     els.retryBtn.addEventListener('click', init);
