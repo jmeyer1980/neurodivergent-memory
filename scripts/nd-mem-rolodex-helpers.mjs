@@ -284,3 +284,117 @@ export function routeGesture(kind, ctx) {
     default: return 'none';
   }
 }
+
+// ---------- navigation tree ----------
+// Supersedes the history stack. The cursor's ancestor chain plays exactly the
+// role the stack played (wall, zoom-out, reconciliation), while abandoned
+// branches are kept so the session's exploration can be drawn and revisited.
+// EVERY dive gesture is one navPush — click, Enter, ctrl+wheel, pinch, and the
+// memories->projects wrap alike. There is no separate lap or loop counter:
+// wraps are ordinary projects-level children and depth just keeps climbing.
+
+export function createNavTree(rootView) {
+  return {
+    nodes: [{ id: 0, parentId: null, view: { ...rootView }, childIds: [] }],
+    cursor: 0,
+    nextId: 1,
+  };
+}
+
+export function navNode(tree, id) {
+  return tree.nodes.find(n => n.id === id) ?? null;
+}
+
+export function navCursor(tree) {
+  return navNode(tree, tree.cursor);
+}
+
+export function navActivePath(tree) {
+  const path = [];
+  for (let node = navCursor(tree); node; node = node.parentId === null ? null : navNode(tree, node.parentId)) {
+    path.push(node);
+  }
+  return path.reverse();
+}
+
+export function navDepth(tree) {
+  return navActivePath(tree).length - 1;
+}
+
+export function navAtWall(tree) {
+  return tree.cursor === 0;
+}
+
+export function navSetCursorView(tree, view) {
+  navCursor(tree).view = { ...view, itemIds: [...(view.itemIds || [])] };
+}
+
+function sameContext(a, b) {
+  return a.level === b.level && a.projectId === b.projectId && a.districtId === b.districtId;
+}
+
+export function navPush(tree, view) {
+  const parent = navCursor(tree);
+  const existing = parent.childIds.map(id => navNode(tree, id)).find(child => sameContext(child.view, view));
+  if (existing) { tree.cursor = existing.id; return existing.id; }
+  const node = { id: tree.nextId++, parentId: parent.id, view: { ...view, itemIds: [...(view.itemIds || [])] }, childIds: [] };
+  tree.nodes.push(node);
+  parent.childIds.push(node.id);
+  tree.cursor = node.id;
+  return node.id;
+}
+
+export function navBack(tree) {
+  if (navAtWall(tree)) return null;
+  tree.cursor = navCursor(tree).parentId;
+  return navCursor(tree).view;
+}
+
+export function navJump(tree, nodeId) {
+  const node = navNode(tree, nodeId);
+  if (!node) return null;
+  tree.cursor = node.id;
+  return node.view;
+}
+
+// Deepest node on the active path whose view matches the wanted context —
+// the coordinate's clickable segments resolve through this, so a jump is
+// always backward along the path you actually walked.
+export function navFindContext(tree, target) {
+  const path = navActivePath(tree);
+  for (let i = path.length - 1; i >= 0; i--) {
+    if (sameContext(path[i].view, target)) return path[i].id;
+  }
+  return null;
+}
+
+function reconcileAtCursor(tree, snapshot) {
+  const view = navCursor(tree).view;
+  const result = reconcileView(view, view.itemIds || [], snapshot);
+  if (result.status === 'invalid') return null;
+  navSetCursorView(tree, result.view);
+  return result.view;
+}
+
+export function navReconcileBack(tree, snapshot) {
+  while (!navAtWall(tree)) {
+    navBack(tree);
+    const view = reconcileAtCursor(tree, snapshot);
+    if (view) return view;
+  }
+  return null;
+}
+
+export function navReconcileJump(tree, nodeId, snapshot) {
+  if (!navJump(tree, nodeId)) return null;
+  const view = reconcileAtCursor(tree, snapshot);
+  return view ?? navReconcileBack(tree, snapshot);
+}
+
+export function navRemapProject(tree, oldId, newId) {
+  for (const node of tree.nodes) {
+    if (node.view.projectId === oldId) node.view.projectId = newId;
+    if (node.view.level === 'projects' && node.view.centeredId === oldId) node.view.centeredId = newId;
+    node.view.itemIds = (node.view.itemIds || []).map(id => (id === oldId ? newId : id));
+  }
+}

@@ -285,3 +285,145 @@ test('routeGesture implements the spec input map', () => {
   assert.equal(routeGesture('arrowRight', at('districts')), 'stepNext');
   assert.equal(routeGesture('bogus', at('projects')), 'none');
 });
+
+import {
+  createNavTree, navNode, navCursor, navDepth, navAtWall, navSetCursorView,
+  navPush, navBack, navActivePath, navFindContext, navJump,
+  navReconcileBack, navReconcileJump, navRemapProject,
+} from '../scripts/nd-mem-rolodex-helpers.mjs';
+
+const ROOT_VIEW = { level: 'projects', projectId: null, districtId: null, centeredId: null, rotation: 0, itemIds: [] };
+const v = (level, projectId, districtId, centeredId = null, itemIds = []) =>
+  ({ level, projectId, districtId, centeredId, rotation: 0, itemIds });
+
+test('a fresh tree is one root node at the wall', () => {
+  const t = createNavTree(ROOT_VIEW);
+  assert.equal(t.nodes.length, 1);
+  assert.equal(t.cursor, 0);
+  assert.equal(navDepth(t), 0);
+  assert.equal(navAtWall(t), true);
+  assert.equal(navBack(t), null);
+  assert.equal(navCursor(t).view.level, 'projects');
+});
+
+test('dive appends a child and advances the cursor; depth counts ancestors', () => {
+  const t = createNavTree(ROOT_VIEW);
+  navPush(t, v('districts', 'alpha', null));
+  assert.equal(navDepth(t), 1);
+  assert.equal(navAtWall(t), false);
+  navPush(t, v('memories', 'alpha', 'practical_execution'));
+  assert.equal(navDepth(t), 2);
+  // the wrap back to projects is an ordinary dive: depth keeps climbing
+  navPush(t, v('projects', null, null));
+  assert.equal(navDepth(t), 3);
+  assert.equal(navCursor(t).view.level, 'projects');
+  assert.equal(t.nodes.length, 4);
+});
+
+test('re-diving the same decision re-enters the existing child, no duplicate sibling', () => {
+  const t = createNavTree(ROOT_VIEW);
+  const first = navPush(t, v('districts', 'alpha', null));
+  navBack(t);
+  const again = navPush(t, v('districts', 'alpha', null));
+  assert.equal(again, first);
+  assert.equal(t.nodes.length, 2);
+  // a different project forks a real sibling
+  navBack(t);
+  const other = navPush(t, v('districts', 'beta', null));
+  assert.notEqual(other, first);
+  assert.equal(t.nodes.length, 3);
+  assert.equal(navNode(t, 0).childIds.length, 2);
+});
+
+test('the same district name under different projects stays two distinct nodes', () => {
+  const t = createNavTree(ROOT_VIEW);
+  navPush(t, v('districts', 'alpha', null));
+  const a = navPush(t, v('memories', 'alpha', 'logical_analysis'));
+  navBack(t); navBack(t);
+  navPush(t, v('districts', 'beta', null));
+  const b = navPush(t, v('memories', 'beta', 'logical_analysis'));
+  assert.notEqual(a, b);
+});
+
+test('dead branches survive backing out and diving elsewhere', () => {
+  const t = createNavTree(ROOT_VIEW);
+  navPush(t, v('districts', 'alpha', null));
+  navPush(t, v('memories', 'alpha', 'practical_execution'));
+  navBack(t); navBack(t);
+  navPush(t, v('districts', 'beta', null));
+  assert.equal(t.nodes.length, 4);              // nothing pruned
+  assert.equal(navDepth(t), 1);
+  assert.deepEqual(navActivePath(t).map(n => n.id), [0, 3]);
+});
+
+test('navSetCursorView records leave-time state, navBack restores it', () => {
+  const t = createNavTree(ROOT_VIEW);
+  navSetCursorView(t, { ...ROOT_VIEW, centeredId: 'alpha', rotation: -120, itemIds: ['alpha', 'beta'] });
+  navPush(t, v('districts', 'alpha', null));
+  const back = navBack(t);
+  assert.equal(back.centeredId, 'alpha');
+  assert.equal(back.rotation, -120);
+  assert.deepEqual(back.itemIds, ['alpha', 'beta']);
+});
+
+test('navFindContext locates an ancestor by level and context', () => {
+  const t = createNavTree(ROOT_VIEW);
+  const d = navPush(t, v('districts', 'alpha', null));
+  navPush(t, v('memories', 'alpha', 'practical_execution'));
+  assert.equal(navFindContext(t, { level: 'districts', projectId: 'alpha', districtId: null }), d);
+  assert.equal(navFindContext(t, { level: 'districts', projectId: 'nope', districtId: null }), null);
+  assert.equal(navJump(t, d).level, 'districts');
+  assert.equal(navDepth(t), 1);
+});
+
+test('navReconcileBack stops at the first view that still has cards', () => {
+  const t = createNavTree({ ...ROOT_VIEW, centeredId: 'beta', itemIds: ['alpha', 'beta', UNASSIGNED] });
+  navPush(t, { ...v('districts', 'beta', null), centeredId: 'weird_custom', itemIds: ['weird_custom'] });
+  navPush(t, { ...v('memories', 'beta', 'weird_custom'), centeredId: 'mem_4', itemIds: ['mem_4'] });
+  const snap = structuredClone(SNAP);
+  delete snap.memories.mem_4;                  // kills beta/weird_custom, but mem_6 keeps beta alive
+  const restored = navReconcileBack(t, snap);
+  assert.equal(restored.level, 'districts');   // beta's district drum survives, so we stop there
+  assert.equal(restored.centeredId, 'logical_analysis'); // weird_custom is gone; neighbor picked
+  assert.equal(navDepth(t), 1);
+});
+
+test('navReconcileBack walks all the way past a fully dead branch', () => {
+  const t = createNavTree({ ...ROOT_VIEW, centeredId: 'beta', itemIds: ['alpha', 'beta', UNASSIGNED] });
+  navPush(t, { ...v('districts', 'beta', null), centeredId: 'weird_custom', itemIds: ['weird_custom'] });
+  navPush(t, { ...v('memories', 'beta', 'weird_custom'), centeredId: 'mem_4', itemIds: ['mem_4'] });
+  const snap = structuredClone(SNAP);
+  delete snap.memories.mem_4;
+  delete snap.memories.mem_6;                  // now beta has no memories at all
+  const restored = navReconcileBack(t, snap);
+  assert.equal(restored.level, 'projects');    // both dead views were walked past
+  assert.equal(restored.centeredId, 'alpha');  // 'beta' is gone; nearest surviving neighbor
+  assert.equal(navAtWall(t), true);
+});
+
+test('navReconcileJump validates the target and falls back to a live ancestor', () => {
+  const t = createNavTree({ ...ROOT_VIEW, centeredId: 'alpha', itemIds: ['alpha', 'beta', UNASSIGNED] });
+  const dead = navPush(t, { ...v('districts', 'beta', null), centeredId: 'weird_custom', itemIds: ['weird_custom'] });
+  const snap = structuredClone(SNAP);
+  delete snap.memories.mem_4;
+  delete snap.memories.mem_6;                 // beta is now gone completely
+  const landed = navReconcileJump(t, dead, snap);
+  assert.equal(landed.level, 'projects');
+  assert.equal(navAtWall(t), true);
+});
+
+test('navRemapProject rewrites the id across every node, dead branches included', () => {
+  // Only a projects-level view's centeredId is a project id; a districts-level
+  // view's centeredId is a district name and must be left alone.
+  const t = createNavTree({ ...ROOT_VIEW, centeredId: 'alpha', itemIds: ['alpha', 'beta'] });
+  navPush(t, v('districts', 'alpha', null));                  // id 1
+  navPush(t, v('memories', 'alpha', 'practical_execution'));  // id 2
+  navBack(t); navBack(t);
+  navPush(t, v('districts', 'beta', null));                   // id 3
+  navRemapProject(t, 'alpha', 'ALPHA');
+  assert.equal(navNode(t, 0).view.centeredId, 'ALPHA', 'a centered project id is remapped');
+  assert.deepEqual(navNode(t, 0).view.itemIds, ['ALPHA', 'beta']);
+  assert.equal(navNode(t, 1).view.projectId, 'ALPHA');
+  assert.equal(navNode(t, 2).view.projectId, 'ALPHA', 'the abandoned branch is remapped too');
+  assert.equal(navNode(t, 3).view.projectId, 'beta', 'other projects untouched');
+});
