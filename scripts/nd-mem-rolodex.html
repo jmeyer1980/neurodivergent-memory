@@ -452,7 +452,7 @@
         // first. Refresh failure is caught separately: the save already succeeded,
         // so a stale card is acceptable but a stuck modal (or a false failure
         // toast from the outer catch) is not.
-        try { await loadSnapshot(); buildDrum(); } catch {}
+        try { await loadSnapshot(); refreshAndReconcile(); } catch {}
         $('#editModalBg').classList.remove('open');
         showToast('Update routed through the bridge.');
       } catch {
@@ -505,22 +505,33 @@
       }
     }
     // ---------- live refresh (spec: preserve level, rotation, history, centered-by-id) ----------
+    // Every path that reloads the snapshot must reconcile through here, never
+    // through a bare buildDrum(): if the centered item has left the view,
+    // buildDrum's `Math.max(0, findIndex(...))` silently re-centers on card 0 and
+    // updateFrontCard rewrites view.centeredId, so neighbor selection and its
+    // toast are skipped — and the SSE pass that follows a local save would then
+    // find an already-valid centeredId and report 'kept'. Callers own the await
+    // on loadSnapshot(); this stays synchronous so it cannot interleave.
+    function refreshAndReconcile(){
+      if (state.transitioning) { buildDrum(); return; }
+      const prevIds = state.items.map(i => i.id);
+      const result = H.reconcileView(currentViewSnapshot(), prevIds, state.snapshot);
+      if (result.status === 'invalid') {
+        const restored = H.reconcilePop(state.history, state.snapshot);
+        state.view = restored ?? { level: 'projects', projectId: null, districtId: null, centeredId: null, rotation: 0, itemIds: [] };
+        showToast(restored ? 'This view emptied — zoomed out to the last valid one.' : 'This view emptied — back to all projects.');
+      } else {
+        state.view = result.view;
+        if (result.status === 'neighbor') showToast('The centered card was removed — showing its neighbor.');
+      }
+      buildDrum();
+    }
+
     function connectEvents(){
       const es = new EventSource(`${BRIDGE}/events`);
       es.addEventListener('memory-change', async () => {
         try { await loadSnapshot(); } catch { return; }
-        if (state.transitioning) { buildDrum(); return; }
-        const prevIds = state.items.map(i => i.id);
-        const result = H.reconcileView(currentViewSnapshot(), prevIds, state.snapshot);
-        if (result.status === 'invalid') {
-          const restored = H.reconcilePop(state.history, state.snapshot);
-          state.view = restored ?? { level: 'projects', projectId: null, districtId: null, centeredId: null, rotation: 0, itemIds: [] };
-          showToast(restored ? 'This view emptied — zoomed out to the last valid one.' : 'This view emptied — back to all projects.');
-        } else {
-          state.view = result.view;
-          if (result.status === 'neighbor') showToast('The centered card was removed — showing its neighbor.');
-        }
-        buildDrum();
+        refreshAndReconcile();
       });
       es.onerror = () => { els.connState.textContent = 'Stream lost — retrying…'; };
       es.addEventListener('hello', () => { els.connState.textContent = 'Live'; });
