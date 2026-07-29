@@ -504,6 +504,28 @@
         els.overlay.classList.add('open');
       }
     }
+    // ---------- live refresh (spec: preserve level, rotation, history, centered-by-id) ----------
+    function connectEvents(){
+      const es = new EventSource(`${BRIDGE}/events`);
+      es.addEventListener('memory-change', async () => {
+        try { await loadSnapshot(); } catch { return; }
+        if (state.transitioning) { buildDrum(); return; }
+        const prevIds = state.items.map(i => i.id);
+        const result = H.reconcileView(currentViewSnapshot(), prevIds, state.snapshot);
+        if (result.status === 'invalid') {
+          const restored = H.reconcilePop(state.history, state.snapshot);
+          state.view = restored ?? { level: 'projects', projectId: null, districtId: null, centeredId: null, rotation: 0, itemIds: [] };
+          showToast(restored ? 'This view emptied — zoomed out to the last valid one.' : 'This view emptied — back to all projects.');
+        } else {
+          state.view = result.view;
+          if (result.status === 'neighbor') showToast('The centered card was removed — showing its neighbor.');
+        }
+        buildDrum();
+      });
+      es.onerror = () => { els.connState.textContent = 'Stream lost — retrying…'; };
+      es.addEventListener('hello', () => { els.connState.textContent = 'Live'; });
+    }
+    connectEvents();
     els.retryBtn.addEventListener('click', init);
     await init();
     tick();
