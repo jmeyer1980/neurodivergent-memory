@@ -267,7 +267,10 @@ export function reconcilePop(history, snapshot) {
 
 // ---------- gesture routing (spec input map) ----------
 // insideReader is only true when the pointer is inside the front card's
-// scrollable reader area, which only exists at the memories level.
+// scrollable reader area (memories level, content actually overflowing).
+// It gates SCROLLING only: clicks dive at every level, because a reader that
+// eats clicks reads as a broken app. Controls inside a card (Edit, links) are
+// exempted by the page's DOM guard before this is ever consulted.
 
 export function routeGesture(kind, ctx) {
   const { level, insideReader } = ctx;
@@ -277,8 +280,8 @@ export function routeGesture(kind, ctx) {
     case 'hdrag': return 'spin';
     case 'ctrlWheelUp': case 'pinchSpread': case 'enter': return 'dive';
     case 'ctrlWheelDown': case 'pinchTogether': case 'rightClick': case 'esc': case 'back': return 'zoomOut';
-    case 'clickCentered': return level === 'memories' ? 'none' : 'dive';
-    case 'clickOther': return level === 'memories' ? 'centerOnly' : 'centerThenDive';
+    case 'clickCentered': return 'dive';
+    case 'clickOther': return 'centerThenDive';
     case 'arrowLeft': return 'stepPrev';
     case 'arrowRight': return 'stepNext';
     default: return 'none';

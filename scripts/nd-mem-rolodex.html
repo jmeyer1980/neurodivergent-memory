@@ -244,11 +244,8 @@
         : level === 'districts' ? `<strong>${esc(projectId)}</strong>`
         : `<strong>${esc(projectId)}</strong> ▸ ${esc(districtId)}`;
       els.position.textContent = state.items.length ? `card ${state.frontIndex + 1} / ${state.items.length}` : '—';
-      // At the memories level a click reads, never dives — advertising "click
-      // to dive" there sent people clicking a reading surface and concluding
-      // the app was broken.
       els.hudHint.textContent = level === 'memories'
-        ? 'Scroll to spin · scroll inside the card to read · Ctrl+scroll up dives onward · right-click / Esc goes back'
+        ? 'Scroll to spin · scroll inside the card to read · click to dive onward · right-click / Esc goes back'
         : 'Scroll to spin · click a card to dive · right-click / Esc to zoom out · Ctrl+scroll zooms';
     }
 
@@ -531,7 +528,12 @@
         const under = document.elementFromPoint(e.clientX, e.clientY);
         if (under instanceof Element && under.closest('.card3d[data-idx]')) hit = under;
       }
-      if (hit && hit.closest('button, a, .reader-scroll')) return;
+      // `.reader-scroll` is deliberately NOT exempt any more: clicking the
+      // memory text dives onward like clicking anywhere else on the card.
+      // Reading is still safe — wheel-inside-the-reader scrolls (see
+      // insideReader), and a text-selection drag exceeds the click threshold
+      // and suppresses its own click.
+      if (hit && hit.closest('button, a')) return;
       const card = hit ? hit.closest('.card3d[data-idx]') : null;
       const idx = card ? Number(card.dataset.idx) : cardIndexAtPoint(e.clientX, e.clientY);
       if (idx < 0) return;

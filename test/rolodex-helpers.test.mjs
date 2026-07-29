@@ -275,12 +275,15 @@ test('routeGesture implements the spec input map', () => {
     assert.equal(routeGesture(out, at('projects')), 'zoomOut', out);
     assert.equal(routeGesture(out, at('memories', true)), 'zoomOut', out);
   }
-  // Clicks are level-dependent: memories cards are a reading surface.
   assert.equal(routeGesture('clickCentered', at('projects')), 'dive');
   assert.equal(routeGesture('clickCentered', at('districts')), 'dive');
-  assert.equal(routeGesture('clickCentered', at('memories')), 'none');
+  // Clicks dive at EVERY level, memories included: the reader scrolls, it does
+  // not swallow clicks. Only real controls (Edit, links) are exempt, and that
+  // exemption lives in the page's DOM guard, not here.
+  assert.equal(routeGesture('clickCentered', at('memories')), 'dive');
+  assert.equal(routeGesture('clickOther', at('memories')), 'centerThenDive');
+  assert.equal(routeGesture('clickCentered', at('memories', true)), 'dive');
   assert.equal(routeGesture('clickOther', at('projects')), 'centerThenDive');
-  assert.equal(routeGesture('clickOther', at('memories')), 'centerOnly');
   assert.equal(routeGesture('arrowLeft', at('districts')), 'stepPrev');
   assert.equal(routeGesture('arrowRight', at('districts')), 'stepNext');
   assert.equal(routeGesture('bogus', at('projects')), 'none');
