@@ -5,6 +5,8 @@ import {
   projectOf, districtOf, deriveProjects, deriveDistricts, deriveMemories,
   anglePerCard, drumRadius, normalizeAngle, shortestDelta,
   nearestIndex, rotationForIndex, snapTarget,
+  FAN_MAX_CARDS, isFanCount, fanStep, fanRadius, drumLayout,
+  rotationForCard, indexAtRotation, snapRotation, clampRotation,
   LEVELS, nextLevel, createHistory, pushView, popView, atWall,
   itemIdsForView, reconcileView, reconcilePop,
   routeGesture,
@@ -101,6 +103,79 @@ test('nearestIndex / rotationForIndex / snapTarget agree', () => {
   assert.equal(snapTarget(-449, 4), -450);
   assert.equal(snapTarget(-451, 4), -450);
   assert.equal(snapTarget(3601, 4), 3600);
+});
+
+test('fan applies to 1-4 cards only', () => {
+  assert.equal(FAN_MAX_CARDS, 4);
+  assert.deepEqual([0, 1, 2, 3, 4, 5, 12].map(isFanCount), [false, true, true, true, true, false, false]);
+});
+
+test('fan angles are symmetric and never exceed 60 degrees', () => {
+  for (const n of [1, 2, 3, 4]) {
+    const { angles, mode } = drumLayout(340, n);
+    assert.equal(mode, 'fan');
+    assert.equal(angles.length, n);
+    assert.ok(Math.max(...angles.map(Math.abs)) <= 60, `n=${n} exceeded 60deg`);
+    // symmetric about 0: first and last are equal and opposite
+    assert.ok(Math.abs(angles[0] + angles[n - 1]) < 1e-9, `n=${n} not symmetric`);
+  }
+  assert.deepEqual(drumLayout(340, 1).angles, [0]);
+  assert.deepEqual(drumLayout(340, 2).angles.map(Math.round), [-20, 20]);
+  assert.deepEqual(drumLayout(340, 3).angles.map(Math.round), [-35, 0, 35]);
+  assert.deepEqual(drumLayout(340, 4).angles.map(Math.round), [-50, -17, 17, 50]);
+});
+
+test('cylinder layout is unchanged from the old uniform math', () => {
+  const layout = drumLayout(340, 12);
+  assert.equal(layout.mode, 'cylinder');
+  assert.equal(layout.step, 30);
+  assert.deepEqual(layout.angles.slice(0, 3), [0, 30, 60]);
+  assert.equal(layout.radius, drumRadius(340, 12));
+  assert.equal(layout.minRotation, -Infinity);
+  assert.equal(layout.maxRotation, Infinity);
+});
+
+test('fan radius keeps adjacent cards from overlapping, with the 260 floor', () => {
+  assert.equal(fanRadius(340, 1), 260);           // single card: floor
+  assert.ok(fanRadius(340, 2) > 490, 'two cards need room for a 340px chord');
+  assert.ok(fanRadius(340, 4) > fanRadius(340, 2), 'tighter step needs more radius');
+  assert.ok(fanRadius(560, 3) > fanRadius(340, 3), 'wider cards need more radius');
+  assert.equal(fanRadius(10, 3), 260);            // tiny cards still respect the floor
+});
+
+test('rotationForCard centers each card in both modes', () => {
+  for (const n of [1, 2, 3, 4, 7, 12]) {
+    const layout = drumLayout(340, n);
+    for (let i = 0; i < n; i++) {
+      const rot = rotationForCard(i, layout);
+      assert.equal(indexAtRotation(rot, layout), i, `mode=${layout.mode} n=${n} i=${i}`);
+    }
+  }
+});
+
+test('fan rotation clamps at the ends; cylinder wraps freely', () => {
+  const fan = drumLayout(340, 3);            // angles -35, 0, 35 -> rotation range -35..35
+  assert.equal(fan.maxRotation, 35);
+  assert.equal(fan.minRotation, -35);
+  assert.equal(clampRotation(200, fan), 35);
+  assert.equal(clampRotation(-200, fan), -35);
+  assert.equal(clampRotation(10, fan), 10);
+  // out-of-range rotations still resolve to the end cards, never past them
+  assert.equal(indexAtRotation(-999, fan), 2);
+  assert.equal(indexAtRotation(999, fan), 0);
+
+  const cyl = drumLayout(340, 12);
+  assert.equal(clampRotation(5000, cyl), 5000, 'cylinder must not clamp');
+  assert.equal(clampRotation(-5000, cyl), -5000);
+});
+
+test('snapRotation stays near the continuous rotation on a cylinder', () => {
+  const cyl = drumLayout(340, 12); // step 30
+  assert.equal(snapRotation(-359, cyl), -360);
+  assert.equal(snapRotation(3601, cyl), 3600);
+  const fan = drumLayout(340, 2);     // angles -20, 20
+  assert.equal(snapRotation(19, fan), 20);
+  assert.equal(snapRotation(-19, fan), -20);
 });
 
 test('nextLevel cycles projects -> districts -> memories -> projects', () => {

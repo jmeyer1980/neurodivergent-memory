@@ -105,6 +105,91 @@ export function snapTarget(rotation, count) {
   return rotation + shortestDelta(rotation, rotationForIndex(idx, count));
 }
 
+// ---------- drum layout: fan (<= 4 cards) vs cylinder (>= 5) ----------
+// A 1-4 card cylinder is degenerate: two cards face away from each other, four
+// make a cube showing one face. Small drums instead fan forward so every card
+// is visible at once, which is how you see at a glance that a project has
+// exactly three districts. Fan mode trades wrap-around for end clamping.
+
+export const FAN_MAX_CARDS = 4;
+
+// Total arc each count spreads over. Capped so no card passes 60 degrees,
+// beyond which a card is edge-on and unreadable.
+const FAN_SPREAD_DEG = { 1: 0, 2: 40, 3: 70, 4: 100 };
+
+export function isFanCount(count) {
+  return count > 0 && count <= FAN_MAX_CARDS;
+}
+
+export function fanStep(count) {
+  if (count <= 1) return 0;
+  return (FAN_SPREAD_DEG[count] ?? FAN_SPREAD_DEG[FAN_MAX_CARDS]) / (count - 1);
+}
+
+// Adjacent card centers sit a chord apart on the arc; the chord must be at
+// least a card wide or the faces overlap and hide each other.
+export function fanRadius(cardWidth, count, minRadius = 260) {
+  const step = fanStep(count);
+  if (step <= 0) return minRadius;
+  const chordHalfAngle = (step / 2) * Math.PI / 180;
+  return Math.max(minRadius, Math.ceil(cardWidth / (2 * Math.sin(chordHalfAngle))));
+}
+
+// One descriptor per drum build. Every geometry consumer (placement, hit
+// testing, snapping, clamping) reads from this, so fan and cylinder never
+// need branching at the call site.
+export function drumLayout(cardWidth, count) {
+  if (isFanCount(count)) {
+    const step = fanStep(count);
+    const mid = (count - 1) / 2;
+    const angles = Array.from({ length: count }, (_, i) => (i - mid) * step);
+    return {
+      mode: 'fan', count, step,
+      radius: fanRadius(cardWidth, count),
+      angles,
+      minRotation: -angles[count - 1],
+      maxRotation: -angles[0],
+    };
+  }
+  const step = count > 0 ? 360 / count : 0;
+  return {
+    mode: 'cylinder', count, step,
+    radius: drumRadius(cardWidth, count),
+    angles: Array.from({ length: count }, (_, i) => i * step),
+    minRotation: -Infinity,
+    maxRotation: Infinity,
+  };
+}
+
+export function rotationForCard(index, layout) {
+  if (!layout || !layout.count || index < 0 || index >= layout.count) return 0;
+  return -layout.angles[index];
+}
+
+export function indexAtRotation(rotation, layout) {
+  if (!layout || layout.count <= 0) return -1;
+  if (layout.count === 1) return 0;
+  if (layout.mode === 'fan') {
+    const mid = (layout.count - 1) / 2;
+    const raw = Math.round(mid - rotation / layout.step);
+    return Math.min(layout.count - 1, Math.max(0, raw));
+  }
+  return Math.round(normalizeAngle(-rotation) / layout.step) % layout.count;
+}
+
+export function snapRotation(rotation, layout) {
+  if (!layout || layout.count <= 0) return rotation;
+  const target = rotationForCard(indexAtRotation(rotation, layout), layout);
+  // Fan targets are absolute; a cylinder must keep the turns it has
+  // accumulated, so approach the target the short way round instead.
+  return layout.mode === 'fan' ? target : rotation + shortestDelta(rotation, target);
+}
+
+export function clampRotation(rotation, layout) {
+  if (!layout || layout.mode !== 'fan') return rotation;
+  return Math.min(layout.maxRotation, Math.max(layout.minRotation, rotation));
+}
+
 // ---------- levels & history ----------
 // A "view" is { level, projectId, districtId, centeredId, rotation, itemIds }.
 // itemIds records the drum's item ids at push time so a later pop can find a
