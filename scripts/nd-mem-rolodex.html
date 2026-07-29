@@ -65,6 +65,20 @@
     .span2{grid-column:span 2}
     .foot{display:flex;justify-content:flex-end;gap:10px;margin-top:16px}
     #hud{position:fixed;inset:auto 0 0 0;z-index:10;display:flex;justify-content:center;padding:16px;pointer-events:none}
+    #minimap{position:fixed;left:0;top:64px;bottom:64px;z-index:9;display:flex;flex-direction:column;justify-content:flex-end;align-items:flex-start;gap:8px;padding:10px;pointer-events:none}
+    #minimap>*{pointer-events:auto}
+    #mapToggle{font-size:.7rem;letter-spacing:.08em;text-transform:uppercase;padding:6px 10px}
+    #mapBody{max-height:100%;overflow:auto;border-radius:16px;border:1px solid var(--surfaceBorder);background:var(--surface);backdrop-filter:blur(10px);padding:6px}
+    #minimap.collapsed #mapBody{display:none}
+    #mapBody svg{display:block}
+    #mapBody .edge{stroke:var(--faint);stroke-width:1.5;opacity:.45}
+    #mapBody .edge.on{stroke:var(--primary);opacity:.9}
+    #mapBody .node{fill:var(--surface);stroke:var(--faint);stroke-width:1.5;cursor:pointer}
+    #mapBody .node.on{stroke:var(--primary)}
+    #mapBody .node.cursor{fill:var(--primary);stroke:var(--primary)}
+    #mapBody .node:hover{stroke:var(--text)}
+    @media (prefers-reduced-motion: no-preference){#mapBody .node.cursor{animation:pulse 1.8s ease-in-out infinite}}
+    @keyframes pulse{0%,100%{r:5}50%{r:7}}
     #overlay{position:fixed;inset:0;z-index:20;display:none;align-items:center;justify-content:center;background:rgba(7,10,12,.7)}
     #overlay.open{display:flex}
     #overlay .box{max-width:420px;text-align:center;padding:28px;border-radius:24px;background:var(--overlayBg);border:1px solid var(--surfaceBorder)}
@@ -93,6 +107,7 @@
   </div>
   <div id="stage" data-level="projects"><div id="scene"><div id="drum"></div></div></div>
   <div id="hud"><span class="pill" id="hudHint">Scroll to spin · click a card to dive · right-click / Esc to zoom out · Ctrl+scroll zooms</span></div>
+  <div id="minimap"><div id="mapBody"></div><button class="pill" id="mapToggle" title="Toggle the exploration map">Map 0^0</button></div>
   <div id="overlay"><div class="box"><h2>Bridge offline</h2><p id="overlayMsg">Could not reach the bridge. Start it with <code>node scripts/nd-mem-bridge-server.mjs</code> and retry.</p><button class="btn primary" id="retryBtn">Retry</button></div></div>
   <div class="modalbg" id="editModalBg">
     <div class="modal">
@@ -117,7 +132,7 @@
     const REDUCED = matchMedia('(prefers-reduced-motion: reduce)').matches;
 
     const $ = s => document.querySelector(s);
-    const els = { stage: $('#stage'), scene: $('#scene'), drum: $('#drum'), crumb: $('#crumb'), levelName: $('#levelName'), position: $('#position'), connState: $('#connState'), backBtn: $('#backBtn'), overlay: $('#overlay'), overlayMsg: $('#overlayMsg'), retryBtn: $('#retryBtn'), toast: $('#toast'), hudHint: $('#hudHint') };
+    const els = { stage: $('#stage'), scene: $('#scene'), drum: $('#drum'), crumb: $('#crumb'), levelName: $('#levelName'), position: $('#position'), connState: $('#connState'), backBtn: $('#backBtn'), overlay: $('#overlay'), overlayMsg: $('#overlayMsg'), retryBtn: $('#retryBtn'), toast: $('#toast'), hudHint: $('#hudHint'), minimap: $('#minimap'), mapBody: $('#mapBody'), mapToggle: $('#mapToggle') };
 
     const state = {
       snapshot: { memories: {} },
@@ -247,6 +262,25 @@
     }
 
     function depthNow(){ return H.navDepth(state.tree); }
+    // The map is drawn from the tree itself, never from a parallel record, so
+    // it cannot drift out of sync with where you can actually go. A layout
+    // failure must not take navigation down with it — the rail hides instead.
+    function renderMinimap(){
+      els.mapToggle.textContent = `Map 0^${depthNow()}`;
+      if (els.minimap.classList.contains('collapsed')) return;
+      try {
+        const laid = H.layoutNavTree(state.tree);
+        const edges = laid.edges.map(e =>
+          `<line class="edge${e.onPath ? ' on' : ''}" x1="${e.x1}" y1="${e.y1}" x2="${e.x2}" y2="${e.y2}" />`).join('');
+        const nodes = laid.nodes.map(n =>
+          `<circle class="node${n.onPath ? ' on' : ''}${n.isCursor ? ' cursor' : ''}" data-node="${n.id}" cx="${n.x}" cy="${n.y}" r="5"><title>${esc(n.label)} (0^${n.depth})</title></circle>`).join('');
+        els.mapBody.innerHTML = `<svg width="${laid.width}" height="${laid.height}" viewBox="0 0 ${laid.width} ${laid.height}">${edges}${nodes}</svg>`;
+        els.mapBody.scrollTop = 0; // deepest row is at the top; keep the frontier in view
+      } catch (err) {
+        console.error('minimap layout failed', err);
+        els.minimap.style.display = 'none';
+      }
+    }
     function updateChrome(){
       const { level, projectId, districtId } = state.view;
       els.levelName.textContent = `${level[0].toUpperCase() + level.slice(1)} · 0^${depthNow()}`;
@@ -271,6 +305,7 @@
       els.hudHint.textContent = level === 'memories'
         ? 'Scroll to spin · scroll inside the card to read · click to dive onward · right-click / Esc goes back'
         : 'Scroll to spin · click a card to dive · right-click / Esc to zoom out · Ctrl+scroll zooms';
+      renderMinimap();
     }
 
     function stepBy(n){
@@ -400,6 +435,21 @@
       if (nodeId === null) { showToast('That step is not on the path you walked.'); return; }
       jumpToNode(nodeId);
     });
+
+    els.mapBody.addEventListener('click', (e) => {
+      const circle = e.target instanceof Element ? e.target.closest('[data-node]') : null;
+      if (!circle) return;
+      const id = Number(circle.dataset.node);
+      if (id === state.tree.cursor) return;
+      jumpToNode(id);
+    });
+    const MAP_KEY = 'ndmem.rolodex.minimap';
+    els.mapToggle.addEventListener('click', () => {
+      const collapsed = els.minimap.classList.toggle('collapsed');
+      try { localStorage.setItem(MAP_KEY, collapsed ? 'collapsed' : 'open'); } catch {}
+      renderMinimap();
+    });
+    try { if (localStorage.getItem(MAP_KEY) === 'collapsed') els.minimap.classList.add('collapsed'); } catch {}
 
     // ---------- animation loop ----------
     function tick(){
