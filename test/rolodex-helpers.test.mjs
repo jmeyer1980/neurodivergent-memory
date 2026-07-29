@@ -434,3 +434,65 @@ test('navRemapProject rewrites the id across every node, dead branches included'
   assert.equal(navNode(t, 2).view.projectId, 'ALPHA', 'the abandoned branch is remapped too');
   assert.equal(navNode(t, 3).view.projectId, 'beta', 'other projects untouched');
 });
+
+import { coordinateOf, navNodeLabel, layoutNavTree } from '../scripts/nd-mem-rolodex-helpers.mjs';
+
+test('coordinateOf builds a depth-prefixed path with jump targets', () => {
+  const projects = coordinateOf(v('projects', null, null), 0, 'alpha');
+  assert.deepEqual(projects.map(s => s.kind), ['depth', 'leaf']);
+  assert.equal(projects[0].text, '0^0');
+  assert.equal(projects[0].target, null);
+  assert.equal(projects[1].text, 'alpha');
+
+  const memories = coordinateOf(v('memories', 'alpha', 'practical_execution'), 7, 'mem_3');
+  assert.deepEqual(memories.map(s => s.kind), ['depth', 'project', 'district', 'leaf']);
+  assert.equal(memories[0].text, '0^7');
+  assert.deepEqual(memories[1].target, { level: 'districts', projectId: 'alpha', districtId: null });
+  assert.deepEqual(memories[2].target, { level: 'memories', projectId: 'alpha', districtId: 'practical_execution' });
+  assert.equal(memories[3].target, null, 'the leaf is where you already are');
+  assert.equal(memories[3].text, 'mem_3');
+});
+
+test('coordinateOf tolerates an empty drum', () => {
+  const segs = coordinateOf(v('districts', 'alpha', null), 1, null);
+  assert.deepEqual(segs.map(s => s.kind), ['depth', 'project']);
+  assert.equal(segs[0].text, '0^1');
+});
+
+test('navNodeLabel names a node by what you dove into', () => {
+  assert.equal(navNodeLabel({ id: 0, parentId: null, view: v('projects', null, null) }), 'start');
+  assert.equal(navNodeLabel({ id: 3, parentId: 2, view: v('projects', null, null) }), 'wrap');
+  assert.equal(navNodeLabel({ id: 1, parentId: 0, view: v('districts', 'alpha', null) }), 'alpha');
+  assert.equal(navNodeLabel({ id: 2, parentId: 1, view: v('memories', 'alpha', 'logical_analysis') }), 'logical_analysis');
+});
+
+test('layoutNavTree grows upward from a bottom root and marks the active path', () => {
+  const t = createNavTree(ROOT_VIEW);
+  navPush(t, v('districts', 'alpha', null));      // id 1
+  navPush(t, v('memories', 'alpha', 'practical_execution')); // id 2
+  navBack(t); navBack(t);
+  navPush(t, v('districts', 'beta', null));       // id 3, cursor here
+
+  const laid = layoutNavTree(t);
+  const byId = Object.fromEntries(laid.nodes.map(n => [n.id, n]));
+  assert.equal(laid.nodes.length, 4);
+  assert.equal(byId[0].depth, 0);
+  assert.equal(byId[2].depth, 2);
+  assert.ok(byId[0].y > byId[1].y, 'root sits below its children (SVG y grows downward)');
+  assert.ok(byId[1].y > byId[2].y, 'deeper nodes sit higher');
+  assert.ok(byId[1].x !== byId[3].x, 'siblings are spread apart');
+  assert.equal(byId[3].isCursor, true);
+  assert.equal(byId[3].onPath, true);
+  assert.equal(byId[0].onPath, true);
+  assert.equal(byId[2].onPath, false, 'the abandoned branch is off the active path');
+  assert.equal(laid.edges.length, 3);
+  assert.ok(laid.width > 0 && laid.height > 0);
+  assert.ok(laid.nodes.every(n => n.x >= 0 && n.y >= 0), 'coordinates stay inside the viewbox');
+});
+
+test('layoutNavTree handles a lone root', () => {
+  const laid = layoutNavTree(createNavTree(ROOT_VIEW));
+  assert.equal(laid.nodes.length, 1);
+  assert.equal(laid.edges.length, 0);
+  assert.equal(laid.nodes[0].isCursor, true);
+});

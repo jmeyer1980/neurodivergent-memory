@@ -398,3 +398,91 @@ export function navRemapProject(tree, oldId, newId) {
     node.view.itemIds = (node.view.itemIds || []).map(id => (id === oldId ? newId : id));
   }
 }
+
+// ---------- coordinate + minimap geometry ----------
+
+// `0^N > project > district > centered-card`. N is total dives, so the badge
+// alone answers "how deep am I in the fractal" without a second counter.
+export function coordinateOf(view, depth, centeredId) {
+  const segments = [{ kind: 'depth', text: `0^${depth}`, target: null }];
+  if (view.projectId != null) {
+    segments.push({
+      kind: 'project',
+      text: String(view.projectId),
+      target: { level: 'districts', projectId: view.projectId, districtId: null },
+    });
+  }
+  if (view.districtId != null) {
+    segments.push({
+      kind: 'district',
+      text: String(view.districtId),
+      target: { level: 'memories', projectId: view.projectId, districtId: view.districtId },
+    });
+  }
+  if (centeredId != null) segments.push({ kind: 'leaf', text: String(centeredId), target: null });
+  return segments;
+}
+
+export function navNodeLabel(node) {
+  const { level, projectId, districtId } = node.view;
+  if (node.parentId === null) return 'start';
+  if (level === 'districts') return String(projectId);
+  if (level === 'memories') return String(districtId);
+  return 'wrap';
+}
+
+const MINIMAP_COL = 26;   // px between sibling columns
+const MINIMAP_ROW = 34;   // px between depth rows
+const MINIMAP_PAD = 14;
+
+// Tidy-ish layout: every leaf takes the next column, every parent centers over
+// its children, and depth maps to a row counted UP from the bottom so the tree
+// grows the way it is drawn — root on the floor.
+export function layoutNavTree(tree) {
+  const depthOf = new Map();
+  const xOf = new Map();
+  let nextColumn = 0;
+  let maxDepth = 0;
+
+  const walk = (node, depth) => {
+    depthOf.set(node.id, depth);
+    if (depth > maxDepth) maxDepth = depth;
+    const children = node.childIds.map(id => navNode(tree, id));
+    if (!children.length) {
+      xOf.set(node.id, nextColumn++);
+      return;
+    }
+    for (const child of children) walk(child, depth + 1);
+    const first = xOf.get(children[0].id);
+    const last = xOf.get(children[children.length - 1].id);
+    xOf.set(node.id, (first + last) / 2);
+  };
+  walk(navNode(tree, 0), 0);
+
+  const onPath = new Set(navActivePath(tree).map(n => n.id));
+  const height = MINIMAP_PAD * 2 + maxDepth * MINIMAP_ROW;
+  const px = id => MINIMAP_PAD + xOf.get(id) * MINIMAP_COL;
+  const py = id => height - MINIMAP_PAD - depthOf.get(id) * MINIMAP_ROW;
+
+  const nodes = tree.nodes.map(node => ({
+    id: node.id,
+    x: px(node.id),
+    y: py(node.id),
+    depth: depthOf.get(node.id),
+    onPath: onPath.has(node.id),
+    isCursor: node.id === tree.cursor,
+    label: navNodeLabel(node),
+  }));
+
+  const edges = [];
+  for (const node of tree.nodes) {
+    if (node.parentId === null) continue;
+    edges.push({
+      x1: px(node.parentId), y1: py(node.parentId),
+      x2: px(node.id), y2: py(node.id),
+      onPath: onPath.has(node.id) && onPath.has(node.parentId),
+    });
+  }
+
+  return { nodes, edges, width: MINIMAP_PAD * 2 + Math.max(0, nextColumn - 1) * MINIMAP_COL, height };
+}
