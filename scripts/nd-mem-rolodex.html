@@ -124,6 +124,9 @@
       dragging: false,
       transitioning: false,
       frontIndex: -1,
+      frontEl: null,        // the .card3d currently wearing .front, so updates touch two cards, not N
+      stepTarget: null,     // arrow-key destination the tick loop eases toward (null = no step pending)
+      gestureGain: 1,       // gesture degrees are scaled by this so a gesture moves a constant number of CARDS
       lastBounceAt: 0,
       editingId: null,
     };
@@ -148,10 +151,16 @@
       if (item.kind === 'project') return `<span class="kicker">Project</span><h2>${esc(d.id)}</h2><div class="chips"><span class="chip">${d.memoryCount} memories</span><span class="chip">${d.districtCount} district${d.districtCount === 1 ? '' : 's'}</span></div>`;
       if (item.kind === 'district') return `<span class="kicker">District</span><h2>${esc(d.id)}</h2><div class="chips"><span class="chip">${d.memoryCount} memories</span>${d.topTags.map(t => `<span class="chip">${esc(t)}</span>`).join('')}</div>`;
       const metaRow = (label, value) => `<div class="mini"><label>${label}</label><span>${esc(value)}</span></div>`;
+      // Content is deliberately NOT baked in twice (or in full) here. A real
+      // bucket holds hundreds of memories of ~2KB each, and this string is
+      // rebuilt on every SSE memory-change: emitting both copies cost ~1.25MB of
+      // innerHTML per rebuild. The preview is clipped by overflow:hidden anyway
+      // so 300 chars is more than the card can show, and the reader is filled by
+      // updateFrontCard for the one card that is actually facing the camera.
       return `<span class="kicker">${esc(d.id)} · ${esc(d.district || 'uncategorized')}</span>`
         + `<h2>${esc(d.name || '(untitled)')}</h2>`
-        + `<p class="preview">${esc(d.content)}</p>`
-        + `<div class="reader-scroll">${esc(d.content)}</div>`
+        + `<p class="preview">${esc(String(d.content ?? '').slice(0, 300))}</p>`
+        + `<div class="reader-scroll"></div>`
         + `<div class="meta">${metaRow('Intensity', d.intensity ?? '—')}${metaRow('Visibility', d.visibility || 'private')}${metaRow('Created', fmt(d.created))}${metaRow('Tags', (d.tags || []).length)}</div>`
         + `<div class="chips">${(d.tags || []).slice(0, 4).map(t => `<span class="chip">${esc(t)}</span>`).join('')}</div>`
         + `<div class="actions"><button class="btn" data-edit="${esc(d.id)}">Edit</button></div>`;
@@ -163,9 +172,20 @@
       state.radius = H.drumRadius(CARD_W, n);
       els.stage.dataset.level = state.view.level;
       const theta = H.anglePerCard(n);
+      // Gestures are authored in degrees, but a degree buys wildly different
+      // amounts of travel depending on drum size: one card is 30deg at n=12 and
+      // 0.99deg at n=364, so a fixed degree gain that feels right on a small
+      // drum skips ~29 cards per wheel notch on a real one. Scale by the card
+      // angle so a gesture moves a comparable number of CARDS instead. The
+      // ceiling keeps 2-3 card drums from whipping past the item you aimed at;
+      // the floor keeps a 364-card drum from needing 364 notches to lap it.
+      state.gestureGain = Math.min(3, Math.max(0.2, theta / 30));
+      state.stepTarget = null;
       if (!n) {
-        els.drum.innerHTML = `<div class="card3d front placeholder"><span class="kicker">Empty</span><h2>${state.view.level === 'projects' ? 'No memories yet' : 'Nothing here'}</h2><p>Store a memory through MCP or the classic app and it will appear.</p></div>`;
-        state.rotation = 0; state.velocity = 0; state.frontIndex = -1;
+        // translateZ puts the placeholder on the camera plane, where real cards
+        // sit; at z=0 it renders a drum-radius deep and reads as a recessed card.
+        els.drum.innerHTML = `<div class="card3d front placeholder" style="transform:translateZ(${state.radius}px)"><span class="kicker">Empty</span><h2>${state.view.level === 'projects' ? 'No memories yet' : 'Nothing here'}</h2><p>Store a memory through MCP or the classic app and it will appear.</p></div>`;
+        state.rotation = 0; state.velocity = 0; state.frontIndex = -1; state.frontEl = null;
         applyDrumTransform(); updateChrome(); return;
       }
       els.drum.innerHTML = state.items.map((item, i) =>
@@ -173,6 +193,7 @@
       const idx = Math.max(0, state.items.findIndex(i => i.id === state.view.centeredId));
       state.rotation = H.rotationForIndex(idx, n);
       state.velocity = 0;
+      state.frontEl = null; // the old element is gone with the innerHTML it lived in
       applyDrumTransform();
       updateFrontCard(true);
     }
@@ -181,12 +202,32 @@
       els.drum.style.transform = `translateZ(${-state.radius}px) rotateY(${state.rotation}deg)`;
     }
 
+    // The reader's text lives on exactly one card at a time. Keeping it in the
+    // markup of all N cards is what made a 364-memory drum unusable; textContent
+    // also needs no escaping, unlike the innerHTML path cardFace has to use.
+    function fillReader(el, text){
+      const rs = el && el.querySelector('.reader-scroll'); // absent on project/district cards
+      if (rs) rs.textContent = text;
+    }
+
     function updateFrontCard(force = false){
       const n = state.items.length;
       const idx = H.nearestIndex(state.rotation, n);
       if (!force && idx === state.frontIndex) return;
       state.frontIndex = idx;
-      els.drum.querySelectorAll('.card3d').forEach((el, i) => el.classList.toggle('front', i === idx));
+      // Cards are appended in item order, so children[idx] is the card for item idx.
+      const next = idx >= 0 ? (els.drum.children[idx] ?? null) : null;
+      if (force) {
+        // buildDrum just rewrote the drum: every card needs its class settled.
+        els.drum.querySelectorAll('.card3d').forEach((el, i) => el.classList.toggle('front', i === idx));
+      } else if (state.frontEl !== next) {
+        // Steady state touches two cards. Sweeping all N here ran once per front
+        // change, i.e. many times a second during a spin, on every card.
+        if (state.frontEl) { state.frontEl.classList.remove('front'); fillReader(state.frontEl, ''); }
+        if (next) next.classList.add('front');
+      }
+      state.frontEl = next;
+      fillReader(next, state.items[idx]?.data?.content ?? '');
       state.view.centeredId = centeredItem()?.id ?? null;
       updateChrome();
     }
@@ -204,9 +245,13 @@
       const count = state.items.length;
       if (!count || state.transitioning) return;
       const target = H.rotationForIndex(((state.frontIndex + n) % count + count) % count, count);
-      state.rotation += H.shortestDelta(state.rotation, target);
-      if (REDUCED) applyDrumTransform();
+      const goal = state.rotation + H.shortestDelta(state.rotation, target);
       state.velocity = 0;
+      // One card is ~1deg on a 364-card drum. Assigning the rotation outright
+      // moved the drum by a hair in a single frame, which reads as "the arrow
+      // keys do nothing"; easing to the same place is legible at any card angle.
+      if (REDUCED) { state.stepTarget = null; state.rotation = goal; applyDrumTransform(); }
+      else state.stepTarget = goal;
     }
 
     // ---------- dive / zoom out ----------
@@ -272,7 +317,11 @@
     // ---------- animation loop ----------
     function tick(){
       if (!state.transitioning && !state.dragging && state.items.length) {
-        if (Math.abs(state.velocity) > 0.02) {
+        if (state.stepTarget != null) {
+          const d = state.stepTarget - state.rotation;
+          if (Math.abs(d) > 0.05) state.rotation += d * 0.14;
+          else { state.rotation = state.stepTarget; state.stepTarget = null; }
+        } else if (Math.abs(state.velocity) > 0.02) {
           state.rotation += state.velocity;
           state.velocity *= 0.93;
         } else {
@@ -310,7 +359,8 @@
       // while transitioning, so notches spun over the ~700ms the new drum is
       // already visible would all release at once as a multi-card lurch.
       if (state.transitioning) return;
-      state.velocity = Math.max(-30, Math.min(30, state.velocity + dy * 0.02));
+      state.stepTarget = null; // a live gesture outranks a pending arrow step
+      state.velocity = Math.max(-30, Math.min(30, state.velocity + dy * 0.02 * state.gestureGain));
     }, { passive: false });
     function ctx(e){ return { level: state.view.level, insideReader: insideReader(e.target) }; }
 
@@ -328,7 +378,7 @@
         pinchStart = Math.hypot(a.x - b.x, a.y - b.y);
       } else if (pointers.size === 1) {
         dragMoved = 0;
-        if (!insideReader(e.target)) { state.dragging = true; state.velocity = 0; }
+        if (!insideReader(e.target)) { state.dragging = true; state.velocity = 0; state.stepTarget = null; }
       }
     });
     els.stage.addEventListener('pointermove', (e) => {
@@ -344,9 +394,12 @@
         return;
       }
       if (state.dragging) {
-        dragMoved += Math.abs(dx) + Math.abs(dy);
-        state.rotation += dx * 0.22;
-        state.velocity = dx * 0.22;
+        dragMoved += Math.abs(dx) + Math.abs(dy); // outside the guard: a drag that
+        // crossed the click threshold must still suppress the click it ends with
+        if (!state.items.length) return; // the empty-state placeholder has no drum to spin
+        const spin = dx * 0.22 * state.gestureGain;
+        state.rotation += spin;
+        state.velocity = Math.max(-30, Math.min(30, spin)); // same rail as the wheel
         applyDrumTransform();
         updateFrontCard();
       }
@@ -383,6 +436,7 @@
         const target = H.rotationForIndex(idx, state.items.length);
         state.rotation += H.shortestDelta(state.rotation, target);
         state.velocity = 0;
+        state.stepTarget = null; // centering on a clicked card overrides a pending arrow step
         applyDrumTransform(); updateFrontCard();
       }
       if (action === 'dive' || action === 'centerThenDive') dive();
