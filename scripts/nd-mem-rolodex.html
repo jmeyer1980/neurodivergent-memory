@@ -29,7 +29,7 @@
     #scene.bouncing{animation:wallbounce .45s ease}
     @keyframes wallbounce{0%{transform:translateZ(0)}35%{transform:translateZ(-90px)}100%{transform:translateZ(0)}}
     #drum{position:relative;width:var(--cardW);height:var(--cardH);transform-style:preserve-3d}
-    #stage[data-level="memories"]{--cardH:460px}
+    #stage[data-level="memories"]{--cardH:500px}
     .card3d{position:absolute;inset:0;display:flex;flex-direction:column;gap:10px;padding:18px;border-radius:24px;border:1px solid var(--surfaceBorder);background:var(--cardWash),radial-gradient(circle at top right,rgba(96,215,210,.16),transparent 38%),var(--surface);box-shadow:0 18px 40px rgba(0,0,0,.35);backface-visibility:hidden;transition:opacity .3s,box-shadow .3s,border-color .3s;opacity:.55}
     .card3d.front{opacity:1;border-color:rgba(96,215,210,.4);box-shadow:0 24px 60px rgba(0,0,0,.5),0 0 30px rgba(96,215,210,.12)}
     .card3d .kicker{font-size:.7rem;text-transform:uppercase;letter-spacing:.1em;color:var(--faint)}
@@ -40,7 +40,7 @@
     .card3d .reader-scroll{display:none;flex:1;min-height:0;overflow:auto;padding-right:6px;line-height:1.6;color:var(--text);font-size:.92rem;white-space:pre-wrap;user-select:text;touch-action:pan-y;overscroll-behavior:contain}
     .card3d.front .reader-scroll{display:block}
     .card3d.front .preview{display:none}
-    .card3d .meta{display:none;grid-template-columns:repeat(2,1fr);gap:8px}
+    .card3d .meta{display:none;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:8px}
     .card3d.front .meta{display:grid}
     .mini{padding:8px 10px;border-radius:12px;background:rgba(255,255,255,.04);border:1px solid var(--surfaceBorder)}
     .mini label{display:block;font-size:.66rem;color:var(--faint);text-transform:uppercase;letter-spacing:.08em;margin-bottom:3px}
@@ -85,7 +85,7 @@
     </div>
   </div>
   <div id="stage" data-level="projects"><div id="scene"><div id="drum"></div></div></div>
-  <div id="hud"><span class="pill">Scroll to spin · click to dive · right-click / Esc to zoom out · Ctrl+scroll zooms</span></div>
+  <div id="hud"><span class="pill" id="hudHint">Scroll to spin · click a card to dive · right-click / Esc to zoom out · Ctrl+scroll zooms</span></div>
   <div id="overlay"><div class="box"><h2>Bridge offline</h2><p id="overlayMsg">Could not reach the bridge. Start it with <code>node scripts/nd-mem-bridge-server.mjs</code> and retry.</p><button class="btn primary" id="retryBtn">Retry</button></div></div>
   <div class="modalbg" id="editModalBg">
     <div class="modal">
@@ -108,10 +108,9 @@
     const BRIDGE = location.protocol.startsWith('http') ? location.origin : 'http://localhost:3737';
     const H = await import(BRIDGE + '/nd-mem-rolodex-helpers.mjs');
     const REDUCED = matchMedia('(prefers-reduced-motion: reduce)').matches;
-    const CARD_W = 340;
 
     const $ = s => document.querySelector(s);
-    const els = { stage: $('#stage'), scene: $('#scene'), drum: $('#drum'), crumb: $('#crumb'), levelName: $('#levelName'), position: $('#position'), connState: $('#connState'), backBtn: $('#backBtn'), overlay: $('#overlay'), overlayMsg: $('#overlayMsg'), retryBtn: $('#retryBtn'), toast: $('#toast') };
+    const els = { stage: $('#stage'), scene: $('#scene'), drum: $('#drum'), crumb: $('#crumb'), levelName: $('#levelName'), position: $('#position'), connState: $('#connState'), backBtn: $('#backBtn'), overlay: $('#overlay'), overlayMsg: $('#overlayMsg'), retryBtn: $('#retryBtn'), toast: $('#toast'), hudHint: $('#hudHint') };
 
     const state = {
       snapshot: { memories: {} },
@@ -170,7 +169,12 @@
     function buildDrum(){
       state.items = itemsForView(state.view);
       const n = state.items.length;
-      state.radius = H.drumRadius(CARD_W, n);
+      // The reader needs line length more than the drum needs uniformity: memory
+      // cards widen (capped to the viewport) so a full meta stack still leaves
+      // readable content. The CSS var and the radius math share this one number.
+      const cardW = state.view.level === 'memories' ? Math.min(560, Math.round(window.innerWidth * 0.92)) : 340;
+      els.stage.style.setProperty('--cardW', cardW + 'px');
+      state.radius = H.drumRadius(cardW, n);
       els.stage.dataset.level = state.view.level;
       const theta = H.anglePerCard(n);
       // Gestures are authored in degrees, but a degree buys wildly different
@@ -240,6 +244,12 @@
         : level === 'districts' ? `<strong>${esc(projectId)}</strong>`
         : `<strong>${esc(projectId)}</strong> ▸ ${esc(districtId)}`;
       els.position.textContent = state.items.length ? `card ${state.frontIndex + 1} / ${state.items.length}` : '—';
+      // At the memories level a click reads, never dives — advertising "click
+      // to dive" there sent people clicking a reading surface and concluding
+      // the app was broken.
+      els.hudHint.textContent = level === 'memories'
+        ? 'Scroll to spin · scroll inside the card to read · Ctrl+scroll up dives onward · right-click / Esc goes back'
+        : 'Scroll to spin · click a card to dive · right-click / Esc to zoom out · Ctrl+scroll zooms';
     }
 
     function stepBy(n){
@@ -394,6 +404,8 @@
     // ---------- input: pointer (drag spin, pinch, long-press) ----------
     const pointers = new Map();
     let pinchStart = 0, dragMoved = 0;
+    let pressTarget = null;        // pointerdown's target: the browser's real 3D hit-test
+    let dragOrigin = { x: 0, y: 0 };
     els.stage.addEventListener('pointerdown', (e) => {
       // Capture so a drag that wanders over the fixed chrome bar (or off the
       // window) keeps delivering pointermove/pointerup to the stage. Without it
@@ -405,6 +417,14 @@
         pinchStart = Math.hypot(a.x - b.x, a.y - b.y);
       } else if (pointers.size === 1) {
         dragMoved = 0;
+        dragOrigin = { x: e.clientX, y: e.clientY };
+        // Kept for the click handler: pointer capture retargets the click to
+        // #stage, and this preserves what the press actually landed on for
+        // the elements Chromium CAN hit-test (the flat front card and its
+        // buttons). Rotated side cards are invisible to hit-testing entirely
+        // — events and elementFromPoint both report #scene — and resolve
+        // geometrically in cardIndexAtPoint instead.
+        pressTarget = e.target instanceof Element ? e.target : null;
         // A horizontal drag spins at every level, reader included (spec: hdrag ->
         // spin). Only a mouse is exempt inside the reader, where press-and-drag is
         // how text gets selected; touch has no such conflict — it scrolls the
@@ -425,10 +445,14 @@
         return;
       }
       if (state.dragging) {
-        // Accumulated above the guard below: a drag that crossed the click
-        // threshold must still suppress the click it ends with, even if the
-        // rotation it asked for was refused.
-        dragMoved += Math.abs(dx) + Math.abs(dy);
+        // Net displacement from the press origin — NOT accumulated path
+        // length. Pointer capture delivers every sub-pixel wobble of a human
+        // click, and summing |dx|+|dy| across those events crossed the click
+        // threshold on jitter alone, silently eating clicks "at random". The
+        // max is sticky, and tracked above the guard below, so a drag that
+        // swings out and back (or was refused mid-transition) still
+        // suppresses the click it ends with.
+        dragMoved = Math.max(dragMoved, Math.abs(e.clientX - dragOrigin.x) + Math.abs(e.clientY - dragOrigin.y));
         // Mirror the wheel's transition guard: a drag mid-zoom rotates the drum
         // the swap is about to replace, and banks a velocity that releases into
         // the new view as a lurch. The placeholder has no drum to spin at all.
@@ -453,18 +477,64 @@
     window.addEventListener('lostpointercapture', releasePointer);
 
     // ---------- input: click, context menu, keys ----------
+    // Chromium's hit-testing — pointer events AND elementFromPoint — misses
+    // the rotated drum cards entirely: both report #scene for every non-front
+    // card, so no DOM path can resolve a side-card click. This projects each
+    // card's face with the same numbers the renderer uses (drum rotation,
+    // radius, card size, stage perspective) and finds the frontmost face
+    // containing the point. Exact for the horizontal extent (both edges are
+    // projected); the vertical band uses the larger edge scale, which is
+    // slightly generous at strong angles and errs toward accepting clicks.
+    const PERSPECTIVE = 1400; // keep in sync with #stage{perspective:1400px}
+    function cardIndexAtPoint(clientX, clientY){
+      const n = state.items.length;
+      if (!n) return -1;
+      const rect = els.stage.getBoundingClientRect();
+      const originX = rect.left + rect.width / 2, originY = rect.top + rect.height / 2;
+      const styles = getComputedStyle(els.stage);
+      const cardW = parseFloat(styles.getPropertyValue('--cardW')) || 340;
+      const cardH = parseFloat(styles.getPropertyValue('--cardH')) || 230;
+      const theta = H.anglePerCard(n);
+      // Screen position + depth of the point localX along card face at angle a:
+      // the card transform is rotateY(a) translateZ(radius) inside a drum at
+      // translateZ(-radius), so (localX, 0, 0) lands at the coordinates below.
+      const project = (localX, a) => {
+        const sin = Math.sin(a), cos = Math.cos(a);
+        const x = localX * cos + state.radius * sin;
+        const z = -localX * sin + state.radius * cos - state.radius; // toward viewer, <= 0
+        const s = PERSPECTIVE / (PERSPECTIVE - z);
+        return { sx: originX + x * s, s, z };
+      };
+      let best = -1, bestZ = -Infinity;
+      for (let i = 0; i < n; i++) {
+        const a = (state.rotation + i * theta) * Math.PI / 180;
+        if (Math.cos(a) <= 0.05) continue; // facing away or edge-on: not clickable
+        const L = project(-cardW / 2, a), R = project(cardW / 2, a);
+        const lo = Math.min(L.sx, R.sx), hi = Math.max(L.sx, R.sx);
+        const halfH = (cardH / 2) * Math.max(L.s, R.s);
+        const centerZ = (L.z + R.z) / 2;
+        if (clientX >= lo && clientX <= hi && Math.abs(clientY - originY) <= halfH && centerZ > bestZ) {
+          best = i; bestZ = centerZ;
+        }
+      }
+      return best;
+    }
     els.stage.addEventListener('click', (e) => {
       if (dragMoved > 8 || state.transitioning) return; // a drag, not a click
-      // An active pointer capture can retarget the click to #stage, which would
-      // hide the card that was actually clicked, so fall back to a hit test.
-      let hit = e.target instanceof Element ? e.target : null;
+      // DOM resolution first — it works for the flat front card and carries
+      // the button/reader guards — then the geometric fallback for the side
+      // cards Chromium cannot hit-test. pressTarget survives the capture
+      // retargeting; isConnected covers a drum rebuilt (SSE) mid-press.
+      let hit = (pressTarget && pressTarget.isConnected) ? pressTarget
+        : (e.target instanceof Element ? e.target : null);
       if (!hit || !hit.closest('.card3d[data-idx]')) {
         const under = document.elementFromPoint(e.clientX, e.clientY);
-        if (under instanceof Element) hit = under;
+        if (under instanceof Element && under.closest('.card3d[data-idx]')) hit = under;
       }
+      if (hit && hit.closest('button, a, .reader-scroll')) return;
       const card = hit ? hit.closest('.card3d[data-idx]') : null;
-      if (!card || hit.closest('button, a, .reader-scroll')) return;
-      const idx = Number(card.dataset.idx);
+      const idx = card ? Number(card.dataset.idx) : cardIndexAtPoint(e.clientX, e.clientY);
+      if (idx < 0) return;
       const kind = idx === state.frontIndex ? 'clickCentered' : 'clickOther';
       const action = H.routeGesture(kind, { level: state.view.level, insideReader: false });
       if (action === 'none') return;
@@ -567,9 +637,11 @@
     }
     els.stage.addEventListener('click', (e) => {
       if (dragMoved > 8 || state.transitioning) return; // a drag-spin that ended over the button, not a click
-      // Same retargeting caveat as the card handler above: an active pointer
-      // capture can deliver the click to #stage, hiding the button that was hit.
-      let hit = e.target instanceof Element ? e.target : null;
+      // Same retargeting caveat as the card handler above: the pointerdown's
+      // target is the real hit; elementFromPoint only as a last resort (the
+      // Edit button lives on the flat front card, where it does still work).
+      let hit = (pressTarget && pressTarget.isConnected) ? pressTarget
+        : (e.target instanceof Element ? e.target : null);
       if (!hit || !hit.closest('[data-edit]')) {
         const under = document.elementFromPoint(e.clientX, e.clientY);
         if (under instanceof Element) hit = under;
