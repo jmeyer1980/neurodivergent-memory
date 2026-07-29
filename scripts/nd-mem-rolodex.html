@@ -20,6 +20,13 @@
     a.pill{text-decoration:none}
     #backBtn{font-size:1rem;line-height:1}
     #levelName{font-family:var(--font-display);text-transform:uppercase;letter-spacing:.14em;font-size:.74rem}
+    #crumb{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:.78rem;letter-spacing:.02em;max-width:52vw;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    #crumb .seg{background:none;border:0;padding:0 2px;font:inherit;color:var(--muted);cursor:pointer;border-radius:4px}
+    #crumb .seg:hover{color:var(--text);background:rgba(96,215,210,.14)}
+    #crumb .seg.depth{color:var(--primary);font-weight:600}
+    #crumb .seg.leaf,#crumb .seg:disabled{color:var(--text);cursor:default}
+    #crumb .seg:disabled:hover{background:none}
+    #crumb .sep{color:var(--faint);padding:0 1px}
     #stage{position:fixed;inset:0;perspective:1400px;overflow:hidden;touch-action:none}
     #stage.bounce::after{content:'';position:absolute;inset:0;pointer-events:none;box-shadow:inset 0 0 120px rgba(96,215,210,.35);animation:edgeflash .45s ease}
     @keyframes edgeflash{from{opacity:1}to{opacity:0}}
@@ -243,9 +250,15 @@
     function updateChrome(){
       const { level, projectId, districtId } = state.view;
       els.levelName.textContent = `${level[0].toUpperCase() + level.slice(1)} · 0^${depthNow()}`;
-      els.crumb.innerHTML = level === 'projects' ? '<strong>All projects</strong>'
-        : level === 'districts' ? `<strong>${esc(projectId)}</strong>`
-        : `<strong>${esc(projectId)}</strong> ▸ ${esc(districtId)}`;
+      // `0^N > project > district > card`: N answers "how deep", the path
+      // answers "where", and each segment is a way back to that view.
+      const segs = H.coordinateOf(state.view, depthNow(), centeredItem()?.id ?? null);
+      els.crumb.innerHTML = segs.map((s, i) => {
+        const sep = i ? '<span class="sep">&gt;</span>' : '';
+        const jumpable = s.kind === 'depth' || s.target != null;
+        return sep + `<button class="seg ${s.kind}" data-seg="${i}"${jumpable ? '' : ' disabled'}>${esc(s.text)}</button>`;
+      }).join('');
+      els.crumb.dataset.segments = JSON.stringify(segs.map(s => s.target));
       els.position.textContent = state.items.length ? `card ${state.frontIndex + 1} / ${state.items.length}` : '—';
       els.hudHint.textContent = level === 'memories'
         ? 'Scroll to spin · scroll inside the card to read · click to dive onward · right-click / Esc goes back'
@@ -344,6 +357,35 @@
       }
       transitionTo(restored, 'out');
     }
+
+    // One animated hop, however far back the target is — replaying a
+    // transition per level would make a seven-deep jump take ten seconds.
+    function jumpToNode(nodeId){
+      if (state.transitioning) return;
+      H.navSetCursorView(state.tree, currentViewSnapshot());
+      const view = H.navReconcileJump(state.tree, nodeId, state.snapshot);
+      if (!view) {
+        transitionTo({ level: 'projects', projectId: null, districtId: null, centeredId: null, rotation: 0, itemIds: [] }, 'out');
+        showToast('That view no longer exists — back to all projects.');
+        return;
+      }
+      transitionTo(view, 'out');
+    }
+
+    els.crumb.addEventListener('click', (e) => {
+      const btn = e.target instanceof Element ? e.target.closest('.seg') : null;
+      if (!btn || btn.disabled || state.transitioning) return;
+      const targets = JSON.parse(els.crumb.dataset.segments || '[]');
+      const target = targets[Number(btn.dataset.seg)];
+      if (target === null || target === undefined) {
+        // The depth badge is the origin: go all the way home.
+        if (btn.classList.contains('depth') && !H.navAtWall(state.tree)) jumpToNode(0);
+        return;
+      }
+      const nodeId = H.navFindContext(state.tree, target);
+      if (nodeId === null) { showToast('That step is not on the path you walked.'); return; }
+      jumpToNode(nodeId);
+    });
 
     // ---------- animation loop ----------
     function tick(){
