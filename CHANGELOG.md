@@ -39,6 +39,15 @@ Running locally on the development branch; not part of a release cut (version st
   spawned children) never open a browser. The launch uses `execFile` with an argument
   array — no shell interpolation.
 
+- **Rolodex view.** `GET /rolodex` on the web-app bridge serves a second,
+  navigation-first UI: nested 3D rolodex carousels (projects → districts →
+  memories) with cyclic dive, history-stack zoom-out that restores the exact
+  prior view, a wall-bounce at the first view, a front-card reader with
+  pointer-aware scroll routing, and edit routed through `/update`. Pure
+  CSS 3D + vanilla JS (`scripts/nd-mem-rolodex.html`), logic unit-tested in
+  `scripts/nd-mem-rolodex-helpers.mjs`. The bridge's static file handlers are
+  consolidated into one helper.
+
 ### Changed
 
 - The web-app bridge (`scripts/nd-mem-bridge-server.mjs`) no longer spawns its own MCP

@@ -729,6 +729,19 @@ node scripts/nd-mem-bridge-server.mjs --no-open  # never open, never prompt
 
 With no flag, an interactive terminal asks `Open bridge UI at http://localhost:3737/ [Y/n]?` once the server is listening; non-interactive runs (tests, spawned child processes) never open a browser. `ND_MEM_BRIDGE_OPEN=1`/`0` is the env-var equivalent of `--open`/`--no-open`.
 
+### Rolodex view
+
+`http://localhost:3737/rolodex` is an alternative, navigation-first UI: 3D
+rolodex carousels nested three deep. Spin through projects, dive into one to
+spin its districts, dive again to read memories card by card — the front card
+is the reader (scroll inside it to read, outside it to spin). Diving past the
+memories level wraps back to project selection; zooming out (right-click,
+Esc/Backspace, the ⤺ button, Ctrl+scroll-down, or pinch) walks back through
+the exact views you came from, and bounces off the wall when you reach the
+first view of the session. Editing the front card routes through the same
+bridge `/update` endpoint as the classic app; creating memories and project
+rename/merge stay in the classic view.
+
 > **Important:** Open the URL above, not the `.html` file directly. Loading `nd-mem-mcp-app-bridge.html` via `file://` (double-clicking it, or "Open File" in a browser) silently breaks the page's helper-module import — the page still loads, but project rename/merge fails with a misleading "helpers not loaded" error even though the bridge is running.
 
 The web app polls the memory snapshot for external changes and pushes live updates over server-sent events, and supports renaming a project across all its memories, merging into an existing project on a name collision, and a "did you mean" prompt for near-miss project names.
