@@ -255,7 +255,15 @@
       const segs = H.coordinateOf(state.view, depthNow(), centeredItem()?.id ?? null);
       els.crumb.innerHTML = segs.map((s, i) => {
         const sep = i ? '<span class="sep">&gt;</span>' : '';
-        const jumpable = s.kind === 'depth' || s.target != null;
+        // A segment whose target is the view we're already standing in (the
+        // rightmost non-leaf segment at districts/memories level) must be a
+        // dead click just like the leaf — otherwise it's the most inviting
+        // button on screen and does nothing but replay a 700ms zoom in place.
+        const atCurrent = s.target
+          && s.target.level === state.view.level
+          && s.target.projectId === state.view.projectId
+          && s.target.districtId === state.view.districtId;
+        const jumpable = !atCurrent && (s.kind === 'depth' || s.target != null);
         return sep + `<button class="seg ${s.kind}" data-seg="${i}"${jumpable ? '' : ' disabled'}>${esc(s.text)}</button>`;
       }).join('');
       els.crumb.dataset.segments = JSON.stringify(segs.map(s => s.target));
@@ -365,6 +373,12 @@
       H.navSetCursorView(state.tree, currentViewSnapshot());
       const view = H.navReconcileJump(state.tree, nodeId, state.snapshot);
       if (!view) {
+        // navReconcileJump leaves the cursor node untouched when nodeId doesn't
+        // resolve (an unknown id), so without this the tree cursor could still
+        // be deep while we show "All projects" — the coordinate would read a
+        // nonzero depth over that view. Walk the cursor home to match; this is
+        // a no-op if navReconcileBack already reached the wall.
+        while (!H.navAtWall(state.tree)) H.navBack(state.tree);
         transitionTo({ level: 'projects', projectId: null, districtId: null, centeredId: null, rotation: 0, itemIds: [] }, 'out');
         showToast('That view no longer exists — back to all projects.');
         return;
