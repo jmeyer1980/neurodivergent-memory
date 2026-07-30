@@ -120,9 +120,22 @@ test('fan angles are symmetric and never exceed 60 degrees', () => {
     assert.ok(Math.abs(angles[0] + angles[n - 1]) < 1e-9, `n=${n} not symmetric`);
   }
   assert.deepEqual(drumLayout(340, 1).angles, [0]);
-  assert.deepEqual(drumLayout(340, 2).angles.map(Math.round), [-20, 20]);
-  assert.deepEqual(drumLayout(340, 3).angles.map(Math.round), [-35, 0, 35]);
-  assert.deepEqual(drumLayout(340, 4).angles.map(Math.round), [-50, -17, 17, 50]);
+  assert.deepEqual(drumLayout(340, 2).angles.map(Math.round), [-15, 15]);
+  assert.deepEqual(drumLayout(340, 3).angles.map(Math.round), [-24, 0, 24]);
+  assert.deepEqual(drumLayout(340, 4).angles.map(Math.round), [-33, -11, 11, 33]);
+});
+
+test('a fan keeps every card face-on enough to be a real click target', () => {
+  // The end cards of a fan are the ones a user most needs to hit, and clicking is
+  // how you both select and dive. At +/-50deg they projected to 123px against the
+  // middle card's 316px; the arc is capped much flatter now. cos(angle) is the
+  // foreshortening factor, so it is the honest proxy for "how wide does this read".
+  for (const n of [2, 3, 4]) {
+    const { angles } = drumLayout(340, n);
+    const worst = Math.max(...angles.map(Math.abs));
+    assert.ok(worst <= 35, `n=${n} spreads to ${worst}deg, too steep to click comfortably`);
+    assert.ok(Math.cos(worst * Math.PI / 180) >= 0.8, `n=${n} foreshortens the end card too far`);
+  }
 });
 
 test('cylinder layout is unchanged from the old uniform math', () => {
@@ -141,6 +154,9 @@ test('fan radius keeps adjacent cards from overlapping, with the 260 floor', () 
   assert.ok(fanRadius(340, 4) > fanRadius(340, 2), 'tighter step needs more radius');
   assert.ok(fanRadius(560, 3) > fanRadius(340, 3), 'wider cards need more radius');
   assert.equal(fanRadius(10, 3), 260);            // tiny cards still respect the floor
+  // Wide cards would otherwise need a radius that flings the outer cards off screen.
+  assert.equal(fanRadius(560, 4, 260, 950), 950, 'the cap must bind for wide cards');
+  assert.ok(fanRadius(340, 4) < 950, 'a normal card is under the cap and keeps exact spacing');
 });
 
 test('rotationForCard centers each card in both modes', () => {

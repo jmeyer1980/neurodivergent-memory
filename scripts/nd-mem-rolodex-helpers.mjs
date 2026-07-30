@@ -113,9 +113,13 @@ export function snapTarget(rotation, count) {
 
 export const FAN_MAX_CARDS = 4;
 
-// Total arc each count spreads over. Capped so no card passes 60 degrees,
-// beyond which a card is edge-on and unreadable.
-const FAN_SPREAD_DEG = { 1: 0, 2: 40, 3: 70, 4: 100 };
+// Total arc each count spreads over. Kept deliberately shallow: a card's readable
+// (and clickable) width shrinks with cos(angle), so the end cards of a wide arc
+// become slivers. At a 100deg spread the end cards of a 4-card fan measured 123px
+// against the middle card's 316px, and users could not reliably hit them — which
+// matters because a click is how you both select and dive. The widest angle here is
+// 33deg (cos 0.84), so no card reads much narrower than the one facing you.
+const FAN_SPREAD_DEG = { 1: 0, 2: 30, 3: 48, 4: 66 };
 
 export function isFanCount(count) {
   return count > 0 && count <= FAN_MAX_CARDS;
@@ -126,13 +130,18 @@ export function fanStep(count) {
   return (FAN_SPREAD_DEG[count] ?? FAN_SPREAD_DEG[FAN_MAX_CARDS]) / (count - 1);
 }
 
-// Adjacent card centers sit a chord apart on the arc; the chord must be at
-// least a card wide or the faces overlap and hide each other.
-export function fanRadius(cardWidth, count, minRadius = 260) {
+// Adjacent card centers sit a chord apart on the arc; the chord must be at least a
+// card wide or the faces overlap and hide each other. A shallow arc needs a big
+// radius to satisfy that, so the result is capped: past the cap the outermost card
+// would be flung off the side of the viewport, and mild overlap at the fan's edges
+// is the better trade — you can still read and click every card, which is the whole
+// point of fanning out instead of forming a cylinder.
+export function fanRadius(cardWidth, count, minRadius = 260, maxRadius = 950) {
   const step = fanStep(count);
   if (step <= 0) return minRadius;
   const chordHalfAngle = (step / 2) * Math.PI / 180;
-  return Math.max(minRadius, Math.ceil(cardWidth / (2 * Math.sin(chordHalfAngle))));
+  const ideal = Math.ceil(cardWidth / (2 * Math.sin(chordHalfAngle)));
+  return Math.min(maxRadius, Math.max(minRadius, ideal));
 }
 
 // One descriptor per drum build. Every geometry consumer (placement, hit
