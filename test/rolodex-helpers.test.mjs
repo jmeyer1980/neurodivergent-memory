@@ -6,6 +6,7 @@ import {
   anglePerCard, drumRadius, normalizeAngle, shortestDelta,
   nearestIndex, rotationForIndex, snapTarget,
   FAN_MAX_CARDS, isFanCount, fanStep, fanRadius, drumLayout,
+  panForCard, liftForCard, fanProjectedHalfWidth,
   rotationForCard, indexAtRotation, snapRotation, clampRotation,
   LEVELS, nextLevel, createHistory, pushView, popView, atWall,
   itemIdsForView, reconcileView, reconcilePop,
@@ -154,9 +155,58 @@ test('fan radius keeps adjacent cards from overlapping, with the 260 floor', () 
   assert.ok(fanRadius(340, 4) > fanRadius(340, 2), 'tighter step needs more radius');
   assert.ok(fanRadius(560, 3) > fanRadius(340, 3), 'wider cards need more radius');
   assert.equal(fanRadius(10, 3), 260);            // tiny cards still respect the floor
-  // Wide cards would otherwise need a radius that flings the outer cards off screen.
-  assert.equal(fanRadius(560, 4, 260, 950), 950, 'the cap must bind for wide cards');
-  assert.ok(fanRadius(340, 4) < 950, 'a normal card is under the cap and keeps exact spacing');
+  // Wide cards would otherwise need a radius that flings the outer cards off the
+  // viewport. The old hard-coded cap (a 4th positional maxRadius argument) is gone
+  // now that fanRadius is viewport-aware: a tight viewport budget (3rd argument)
+  // does the same job, binding the radius below the unconstrained no-overlap ideal.
+  const wideIdealRadius = fanRadius(560, 4); // unconstrained: no-overlap ideal
+  assert.ok(fanRadius(560, 4, 900) < wideIdealRadius, 'a tight viewport shrinks a wide-card fan below its ideal radius');
+  assert.ok(fanRadius(340, 4) < wideIdealRadius, 'a normal card is naturally smaller than a wide-card fan');
+});
+
+test('a fan shrinks to fit a narrow viewport before it resorts to panning', () => {
+  const roomy = drumLayout(340, 3, 1600);
+  assert.equal(roomy.mode, 'fan');
+  assert.equal(roomy.panning, false, 'a fan that fits stays symmetric about centre');
+  assert.ok(roomy.pans.every(p => p === 0));
+  assert.ok(roomy.overlapRatio <= 0.001, 'and it spends no overlap');
+
+  const tight = drumLayout(340, 3, 820);   // iPad portrait
+  assert.equal(tight.mode, 'fan');
+  assert.ok(tight.radius < roomy.radius, 'the arc tightens to fit');
+  assert.ok(tight.overlapRatio > 0, 'which necessarily costs some overlap');
+});
+
+test('a fan pans so the selection is centred when even the tightest arc overflows', () => {
+  const phone = drumLayout(340, 4, 390);
+  assert.equal(phone.mode, 'fan');
+  assert.equal(phone.panning, true, 'a 4-card fan cannot fit 390px, so it must pan');
+  // Panning centres the selected card: the pan for card i cancels its own x offset.
+  assert.equal(panForCard(1, phone), phone.pans[1]);
+  assert.ok(panForCard(0, phone) > 0, 'the leftmost card pans right to reach centre');
+  assert.ok(panForCard(3, phone) < 0, 'the rightmost card pans left');
+  assert.ok(Math.abs(panForCard(0, phone) + panForCard(3, phone)) <= 1, 'and the ends mirror');
+});
+
+test('the selected card is lifted to a constant depth whatever its angle', () => {
+  // The old fixed 40px lift under-compensated: an angled card sat further back
+  // than a flat one, so the selection could render smaller than its neighbours.
+  const fan = drumLayout(340, 4, 1600);
+  const lift = i => liftForCard(i, fan);
+  assert.ok(lift(0) > lift(1), 'a steeper card needs more lift to reach the same depth');
+  for (let i = 0; i < fan.count; i++) {
+    const a = fan.angles[i] * Math.PI / 180;
+    const faceZ = (fan.radius + lift(i)) * Math.cos(a) - fan.radius;
+    assert.ok(Math.abs(faceZ - 40) < 1.5, `card ${i} face should land at z~40, got ${faceZ}`);
+  }
+});
+
+test('a cylinder reports zeroed pan and lift so callers stay branch-free', () => {
+  const cyl = drumLayout(340, 12, 390);
+  assert.equal(cyl.mode, 'cylinder');
+  assert.equal(cyl.panning, false);
+  assert.equal(panForCard(3, cyl), 0);
+  assert.equal(liftForCard(3, cyl), 0);
 });
 
 test('rotationForCard centers each card in both modes', () => {

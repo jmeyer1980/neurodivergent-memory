@@ -105,11 +105,35 @@ export function snapTarget(rotation, count) {
   return rotation + shortestDelta(rotation, rotationForIndex(idx, count));
 }
 
-// ---------- drum layout: fan (<= 4 cards) vs cylinder (>= 5) ----------
 // A 1-4 card cylinder is degenerate: two cards face away from each other, four
 // make a cube showing one face. Small drums instead fan forward so every card
 // is visible at once, which is how you see at a glance that a project has
 // exactly three districts. Fan mode trades wrap-around for end clamping.
+//
+// WHY THIS SECTION CHANGED — the fan's radius was derived from card width alone
+// and capped by a constant, so it never knew how wide the screen was. A 3-card
+// district fan projects ~887px wide; on an iPad in portrait (820px) the end
+// cards hang 58px off each edge, and on a phone 273px. Since a fan never
+// rotates, there was also no mechanism that could ever bring an off-screen card
+// back. Three things fix it, in this order of preference:
+//
+//   1. Shrink the arc to fit the viewport, spending overlap to do it.
+//   2. If even the maximum-overlap arc is wider than the screen, PAN the drum
+//      (translateX) so the selection is centred. Panning, not rotating: a
+//      forward-facing card that is merely displaced still renders at full width,
+//      whereas rotating the arc to centre an end card swings the opposite end
+//      toward edge-on and re-creates the sliver problem FAN_SPREAD_DEG was
+//      tuned to avoid.
+//   3. Lift the selection by however much the arc set it back, so "selected"
+//      never renders smaller than its unselected neighbours.
+//
+// A note on what is NOT achievable: for a non-overlapping arc of forward-facing
+// cards, the projected width tends to count * cardWidth as the spread narrows —
+// the arc can never be more compact than the same cards laid flat side by side,
+// whatever spread you choose. Perspective foreshortening buys back roughly
+// 15-20%, and that is all. So three 340px cards genuinely cannot all be shown
+// un-overlapped below ~890px of viewport. Overlap or panning is not a shortcut
+// here; it is the only remaining move.
 
 export const FAN_MAX_CARDS = 4;
 
@@ -121,6 +145,25 @@ export const FAN_MAX_CARDS = 4;
 // 33deg (cos 0.84), so no card reads much narrower than the one facing you.
 const FAN_SPREAD_DEG = { 1: 0, 2: 30, 3: 48, 4: 66 };
 
+// Keep in sync with #stage{perspective:1400px} and the PERSPECTIVE constant in
+// nd-mem-rolodex.html. Geometry that decides what fits on screen has to agree
+// with the projection the browser actually performs.
+export const FAN_PERSPECTIVE = 1400;
+
+// How much of a card may be hidden by its neighbour before we stop shrinking the
+// arc and start panning instead. At 0.62, adjacent centres sit 62% of a card
+// apart, so ~38% of a side card is occluded — enough to still read its heading
+// and land a tap, which is all a non-selected card needs to do. Below ~0.5 the
+// side cards stop being independently clickable.
+export const FAN_MIN_CHORD_RATIO = 0.62;
+
+// Breathing room left between the outermost card edge and the viewport edge.
+export const FAN_VIEWPORT_MARGIN = 24;
+
+// Baseline z the selected card is raised to. At angle 0 this reproduces the old
+// fixed FAN_LIFT_PX exactly, so the flat case looks and feels unchanged.
+export const FAN_LIFT_MARGIN = 40;
+
 export function isFanCount(count) {
   return count > 0 && count <= FAN_MAX_CARDS;
 }
@@ -130,34 +173,98 @@ export function fanStep(count) {
   return (FAN_SPREAD_DEG[count] ?? FAN_SPREAD_DEG[FAN_MAX_CARDS]) / (count - 1);
 }
 
-// Adjacent card centers sit a chord apart on the arc; the chord must be at least a
-// card wide or the faces overlap and hide each other. A shallow arc needs a big
-// radius to satisfy that, so the result is capped: past the cap the outermost card
-// would be flung off the side of the viewport, and mild overlap at the fan's edges
-// is the better trade — you can still read and click every card, which is the whole
-// point of fanning out instead of forming a cylinder.
-export function fanRadius(cardWidth, count, minRadius = 260, maxRadius = 950) {
+export function fanSpread(count) {
+  return count <= 1 ? 0 : (FAN_SPREAD_DEG[count] ?? FAN_SPREAD_DEG[FAN_MAX_CARDS]);
+}
+
+/**
+ * Projected distance from stage centre to the outer edge of the outermost card,
+ * using the same transform chain the renderer uses: the card is
+ * rotateY(a) translateZ(radius) inside a drum at translateZ(-radius), so the
+ * front card's face sits on the camera plane at z=0 and everything else recedes.
+ */
+export function fanProjectedHalfWidth(radius, count, cardWidth, perspective = FAN_PERSPECTIVE) {
+  const a = (fanSpread(count) / 2) * Math.PI / 180;
+  const sin = Math.sin(a), cos = Math.cos(a);
+  const x = (cardWidth / 2) * cos + radius * sin;
+  const z = -(cardWidth / 2) * sin + radius * cos - radius; // <= 0, away from viewer
+  return x * (perspective / (perspective - z));
+}
+
+/**
+ * Adjacent card centres sit a chord apart on the arc. A chord of one full card
+ * width means no overlap; FAN_MIN_CHORD_RATIO of one is the most overlap we
+ * accept. Between those two radii we take the largest that still fits the
+ * viewport.
+ *
+ * `viewportWidth` defaults to Infinity, which makes the budget unbounded and
+ * returns the no-overlap radius — byte-for-byte the old behaviour, so existing
+ * callers and tests that pass two arguments are unaffected.
+ */
+export function fanRadius(cardWidth, count, viewportWidth = Infinity, options = {}) {
   const step = fanStep(count);
-  if (step <= 0) return minRadius;
-  const chordHalfAngle = (step / 2) * Math.PI / 180;
-  const ideal = Math.ceil(cardWidth / (2 * Math.sin(chordHalfAngle)));
-  return Math.min(maxRadius, Math.max(minRadius, ideal));
+  if (step <= 0) return options.minRadius ?? 260;
+  const perspective = options.perspective ?? FAN_PERSPECTIVE;
+  const margin = options.margin ?? FAN_VIEWPORT_MARGIN;
+  const chordRatio = options.minChordRatio ?? FAN_MIN_CHORD_RATIO;
+
+  const halfChordAngle = Math.sin((step / 2) * Math.PI / 180);
+  const ideal = cardWidth / (2 * halfChordAngle);            // zero overlap
+  const floor = (chordRatio * cardWidth) / (2 * halfChordAngle); // max overlap
+
+  const minRadius = options.minRadius ?? 260;
+  const budget = viewportWidth / 2 - margin;
+  if (!Number.isFinite(budget) || fanProjectedHalfWidth(ideal, count, cardWidth, perspective) <= budget) {
+    return Math.ceil(Math.max(minRadius, ideal));
+  }
+
+  // Projected half-width is monotonically increasing in radius, so bisection
+  // finds the fitting radius without the algebra needed to invert the
+  // perspective divide — and stays correct if the projection model is ever
+  // refined.
+  let lo = floor, hi = ideal;
+  for (let i = 0; i < 40; i++) {
+    const mid = (lo + hi) / 2;
+    if (fanProjectedHalfWidth(mid, count, cardWidth, perspective) <= budget) lo = mid;
+    else hi = mid;
+  }
+  return Math.ceil(Math.max(minRadius, floor, lo));
 }
 
 // One descriptor per drum build. Every geometry consumer (placement, hit
-// testing, snapping, clamping) reads from this, so fan and cylinder never
-// need branching at the call site.
-export function drumLayout(cardWidth, count) {
+// testing, snapping, clamping, panning, lifting) reads from this, so fan and
+// cylinder never need branching at the call site.
+export function drumLayout(cardWidth, count, viewportWidth = Infinity) {
   if (isFanCount(count)) {
     const step = fanStep(count);
     const mid = (count - 1) / 2;
     const angles = Array.from({ length: count }, (_, i) => (i - mid) * step);
+    const radius = fanRadius(cardWidth, count, viewportWidth);
+    const halfWidth = fanProjectedHalfWidth(radius, count, cardWidth);
+    const budget = viewportWidth / 2 - FAN_VIEWPORT_MARGIN;
+    // Only pan when the arc genuinely overflows. A fan that fits stays
+    // symmetric about centre, which is the composition the design wants.
+    const panning = Number.isFinite(budget) && halfWidth > budget + 0.5;
     return {
-      mode: 'fan', count, step,
-      radius: fanRadius(cardWidth, count),
-      angles,
+      mode: 'fan', count, step, radius, angles,
       minRotation: -angles[count - 1],
       maxRotation: -angles[0],
+      // Precomputed per card, like `angles`, so consumers never redo trig.
+      // Centring card i needs translateX(-radius*sin(angle_i)): the drum's own
+      // translateZ is unchanged by an X shift, so the perspective scale cancels
+      // and the correction is exact at any depth.
+      pans: angles.map(a => (panning ? -Math.round(radius * Math.sin(a * Math.PI / 180)) : 0)),
+      // Extra translateZ that puts the selected card's face at
+      // z = FAN_LIFT_MARGIN regardless of its angle. Without this the fixed
+      // 40px lift under-compensated: the selected end card of a 4-fan landed at
+      // z=-110 while an unselected middle card sat at z=-16, so the selection
+      // rendered ~6% smaller AND painted behind its own neighbour.
+      lifts: angles.map(a => {
+        const cos = Math.cos(a * Math.PI / 180);
+        return Math.round((radius + FAN_LIFT_MARGIN) / cos - radius);
+      }),
+      panning,
+      overlapRatio: 1 - (2 * radius * Math.sin((step / 2) * Math.PI / 180)) / cardWidth,
     };
   }
   const step = count > 0 ? 360 / count : 0;
@@ -167,7 +274,25 @@ export function drumLayout(cardWidth, count) {
     angles: Array.from({ length: count }, (_, i) => i * step),
     minRotation: -Infinity,
     maxRotation: Infinity,
+    // A cylinder centres by rotating, so the front card is already at x~0 and
+    // needs no shift. Present as zeros so callers stay branch-free.
+    pans: Array.from({ length: count }, () => 0),
+    lifts: Array.from({ length: count }, () => 0),
+    panning: false,
+    overlapRatio: 0,
   };
+}
+
+/** Camera-space X shift that centres card `index`. 0 whenever the arc fits. */
+export function panForCard(index, layout) {
+  if (!layout || !layout.pans || index < 0 || index >= layout.count) return 0;
+  return layout.pans[index] || 0;
+}
+
+/** translateZ to add to a selected card's own radius. 0 in cylinder mode. */
+export function liftForCard(index, layout) {
+  if (!layout || !layout.lifts || index < 0 || index >= layout.count) return 0;
+  return layout.lifts[index] || 0;
 }
 
 export function rotationForCard(index, layout) {
