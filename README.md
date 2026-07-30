@@ -769,8 +769,11 @@ Navigation aids:
   growing upward from the floor. Branches you abandoned are kept, dimmed;
   the path you are on glows. Any node — live or abandoned — is a one-hop
   jump. Its `Map` chip collapses the rail, and that choice is remembered
-  across reloads (`localStorage`). The rail is width-capped and scrolls,
-  keeping the newest column in view.
+  across reloads (`localStorage`); until you set a preference, the rail
+  starts collapsed on narrow screens (below roughly 760px wide) and open
+  otherwise, so it never sits on top of the drum on a phone or a portrait
+  tablet. The rail is width-capped and scrolls, keeping the newest column
+  in view.
 - **Small drums fan out** — a drum of four cards or fewer spreads into a
   shallow forward arc, so you can see the cards at once where there is
   room; five or more keeps the rotating cylinder, which still wraps past
@@ -778,11 +781,11 @@ Navigation aids:
   rather than turning the drum, which is what keeps every card facing
   forward. The selected card is always fully on screen at full width. On
   a screen too narrow for the whole arc, the fan first shrinks — trading
-  away some of the cards' overlap — and, if that is still not enough,
-  slides the whole drum sideways to keep the selection centered, so
-  stepping to any card brings it, in turn, to center at full size. The
-  arc is deliberately shallow so the end cards stay large enough to click
-  comfortably.
+  away some of the cards' separation, so adjacent cards overlap — and, if
+  that is still not enough, slides the whole drum sideways to keep the
+  selection centered, so stepping to any card brings it, in turn, to
+  center at full size. The arc is deliberately shallow so the end cards
+  stay large enough to click comfortably.
 - **Rename projects in place** — the front project card has a `Rename…`
   button with the same merge and "did you mean" behavior as the classic
   app; it imports the classic app's helpers rather than reimplementing

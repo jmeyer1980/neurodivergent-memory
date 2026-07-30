@@ -262,12 +262,17 @@ badge shows the one depth number and remains unambiguous.
   and appears in the tree; fork a branch and confirm two branches render
   with the active one bright; click a dead-branch node → single-animation
   jump; rename a project → coordinate/trail show the new id; a 4-card drum
-  renders as a fan with all cards' faces visible and rotation clamps; a
-  5-card drum stays a cylinder and wraps past the ends; clicking a
+  renders as a fan with the selected card fully on screen and stepping
+  reaches every card in turn (a fan does not clamp — it does not spin at
+  all); a 5-card drum stays a cylinder and wraps past the ends; clicking a
   centered memory card's body dives onward while the Edit button still
   opens the modal; clicking a side memory card centers and dives.
-- **Manual:** feel of the fan clamp bounce, minimap legibility, rename
-  confirm flow.
+  [Corrected 2026-07-30 — see the §4 note; this line originally read
+  "renders as a fan with all cards' faces visible and rotation clamps."]
+- **Manual:** feel of the fan's pan/lift on a step (not a clamp bounce —
+  a fan never spins), minimap legibility, rename confirm flow. [Corrected
+  2026-07-30; this line originally read "feel of the fan clamp bounce,
+  minimap legibility, rename confirm flow."]
 
 ## Decisions log (from brainstorming)
 

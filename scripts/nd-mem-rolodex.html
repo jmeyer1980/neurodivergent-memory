@@ -40,9 +40,11 @@
        every animation frame while spinning, and an unscoped transition here would
        fight that per-frame write (each new value chases the last one's easing
        instead of applying immediately), turning a spin into a laggy smear. A fan
-       never spins — its transform only changes on a discrete selection step (pan)
-       or a viewport resize — so easing it is safe and reads as the pan sliding
-       rather than teleporting. */
+       never spins — its transform only ever changes on a discrete selection step,
+       which is exactly what this eases. A full rebuild (dive, zoom, resize) also
+       writes a fresh transform, but setDrumTransformNow() explicitly suppresses
+       this transition for that write, so a brand-new fan never appears to
+       animate into place — only a live selection step ever eases. */
     #stage[data-layout="fan"] #drum{transition:transform .25s ease}
     #stage[data-level="memories"]{--cardH:500px}
     .card3d{position:absolute;inset:0;display:flex;flex-direction:column;gap:10px;padding:18px;border-radius:24px;border:1px solid var(--surfaceBorder);background:var(--cardWash),radial-gradient(circle at top right,rgba(96,215,210,.16),transparent 38%),var(--surface);box-shadow:0 18px 40px rgba(0,0,0,.35);backface-visibility:hidden;transition:opacity .3s,box-shadow .3s,border-color .3s,transform .25s ease;opacity:.55}
@@ -97,7 +99,7 @@
     .btn.primary{background:linear-gradient(180deg,rgba(96,215,210,.24),rgba(96,215,210,.12));border-color:rgba(96,215,210,.3)}
     #toast{position:fixed;right:16px;bottom:16px;z-index:50;display:none;max-width:360px;padding:13px 16px;border-radius:16px;background:var(--overlayBg);border:1px solid rgba(96,215,210,.26)}
     #toast.show{display:block}
-    @media (prefers-reduced-motion: reduce){#scene{transition:none}#scene.bouncing,#stage.bounce::after{animation:none}.card3d{transition:none}#drum{transition:none}}
+    @media (prefers-reduced-motion: reduce){#scene{transition:none}#scene.bouncing,#stage.bounce::after{animation:none}.card3d{transition:none}#stage[data-layout="fan"] #drum{transition:none}}
   </style>
 </head>
 <body>
@@ -232,9 +234,9 @@
       // readable content. The CSS var and the radius math share this one number.
       const cardW = state.view.level === 'memories' ? Math.min(560, Math.round(window.innerWidth * 0.92)) : 340;
       els.stage.style.setProperty('--cardW', cardW + 'px');
-      // One descriptor drives placement, hit-testing, snapping and clamping,
-      // so fan and cylinder never need a branch at the call site. It is
-      // assigned before the empty-drum return below, because updateFrontCard
+      // One descriptor drives placement, hit-testing, snapping, panning and
+      // lifting, so fan and cylinder never need a branch at the call site. It
+      // is assigned before the empty-drum return below, because updateFrontCard
       // reads it even when there is nothing to show.
       // The viewport is now part of the geometry: a fan shrinks, then pans, to keep
       // every card on screen. Without this the fan stranded its end cards off the
@@ -257,7 +259,7 @@
         // sit; at z=0 it renders a drum-radius deep and reads as a recessed card.
         els.drum.innerHTML = `<div class="card3d front placeholder" style="transform:translateZ(${state.radius}px)"><span class="kicker">Empty</span><h2>${state.view.level === 'projects' ? 'No memories yet' : 'Nothing here'}</h2><p>Store a memory through MCP or the classic app and it will appear.</p></div>`;
         state.rotation = 0; state.velocity = 0; state.frontIndex = -1; state.frontEl = null;
-        applyDrumTransform(); updateChrome(); return;
+        setDrumTransformNow(); updateChrome(); return;
       }
       // data-tf keeps each card's resting transform so the fan's selected card can
       // be lifted toward the viewer and set back down without recomputing angles.
@@ -275,8 +277,15 @@
       state.dragAccum = 0;
       state.velocity = 0;
       state.frontEl = null; // the old element is gone with the innerHTML it lived in
-      applyDrumTransform();
-      updateFrontCard(true);
+      setDrumTransformNow();
+      // The second argument tells updateFrontCard not to re-apply the drum
+      // transform itself: setDrumTransformNow() just wrote it, transition
+      // suppressed. Without this, updateFrontCard's own fan-mode re-apply
+      // (below) writes the identical value again — but this time with the
+      // transition no longer suppressed, which was enough to make the fan
+      // CSS transition fire on every rebuild, animating a brand-new fan into
+      // place from wherever the previous drum's transform happened to be.
+      updateFrontCard(true, true);
     }
 
     function applyDrumTransform(){
@@ -285,6 +294,21 @@
       // centring is exact. 0 unless the fan is too wide to fit, and always 0 on a cylinder.
       const pan = H.panForCard(state.frontIndex, state.layout);
       els.drum.style.transform = `translateX(${pan}px) translateZ(${-state.radius}px) rotateY(${state.rotation}deg)`;
+    }
+
+    // buildDrum's own writes must never animate: a rebuild can land while the
+    // PREVIOUS drum's transform is still mid-transition (diving from a spun
+    // cylinder straight into a fresh fan, say), and the fan CSS transition would
+    // then ease the brand-new drum's first pose in from wherever the old one
+    // left off — a fan visibly rotating/panning into place, which the design
+    // says never happens. Only a later selection step (via updateFrontCard's
+    // own applyDrumTransform call) should ever animate. Same suppress-then-
+    // restore pattern transitionTo already uses for its own pose commit.
+    function setDrumTransformNow(){
+      els.drum.style.transition = 'none';
+      applyDrumTransform();
+      void els.drum.offsetWidth; // commit this write with no transition before restoring it
+      els.drum.style.transition = '';
     }
 
     // The reader's text lives on exactly one card at a time. Keeping it in the
@@ -314,13 +338,18 @@
       const lift = lifted ? H.liftForCard(idx, state.layout) : 0;
       el.style.transform = lift ? `${base} translateZ(${lift}px)` : base;
     }
-    function updateFrontCard(force = false){
+    function updateFrontCard(force = false, skipTransform = false){
       const idx = frontIndexNow();
       if (!force && idx === state.frontIndex) return;
       state.frontIndex = idx;
       // A panning fan re-centres on the new selection, so the drum transform depends on
-      // frontIndex and must be rewritten here — tick() does not run for fans.
-      if (state.layout.mode === 'fan') applyDrumTransform();
+      // frontIndex and must be rewritten here — tick() does not run for fans. `skipTransform`
+      // is only true when buildDrum just called this: it already wrote this exact transform
+      // via setDrumTransformNow() with the transition suppressed, so re-applying it here too
+      // is both redundant and, on a fan, enough to trigger the CSS transition on a rebuild.
+      // selectCard's live selection step leaves skipTransform false — that write is what
+      // actually produces the eased pan for a real step.
+      if (state.layout.mode === 'fan' && !skipTransform) applyDrumTransform();
       // Cards are appended in item order, so children[idx] is the card for item idx.
       const next = idx >= 0 ? (els.drum.children[idx] ?? null) : null;
       if (force) {

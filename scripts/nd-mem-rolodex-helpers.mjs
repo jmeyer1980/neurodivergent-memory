@@ -108,7 +108,8 @@ export function snapTarget(rotation, count) {
 // A 1-4 card cylinder is degenerate: two cards face away from each other, four
 // make a cube showing one face. Small drums instead fan forward so every card
 // is visible at once, which is how you see at a glance that a project has
-// exactly three districts. Fan mode trades wrap-around for end clamping.
+// exactly three districts. Fan mode trades wrap-around for discrete selection
+// stepping: a fan does not spin at all, so there is no rotation to clamp.
 //
 // WHY THIS SECTION CHANGED — the fan's radius was derived from card width alone
 // and capped by a constant, so it never knew how wide the screen was. A 3-card
