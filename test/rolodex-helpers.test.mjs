@@ -662,6 +662,19 @@ test('navRemapProject rewrites the id across every node, dead branches included'
   assert.equal(navNode(t, 3).view.projectId, 'beta', 'other projects untouched');
 });
 
+test('navRemapProject leaves a districts-level itemIds list untouched, even when a district id collides with the old project id', () => {
+  // itemIds at the districts level are district ids, not project ids (only a
+  // projects-level view's itemIds are project ids) — same gate as centeredId.
+  // District names look like 'alpha' here on purpose: a project named 'alpha'
+  // renaming to 'ALPHA' must not corrupt a districts-level node whose itemIds
+  // happen to contain the literal string 'alpha' as a district id.
+  const t = createNavTree(ROOT_VIEW);
+  navPush(t, { ...v('districts', 'alpha', null), itemIds: ['alpha', 'logical_analysis'] }); // id 1
+  navRemapProject(t, 'alpha', 'ALPHA');
+  assert.equal(navNode(t, 1).view.projectId, 'ALPHA', 'projectId itself is still remapped');
+  assert.deepEqual(navNode(t, 1).view.itemIds, ['alpha', 'logical_analysis'], 'districts-level itemIds are untouched by the project rename');
+});
+
 import { coordinateOf, navNodeLabel, layoutNavTree } from '../scripts/nd-mem-rolodex-helpers.mjs';
 
 test('coordinateOf builds a depth-prefixed path with jump targets', () => {

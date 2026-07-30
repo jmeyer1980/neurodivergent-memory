@@ -36,6 +36,14 @@
     #scene.bouncing{animation:wallbounce .45s ease}
     @keyframes wallbounce{0%{transform:translateZ(0)}35%{transform:translateZ(-90px)}100%{transform:translateZ(0)}}
     #drum{position:relative;width:var(--cardW);height:var(--cardH);transform-style:preserve-3d}
+    /* Scoped to fan mode only: a cylinder writes rotateY(...) to #drum's transform
+       every animation frame while spinning, and an unscoped transition here would
+       fight that per-frame write (each new value chases the last one's easing
+       instead of applying immediately), turning a spin into a laggy smear. A fan
+       never spins — its transform only changes on a discrete selection step (pan)
+       or a viewport resize — so easing it is safe and reads as the pan sliding
+       rather than teleporting. */
+    #stage[data-layout="fan"] #drum{transition:transform .25s ease}
     #stage[data-level="memories"]{--cardH:500px}
     .card3d{position:absolute;inset:0;display:flex;flex-direction:column;gap:10px;padding:18px;border-radius:24px;border:1px solid var(--surfaceBorder);background:var(--cardWash),radial-gradient(circle at top right,rgba(96,215,210,.16),transparent 38%),var(--surface);box-shadow:0 18px 40px rgba(0,0,0,.35);backface-visibility:hidden;transition:opacity .3s,box-shadow .3s,border-color .3s,transform .25s ease;opacity:.55}
     .card3d.front{opacity:1;border-color:rgba(96,215,210,.4);box-shadow:0 24px 60px rgba(0,0,0,.5),0 0 30px rgba(96,215,210,.12)}
@@ -69,7 +77,7 @@
     #minimap{position:fixed;left:0;top:64px;bottom:64px;z-index:9;display:flex;flex-direction:column;justify-content:flex-end;align-items:flex-start;gap:8px;padding:10px;pointer-events:none}
     #minimap>*{pointer-events:auto}
     #mapToggle{font-size:.7rem;letter-spacing:.08em;text-transform:uppercase;padding:6px 10px}
-    #mapBody{max-height:100%;max-width:180px;min-width:120px;overflow:auto;border-radius:16px;border:1px solid var(--surfaceBorder);background:var(--surface);backdrop-filter:blur(10px);padding:6px}
+    #mapBody{max-height:100%;max-width:180px;overflow:auto;border-radius:16px;border:1px solid var(--surfaceBorder);background:var(--surface);backdrop-filter:blur(10px);padding:6px}
     #minimap.collapsed #mapBody{display:none}
     #mapBody svg{display:block}
     #mapBody .edge{fill:none;stroke:var(--faint);stroke-width:1.5;opacity:.45}
@@ -89,7 +97,7 @@
     .btn.primary{background:linear-gradient(180deg,rgba(96,215,210,.24),rgba(96,215,210,.12));border-color:rgba(96,215,210,.3)}
     #toast{position:fixed;right:16px;bottom:16px;z-index:50;display:none;max-width:360px;padding:13px 16px;border-radius:16px;background:var(--overlayBg);border:1px solid rgba(96,215,210,.26)}
     #toast.show{display:block}
-    @media (prefers-reduced-motion: reduce){#scene{transition:none}#scene.bouncing,#stage.bounce::after{animation:none}.card3d{transition:none}}
+    @media (prefers-reduced-motion: reduce){#scene{transition:none}#scene.bouncing,#stage.bounce::after{animation:none}.card3d{transition:none}#drum{transition:none}}
   </style>
 </head>
 <body>
@@ -339,13 +347,30 @@
     }
 
     function depthNow(){ return H.navDepth(state.tree); }
+    // renderMinimap runs from updateChrome, which runs from every updateFrontCard —
+    // i.e. many times a second while a cylinder spins, even though the tree itself
+    // is not changing at all during a spin. Rebuilding the SVG on every one of those
+    // calls restarted the cursor's pulse animation, destroyed any open tooltip, and
+    // reset the rail's scroll position back to the frontier, yanking it away from
+    // wherever the user had scrolled to inspect an older column. Node count plus
+    // cursor id is a cheap-to-compute signature of "did the tree actually change":
+    // both change on every dive/zoom-out/jump (the cursor always moves), so a real
+    // navigation event still rebuilds. A rename remap is the one mutation that
+    // changes neither (it only rewrites ids already on the tree, not its shape or
+    // cursor) — bulkReassign calls invalidateMinimap() right after H.navRemapProject
+    // so that mutation still forces a rebuild despite the unchanged signature.
+    let mapSignature = null;
+    function invalidateMinimap(){ mapSignature = null; }
     // The map is drawn from the tree itself, never from a parallel record, so
     // it cannot drift out of sync with where you can actually go. A layout
     // failure must not take navigation down with it — the rail hides instead.
     function renderMinimap(){
       els.mapToggle.textContent = `Map 0^${depthNow()}`;
       if (els.minimap.classList.contains('collapsed')) return;
+      const sig = `${state.tree.nodes.length}:${state.tree.cursor}`;
+      if (sig === mapSignature) return; // tree unchanged since the last real render
       try {
+        mapSignature = sig;
         const laid = H.layoutNavTree(state.tree);
         // Elbow, not a straight diagonal: rise from the parent, run across, then rise
         // into the child. Over a short horizontal gap a diagonal is visually just a
@@ -362,6 +387,7 @@
         els.mapBody.scrollLeft = els.mapBody.scrollWidth; // newest column (rightmost) is the frontier; keep it in view
       } catch (err) {
         console.error('minimap layout failed', err);
+        mapSignature = null; // do not suppress a retry on whatever caused this
         els.minimap.style.display = 'none';
       }
     }
@@ -381,7 +407,13 @@
           && s.target.level === state.view.level
           && s.target.projectId === state.view.projectId
           && s.target.districtId === state.view.districtId;
-        const jumpable = !atCurrent && (s.kind === 'depth' || s.target != null);
+        // The depth badge (0^N) jumps home. At the wall (0^0) home is where we
+        // already are, so it needs the same disabled treatment as any other
+        // current-view segment above — otherwise it shows the hover highlight
+        // and pointer cursor while doing nothing on click, the same defect
+        // already fixed for context segments.
+        const atWallBadge = s.kind === 'depth' && H.navAtWall(state.tree);
+        const jumpable = !atCurrent && !atWallBadge && (s.kind === 'depth' || s.target != null);
         return sep + `<button class="seg ${s.kind}" data-seg="${i}"${jumpable ? '' : ' disabled'}>${esc(s.text)}</button>`;
       }).join('');
       els.crumb.dataset.segments = JSON.stringify(segs.map(s => s.target));
@@ -549,7 +581,18 @@
       try { localStorage.setItem(MAP_KEY, collapsed ? 'collapsed' : 'open'); } catch {}
       renderMinimap();
     });
-    try { if (localStorage.getItem(MAP_KEY) === 'collapsed') els.minimap.classList.add('collapsed'); } catch {}
+    // The rail sits over the drum's bottom-left corner, which is exactly where a
+    // narrow-viewport memory card lives — an always-open rail there steals both
+    // taps and drag-scroll from the card, the same class of bug this feature's
+    // viewport-fitting fan just fixed. A stored preference always wins once the
+    // user has set one; absent that, default collapsed below ~760px (phones and
+    // narrow tablets) and open at wider (tablet-landscape and desktop) widths.
+    const MAP_NARROW_PX = 760;
+    try {
+      const stored = localStorage.getItem(MAP_KEY);
+      const collapsedByDefault = stored ? stored === 'collapsed' : window.innerWidth < MAP_NARROW_PX;
+      if (collapsedByDefault) els.minimap.classList.add('collapsed');
+    } catch {}
 
     // ---------- animation loop ----------
     function tick(){
@@ -561,11 +604,11 @@
           if (Math.abs(d) > 0.05) state.rotation += d * 0.14;
           else { state.rotation = state.stepTarget; state.stepTarget = null; }
         } else if (Math.abs(state.velocity) > 0.02) {
+          // A fan does not spin at all (the outer guard above already excludes
+          // fan mode from this whole block), so there is no rail to grind
+          // against and nothing here to clamp — decay is the only thing this
+          // branch has ever needed to do.
           state.rotation += state.velocity;
-          // A fan cannot spin past its end cards; kill the momentum at the
-          // rail so it settles instead of grinding against the clamp.
-          const clamped = H.clampRotation(state.rotation, state.layout);
-          if (clamped !== state.rotation) { state.rotation = clamped; state.velocity = 0; }
           state.velocity *= 0.93;
         } else {
           state.velocity = 0;
@@ -704,8 +747,10 @@
           }
           return;
         }
+        // Cylinder only — the fan branch above already returned, and a fan
+        // never spins in the first place, so there is no end to clamp against.
         const spin = dx * 0.22 * state.gestureGain;
-        state.rotation = H.clampRotation(state.rotation + spin, state.layout);
+        state.rotation += spin;
         state.velocity = Math.max(-30, Math.min(30, spin)); // same rail as the wheel
         applyDrumTransform();
         updateFrontCard();
@@ -976,6 +1021,11 @@
         // ids real, and rewriting history to a half-existing project would
         // strand every node that referenced it.
         H.navRemapProject(state.tree, source, target);
+        // The remap rewrites ids already on the tree without touching its shape or
+        // the cursor, so the minimap's cheap node-count+cursor signature would not
+        // notice — force the next render to rebuild so stale node labels do not
+        // linger under the renamed project's old id.
+        invalidateMinimap();
         if (state.view.projectId === source) state.view.projectId = target;
         // Test the rendered card itself, not state.view.centeredId: the two
         // only agree because updateFrontCard keeps them in sync elsewhere,

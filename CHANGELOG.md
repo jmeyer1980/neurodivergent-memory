@@ -57,10 +57,14 @@ Running locally on the development branch; not part of a release cut (version st
   exploration tree on success, and a fan layout that spreads drums of four
   cards or fewer into a shallow forward-facing arc instead of a degenerate
   cylinder (a fan never rotates; selecting a card lifts it toward you
-  instead of spinning the drum). Clicks now dive at every level, memories
-  included. Internally the history stack became a navigation tree whose
-  active path preserves the previous wall, zoom-out and reconciliation
-  semantics. See
+  instead of spinning the drum). The fan now adapts to the viewport: it
+  first shrinks the arc, spending up to 38% card overlap, and if that is
+  still not enough it pans the whole drum sideways to keep the selected
+  card centered and lifts it back to full size — fixing a reported iPhone
+  15 bug where a fan's end cards sat off-screen and unreachable. Clicks
+  now dive at every level, memories included. Internally the history
+  stack became a navigation tree whose active path preserves the previous
+  wall, zoom-out and reconciliation semantics. See
   `docs/superpowers/specs/2026-07-29-rolodex-navigation-aids-design.md`.
 
 ### Changed

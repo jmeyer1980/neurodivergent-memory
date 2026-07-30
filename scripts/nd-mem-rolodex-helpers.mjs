@@ -365,6 +365,13 @@ export function snapRotation(rotation, layout) {
   return layout.mode === 'fan' ? target : rotation + shortestDelta(rotation, target);
 }
 
+// Cylinder-only in practice on the shipped page: a fan never spins (selecting
+// a card lifts it instead of rotating the drum — see `drumLayout`), so every
+// call site in nd-mem-rolodex.html is gated to run only when
+// `layout.mode !== 'fan'`, which is exactly the branch below that returns
+// `rotation` unchanged. The clamp below, and the finite `minRotation`/
+// `maxRotation` a fan layout carries, are real and exercised directly by this
+// file's unit tests, but the page itself never reaches them.
 export function clampRotation(rotation, layout) {
   if (!layout || layout.mode !== 'fan') return rotation;
   return Math.min(layout.maxRotation, Math.max(layout.minRotation, rotation));
@@ -577,8 +584,15 @@ export function navReconcileJump(tree, nodeId, snapshot) {
 export function navRemapProject(tree, oldId, newId) {
   for (const node of tree.nodes) {
     if (node.view.projectId === oldId) node.view.projectId = newId;
-    if (node.view.level === 'projects' && node.view.centeredId === oldId) node.view.centeredId = newId;
-    node.view.itemIds = (node.view.itemIds || []).map(id => (id === oldId ? newId : id));
+    // itemIds are project ids only at the projects level (districts/memories
+    // level itemIds are district/memory ids, which happen to share a namespace
+    // with project ids — e.g. a district literally named "logical_analysis" —
+    // so rewriting them unconditionally could corrupt an unrelated node's
+    // reconciliation data). Gate both rewrites the same way.
+    if (node.view.level === 'projects') {
+      if (node.view.centeredId === oldId) node.view.centeredId = newId;
+      node.view.itemIds = (node.view.itemIds || []).map(id => (id === oldId ? newId : id));
+    }
   }
 }
 
