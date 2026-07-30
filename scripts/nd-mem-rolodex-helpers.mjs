@@ -245,24 +245,34 @@ export function drumLayout(cardWidth, count, viewportWidth = Infinity) {
     // Only pan when the arc genuinely overflows. A fan that fits stays
     // symmetric about centre, which is the composition the design wants.
     const panning = Number.isFinite(budget) && halfWidth > budget + 0.5;
+    // Extra translateZ that puts the selected card's face at
+    // z = FAN_LIFT_MARGIN regardless of its angle. Without this the fixed
+    // 40px lift under-compensated: the selected end card of a 4-fan landed at
+    // z=-110 while an unselected middle card sat at z=-16, so the selection
+    // rendered ~6% smaller AND painted behind its own neighbour.
+    const lifts = angles.map(a => {
+      const cos = Math.cos(a * Math.PI / 180);
+      return Math.round((radius + FAN_LIFT_MARGIN) / cos - radius);
+    });
+    // Precomputed per card, like `angles`, so consumers never redo trig.
+    // Centring card i needs translateX(-radius*sin(angle_i)): the drum's own
+    // translateZ is unchanged by an X shift, so the perspective scale cancels
+    // and the correction is exact at any depth.
+    //
+    // The pan has to cancel the SELECTED card's x offset, and a selected card is
+    // lifted — so its face sits at (radius + lift) * sin(angle), not radius *
+    // sin(angle). Ignoring the lift term left the steepest cards short of centre by
+    // lift * sin(angle): zero at 0deg, ~29px at 33deg, which is exactly the residual
+    // overflow measured on a 390px viewport.
+    const pans = angles.map((a, i) => (panning
+      ? -Math.round((radius + lifts[i]) * Math.sin(a * Math.PI / 180))
+      : 0));
     return {
       mode: 'fan', count, step, radius, angles,
       minRotation: -angles[count - 1],
       maxRotation: -angles[0],
-      // Precomputed per card, like `angles`, so consumers never redo trig.
-      // Centring card i needs translateX(-radius*sin(angle_i)): the drum's own
-      // translateZ is unchanged by an X shift, so the perspective scale cancels
-      // and the correction is exact at any depth.
-      pans: angles.map(a => (panning ? -Math.round(radius * Math.sin(a * Math.PI / 180)) : 0)),
-      // Extra translateZ that puts the selected card's face at
-      // z = FAN_LIFT_MARGIN regardless of its angle. Without this the fixed
-      // 40px lift under-compensated: the selected end card of a 4-fan landed at
-      // z=-110 while an unselected middle card sat at z=-16, so the selection
-      // rendered ~6% smaller AND painted behind its own neighbour.
-      lifts: angles.map(a => {
-        const cos = Math.cos(a * Math.PI / 180);
-        return Math.round((radius + FAN_LIFT_MARGIN) / cos - radius);
-      }),
+      pans,
+      lifts,
       panning,
       overlapRatio: 1 - (2 * radius * Math.sin((step / 2) * Math.PI / 180)) / cardWidth,
     };

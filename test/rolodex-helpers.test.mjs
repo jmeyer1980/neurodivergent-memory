@@ -186,6 +186,12 @@ test('a fan pans so the selection is centred when even the tightest arc overflow
   assert.ok(panForCard(0, phone) > 0, 'the leftmost card pans right to reach centre');
   assert.ok(panForCard(3, phone) < 0, 'the rightmost card pans left');
   assert.ok(Math.abs(panForCard(0, phone) + panForCard(3, phone)) <= 1, 'and the ends mirror');
+  // The selected card is lifted, which shifts its own screen-x by lift*sin(angle);
+  // the pan must cancel THAT (lifted-radius) offset, not the unlifted one, or the
+  // steepest cards land short of centre. Pin the magnitude so this can't regress.
+  const steep = phone.angles[0] * Math.PI / 180;
+  assert.ok(Math.abs(panForCard(0, phone)) > Math.abs(phone.radius * Math.sin(steep)),
+    'the pan must include the lifted radius, not just the base radius');
 });
 
 test('the selected card is lifted to a constant depth whatever its angle', () => {
