@@ -5,8 +5,9 @@ import {
   projectOf, districtOf, deriveProjects, deriveDistricts, deriveMemories,
   anglePerCard, drumRadius, normalizeAngle, shortestDelta,
   nearestIndex, rotationForIndex, snapTarget,
-  FAN_MAX_CARDS, isFanCount, fanStep, fanRadius, drumLayout,
+  FAN_MAX_CARDS, isFanCount, fanStep, fanSpread, fanRadius, drumLayout,
   panForCard, liftForCard, fanProjectedHalfWidth, FAN_PERSPECTIVE,
+  FAN_LIFT_MARGIN, FAN_MIN_CHORD_RATIO,
   rotationForCard, indexAtRotation, snapRotation, clampRotation,
   LEVELS, nextLevel, createHistory, pushView, popView, atWall,
   itemIdsForView, reconcileView, reconcilePop,
@@ -164,17 +165,38 @@ test('fan radius keeps adjacent cards from overlapping, with the 260 floor', () 
   assert.ok(fanRadius(340, 4) < wideIdealRadius, 'a normal card is naturally smaller than a wide-card fan');
 });
 
-test('a fan shrinks to fit a narrow viewport before it resorts to panning', () => {
+// The three responses to a narrow viewport are GRADED, not exclusive: shrink the
+// arc first, spending up to (1 - FAN_MIN_CHORD_RATIO) of overlap, and pan on top
+// of that if even the maximum-overlap arc still overflows. This test used to be
+// called "a fan shrinks to fit a narrow viewport before it resorts to panning",
+// which read as if a shrunk fan never pans — but its own 340/3 @820 case does
+// both, so the name described behaviour the assertions never checked. Renamed,
+// and the actual `panning` value pinned at each of the three regimes.
+test('a fan that fits does neither; a tight one shrinks; a too-tight one shrinks AND pans', () => {
   const roomy = drumLayout(340, 3, 1600);
   assert.equal(roomy.mode, 'fan');
   assert.equal(roomy.panning, false, 'a fan that fits stays symmetric about centre');
   assert.ok(roomy.pans.every(p => p === 0));
   assert.ok(roomy.overlapRatio <= 0.001, 'and it spends no overlap');
 
-  const tight = drumLayout(340, 3, 820);   // iPad portrait
+  // Shrinking alone is enough here: the arc tightens, some overlap is spent, and
+  // the selected card still fits without any pan.
+  const shrunk = drumLayout(340, 3, 1024);
+  assert.equal(shrunk.mode, 'fan');
+  assert.ok(shrunk.radius < roomy.radius, 'the arc tightens to fit');
+  assert.ok(shrunk.overlapRatio > 0, 'which necessarily costs some overlap');
+  assert.equal(shrunk.panning, false, 'and at 1024px that alone is enough — no pan');
+  assert.ok(shrunk.pans.every(p => p === 0));
+
+  // iPad portrait. Three 340px cards do not fit 820px even at maximum overlap, so
+  // this case shrinks to the floor AND pans — the two responses compose.
+  const tight = drumLayout(340, 3, 820);
   assert.equal(tight.mode, 'fan');
-  assert.ok(tight.radius < roomy.radius, 'the arc tightens to fit');
-  assert.ok(tight.overlapRatio > 0, 'which necessarily costs some overlap');
+  assert.ok(tight.radius < shrunk.radius, 'a narrower viewport tightens the arc further');
+  assert.ok(tight.overlapRatio > shrunk.overlapRatio, 'spending more overlap to do it');
+  assert.ok(tight.overlapRatio <= 1 - FAN_MIN_CHORD_RATIO + 1e-6,
+    'but never more overlap than FAN_MIN_CHORD_RATIO permits');
+  assert.equal(tight.panning, true, 'and it still overflows at that floor, so it pans too');
 });
 
 test('a fan pans so the selection is centred when even the tightest arc overflows', () => {
@@ -221,10 +243,15 @@ test('a cylinder reports zeroed pan and lift so callers stay branch-free', () =>
 // bisection's correctness depends entirely on that predicate being monotone in
 // radius over the range it searches; re-derive the same formula here (it isn't
 // exported, matching the sanctioned diff) and sample it rather than assume.
+// The re-derivation below deliberately mirrors helpers.mjs's own formula, so every
+// number in it comes from an EXPORTED constant (FAN_LIFT_MARGIN, FAN_MIN_CHORD_RATIO)
+// or an exported function (fanSpread, fanStep). Inlining 40 / 0.62 / {2:30,3:48,4:66}
+// as literals — as this test originally did — meant a future change to any of those
+// constants would leave the test silently validating the OLD formula while the
+// implementation moved on, which is the one failure mode a pinning test must not have.
 test('fanSelectedHalfWidth is monotone in radius over the range fanRadius bisects', () => {
-  const FAN_LIFT_MARGIN = 40;
   const fanSelectedHalfWidth = (radius, count, cardWidth) => {
-    const spreadHalf = (count <= 1 ? 0 : ({ 2: 30, 3: 48, 4: 66 }[count] ?? 66)) / 2 * Math.PI / 180;
+    const spreadHalf = (fanSpread(count) / 2) * Math.PI / 180;
     const lift = (radius + FAN_LIFT_MARGIN) / Math.cos(spreadHalf) - radius;
     return fanProjectedHalfWidth(radius + lift, count, cardWidth, undefined, radius);
   };
@@ -232,7 +259,7 @@ test('fanSelectedHalfWidth is monotone in radius over the range fanRadius bisect
     for (const cardWidth of [340, 560]) {
       const step = fanStep(count);
       const halfChordAngle = Math.sin((step / 2) * Math.PI / 180);
-      const floor = (0.62 * cardWidth) / (2 * halfChordAngle);
+      const floor = (FAN_MIN_CHORD_RATIO * cardWidth) / (2 * halfChordAngle);
       const ideal = cardWidth / (2 * halfChordAngle);
       let prev = -Infinity;
       for (let i = 0; i <= 20; i++) {
@@ -258,7 +285,37 @@ test('fanSelectedHalfWidth is monotone in radius over the range fanRadius bisect
 // the renderer's cardIndexAtPoint uses: origin + (pan + x) * scale, pan
 // composed with x BEFORE the perspective divide, not added to an
 // already-projected screen coordinate.
-test('the selected outermost card stays within the viewport across counts, card widths and common breakpoints', () => {
+// WHY THIS SWEEPS EVERY CARD AT EVERY SELECTION, and not just the outermost card
+// as selected: this test used to measure only card `count-1`, on the assumption
+// that the steepest angle projects furthest. That is true of an UNPANNED fan, but
+// false of a panning one, and a panning fan is exactly the case this guard exists
+// to protect. In pan mode the drum's translateX cancels the selected card's own x
+// offset, so its edges project to
+//     localX * cos(a) * P / (P - FAN_LIFT_MARGIN + localX * sin(a))
+// whose magnitude peaks at sin(a) = (cardWidth/2) / (P - FAN_LIFT_MARGIN), i.e.
+// ~11.9deg -- NOT at the outermost angle. Measured: for cardWidth 560 at count 4
+// the +/-11deg card projects 294.9px from centre against the outermost card's
+// 272.2px (for 340px cards: 175.7 vs 157.4), so the old single-card guard was
+// ~20px looser than its name implied and a regression of that size would pass.
+//
+// WHY THE REQUIREMENT DIFFERS BY MODE -- this is a deliberate, ruled-on
+// distinction, not a loosened bar:
+//   * A fan that FITS (panning === false) must show every card fully, at every
+//     selection. That is the property Task 13 established, and it still holds
+//     whenever the geometry allows it.
+//   * A PANNING fan cannot show every card at once -- the cards genuinely span
+//     more screen than exists (see the note at the top of the fan section in
+//     helpers.mjs: the arc can never be more compact than the same cards laid
+//     flat side by side). For it the requirement is that the SELECTED card is
+//     fully on screen, which is what panning buys. Simultaneous visibility is
+//     the fan's preference; REACHABILITY is its requirement, and reachability
+//     follows directly from the selected-card assertion below: card i is fully
+//     contained at selection i, so stepping reaches every card. The original
+//     field complaint was cards that could neither be seen NOR brought into
+//     view by any gesture; that is what must not regress.
+// Verified in a driven browser at 1600x1000 and 390x844 (see task-14-report.md):
+// the boxes the browser renders match this projection to within a pixel.
+test('every card stays within the viewport at every selection, across counts, card widths and common breakpoints', () => {
   const widths = [390, 820, 1024, 1180, 1280, 1366, 1440, 1600, 1920];
   for (const count of [2, 3, 4]) {
     for (const cardWidth of [340, 560]) {
@@ -274,21 +331,33 @@ test('the selected outermost card stays within the viewport across counts, card 
         // combination, including 560 at width=820, passed.
         if (cardWidth > width) continue;
         const layout = drumLayout(cardWidth, count, width);
-        const idx = count - 1; // outermost card; symmetric with index 0
-        const a = layout.angles[idx] * Math.PI / 180;
-        const r = layout.radius + liftForCard(idx, layout);
-        const pan = panForCard(idx, layout);
-        const project = (localX) => {
-          const x = localX * Math.cos(a) + r * Math.sin(a);
-          const z = -localX * Math.sin(a) + r * Math.cos(a) - layout.radius;
-          const s = FAN_PERSPECTIVE / (FAN_PERSPECTIVE - z);
-          return (pan + x) * s;
-        };
         const origin = width / 2;
-        const edges = [project(-cardWidth / 2), project(cardWidth / 2)].map(v => origin + v);
-        const left = Math.min(...edges), right = Math.max(...edges);
-        assert.ok(left >= -0.5 && right <= width + 0.5,
-          `count=${count} cardWidth=${cardWidth} width=${width}: outermost card [${left.toFixed(1)}..${right.toFixed(1)}] must be within 0..${width}`);
+        for (let sel = 0; sel < count; sel++) {
+          // One translateX on the drum, chosen by the selection, moves every card
+          // together — so the pan is the SELECTED card's pan for all of them.
+          const pan = panForCard(sel, layout);
+          for (let idx = 0; idx < count; idx++) {
+            if (layout.panning && idx !== sel) continue; // see the mode note above
+            const a = layout.angles[idx] * Math.PI / 180;
+            // The page lifts exactly one card (setCardLift is called with
+            // `lifted = (i === idx)`), so only the selected card's radius grows.
+            const r = layout.radius + (idx === sel ? liftForCard(idx, layout) : 0);
+            // Same composition the renderer and cardIndexAtPoint use:
+            // origin + (pan + x) * s, with pan composed with x BEFORE the single
+            // perspective divide — not added to an already-projected coordinate.
+            const project = (localX) => {
+              const x = localX * Math.cos(a) + r * Math.sin(a);
+              const z = -localX * Math.sin(a) + r * Math.cos(a) - layout.radius;
+              const s = FAN_PERSPECTIVE / (FAN_PERSPECTIVE - z);
+              return (pan + x) * s;
+            };
+            const edges = [project(-cardWidth / 2), project(cardWidth / 2)].map(v => origin + v);
+            const left = Math.min(...edges), right = Math.max(...edges);
+            assert.ok(left >= -0.5 && right <= width + 0.5,
+              `count=${count} cardWidth=${cardWidth} width=${width} panning=${layout.panning} `
+              + `selection=${sel} card=${idx}: [${left.toFixed(1)}..${right.toFixed(1)}] must be within 0..${width}`);
+          }
+        }
       }
     }
   }
