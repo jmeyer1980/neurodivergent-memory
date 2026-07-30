@@ -182,13 +182,39 @@ export function fanSpread(count) {
  * using the same transform chain the renderer uses: the card is
  * rotateY(a) translateZ(radius) inside a drum at translateZ(-radius), so the
  * front card's face sits on the camera plane at z=0 and everything else recedes.
+ *
+ * `radius` is the CARD's own distance from the drum axis (which is larger than
+ * the drum's own radius when the card is lifted — see `fanSelectedHalfWidth`);
+ * `drumRadius` is what the drum itself is pulled back by (translateZ(-drumRadius)),
+ * which stays the bare radius regardless of any one card's lift. They default to
+ * the same value, which keeps every existing caller and test — none of which
+ * measure a lifted card — byte-for-byte unchanged.
  */
-export function fanProjectedHalfWidth(radius, count, cardWidth, perspective = FAN_PERSPECTIVE) {
+export function fanProjectedHalfWidth(radius, count, cardWidth, perspective = FAN_PERSPECTIVE, drumRadius = radius) {
   const a = (fanSpread(count) / 2) * Math.PI / 180;
   const sin = Math.sin(a), cos = Math.cos(a);
   const x = (cardWidth / 2) * cos + radius * sin;
-  const z = -(cardWidth / 2) * sin + radius * cos - radius; // <= 0, away from viewer
+  const z = -(cardWidth / 2) * sin + radius * cos - drumRadius; // <= 0, away from viewer
   return x * (perspective / (perspective - z));
+}
+
+/**
+ * The outermost card's projected half-width AS SELECTED — i.e. lifted. A
+ * selected card is pulled toward the camera by `liftForCard`'s amount, which
+ * pushes its outer edge both further out (lift*sin(angle)) and nearer the lens
+ * (larger perspective scale), so it projects substantially wider than the bare
+ * arc `fanProjectedHalfWidth(radius, ...)` reports. Measuring the bare arc
+ * under-estimated the true on-screen extent by up to several hundred pixels at
+ * wide viewports, which meant `fanRadius` and `drumLayout` could both decide
+ * panning was unnecessary when the selected card would in fact hang off the
+ * edge of the screen — under-panning, not over-panning: the dangerous
+ * direction, since it silently fails to invoke the mechanism this whole file
+ * exists to provide.
+ */
+function fanSelectedHalfWidth(radius, count, cardWidth, perspective = FAN_PERSPECTIVE) {
+  const a = (fanSpread(count) / 2) * Math.PI / 180;
+  const lift = (radius + FAN_LIFT_MARGIN) / Math.cos(a) - radius;
+  return fanProjectedHalfWidth(radius + lift, count, cardWidth, perspective, radius);
 }
 
 /**
@@ -214,18 +240,22 @@ export function fanRadius(cardWidth, count, viewportWidth = Infinity, options = 
 
   const minRadius = options.minRadius ?? 260;
   const budget = viewportWidth / 2 - margin;
-  if (!Number.isFinite(budget) || fanProjectedHalfWidth(ideal, count, cardWidth, perspective) <= budget) {
+  // The card that has to fit is the SELECTED (lifted) one, not the bare arc —
+  // measuring the bare arc under-estimated the true extent and let this return
+  // "fits" when the selected card would in fact hang off the screen.
+  if (!Number.isFinite(budget) || fanSelectedHalfWidth(ideal, count, cardWidth, perspective) <= budget) {
     return Math.ceil(Math.max(minRadius, ideal));
   }
 
-  // Projected half-width is monotonically increasing in radius, so bisection
-  // finds the fitting radius without the algebra needed to invert the
-  // perspective divide — and stays correct if the projection model is ever
-  // refined.
+  // fanSelectedHalfWidth is monotonically increasing in radius (verified by
+  // sampling — see "fanSelectedHalfWidth is monotone in radius over the range
+  // fanRadius bisects" in the test suite), so bisection finds the fitting
+  // radius without the algebra needed to invert the perspective divide — and
+  // stays correct if the projection model is ever refined.
   let lo = floor, hi = ideal;
   for (let i = 0; i < 40; i++) {
     const mid = (lo + hi) / 2;
-    if (fanProjectedHalfWidth(mid, count, cardWidth, perspective) <= budget) lo = mid;
+    if (fanSelectedHalfWidth(mid, count, cardWidth, perspective) <= budget) lo = mid;
     else hi = mid;
   }
   return Math.ceil(Math.max(minRadius, floor, lo));
@@ -240,7 +270,13 @@ export function drumLayout(cardWidth, count, viewportWidth = Infinity) {
     const mid = (count - 1) / 2;
     const angles = Array.from({ length: count }, (_, i) => (i - mid) * step);
     const radius = fanRadius(cardWidth, count, viewportWidth);
-    const halfWidth = fanProjectedHalfWidth(radius, count, cardWidth);
+    // The selected card is the one that must stay on screen, and it renders
+    // lifted — nearer the camera and pushed outward by lift*sin(angle) — so it
+    // projects wider than the bare arc. Deciding `panning` from the bare arc's
+    // half-width under-estimated the true extent (by up to several hundred
+    // pixels at wide viewports) and could leave `panning` false while the
+    // selected card actually hung off the edge of the screen.
+    const halfWidth = fanSelectedHalfWidth(radius, count, cardWidth);
     const budget = viewportWidth / 2 - FAN_VIEWPORT_MARGIN;
     // Only pan when the arc genuinely overflows. A fan that fits stays
     // symmetric about centre, which is the composition the design wants.

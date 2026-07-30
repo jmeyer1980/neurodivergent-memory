@@ -754,7 +754,13 @@
         const x = localX * cos + r * sin;
         const z = -localX * sin + r * cos - state.radius; // toward viewer, <= 0; the drum's own translateZ(-state.radius) is constant regardless of this card's radius
         const s = PERSPECTIVE / (PERSPECTIVE - z);
-        return { sx: originX + panX + x * s, s, z };
+        // pan is composed into the SAME matrix as x, before the perspective divide
+        // (translateX(pan) translateZ(-r) rotateY(rot) is one matrix multiply, not
+        // pan added to an already-projected screen coordinate) — so it must be
+        // inside the (... ) * s, not added after. Adding it after left a
+        // pan*(1-s) gap that shrank the hit box on exactly the far side of the
+        // selected card Chromium's own hit-test also fails on.
+        return { sx: originX + (panX + x) * s, s, z };
       };
       let best = -1, bestZ = -Infinity;
       for (let i = 0; i < n; i++) {
@@ -812,6 +818,16 @@
         // inspects it for this synthetic click agree on the real element.
         pressTarget = overFrontButton;
         overFrontButton.click();
+        // The synthetic click above already bubbled to #stage and ran the rename/edit
+        // listeners once. `return` alone does not stop the ORIGINAL event from also
+        // reaching those same listeners afterward — and since pressTarget now correctly
+        // points at the button, they would resolve it again and fire a second time. A
+        // button that only re-seeds a form is harmless to call twice; the first one that
+        // POSTs (Edit's save, a future delete) would not be. stopImmediatePropagation
+        // (not the plain stopPropagation) is required because all three listeners are
+        // bound to the same #stage element, so "propagation to ancestors" isn't the
+        // issue — later same-element listeners are.
+        e.stopImmediatePropagation();
         return;
       }
       if (hit && hit.closest('button, a')) return;
@@ -1164,10 +1180,20 @@
     // level's card width), so a resize has to rebuild the drum. Debounced: resize fires
     // continuously while a window is dragged.
     let resizeTimer = null;
-    window.addEventListener('resize', () => {
+    function scheduleResizeRebuild(){
       clearTimeout(resizeTimer);
-      resizeTimer = setTimeout(() => { if (!state.transitioning) buildDrum(); }, 200);
-    });
+      resizeTimer = setTimeout(() => {
+        // A dive/zoom holds `transitioning` for ~1400ms (two 700ms legs), and a drag-spin
+        // holds `dragging` until pointerup. Discarding the rebuild here (the original fix)
+        // meant a phone rotated mid-transition kept stale geometry until the NEXT resize
+        // event happened to land outside a transition — which may never happen if the user
+        // rotates once and then just uses the app. Re-arm instead: keep checking every
+        // 200ms until neither is true, so the rebuild always eventually runs.
+        if (state.transitioning || state.dragging) { scheduleResizeRebuild(); return; }
+        buildDrum();
+      }, 200);
+    }
+    window.addEventListener('resize', scheduleResizeRebuild);
     await init();
     tick();
   </script>

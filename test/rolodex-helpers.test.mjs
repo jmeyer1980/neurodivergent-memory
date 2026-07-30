@@ -6,7 +6,7 @@ import {
   anglePerCard, drumRadius, normalizeAngle, shortestDelta,
   nearestIndex, rotationForIndex, snapTarget,
   FAN_MAX_CARDS, isFanCount, fanStep, fanRadius, drumLayout,
-  panForCard, liftForCard, fanProjectedHalfWidth,
+  panForCard, liftForCard, fanProjectedHalfWidth, FAN_PERSPECTIVE,
   rotationForCard, indexAtRotation, snapRotation, clampRotation,
   LEVELS, nextLevel, createHistory, pushView, popView, atWall,
   itemIdsForView, reconcileView, reconcilePop,
@@ -213,6 +213,85 @@ test('a cylinder reports zeroed pan and lift so callers stay branch-free', () =>
   assert.equal(cyl.panning, false);
   assert.equal(panForCard(3, cyl), 0);
   assert.equal(liftForCard(3, cyl), 0);
+});
+
+// fanSelectedHalfWidth (internal to helpers.mjs, not exported — measures the
+// outermost card's projected half-width AS SELECTED, i.e. lifted) replaced the
+// bare-arc fanProjectedHalfWidth inside fanRadius's bisection predicate. The
+// bisection's correctness depends entirely on that predicate being monotone in
+// radius over the range it searches; re-derive the same formula here (it isn't
+// exported, matching the sanctioned diff) and sample it rather than assume.
+test('fanSelectedHalfWidth is monotone in radius over the range fanRadius bisects', () => {
+  const FAN_LIFT_MARGIN = 40;
+  const fanSelectedHalfWidth = (radius, count, cardWidth) => {
+    const spreadHalf = (count <= 1 ? 0 : ({ 2: 30, 3: 48, 4: 66 }[count] ?? 66)) / 2 * Math.PI / 180;
+    const lift = (radius + FAN_LIFT_MARGIN) / Math.cos(spreadHalf) - radius;
+    return fanProjectedHalfWidth(radius + lift, count, cardWidth, undefined, radius);
+  };
+  for (const count of [2, 3, 4]) {
+    for (const cardWidth of [340, 560]) {
+      const step = fanStep(count);
+      const halfChordAngle = Math.sin((step / 2) * Math.PI / 180);
+      const floor = (0.62 * cardWidth) / (2 * halfChordAngle);
+      const ideal = cardWidth / (2 * halfChordAngle);
+      let prev = -Infinity;
+      for (let i = 0; i <= 20; i++) {
+        const r = floor + (ideal - floor) * (i / 20);
+        const v = fanSelectedHalfWidth(r, count, cardWidth);
+        assert.ok(v >= prev - 1e-6,
+          `count=${count} cardWidth=${cardWidth}: fanSelectedHalfWidth decreased at r=${r.toFixed(1)} (${v} < ${prev})`);
+        prev = v;
+      }
+    }
+  }
+});
+
+// The upper-bound regression guard that used to live in the old `fanRadius`
+// (a hard `maxRadius` cap) is gone now that the radius is viewport-derived, and
+// nothing else pinned an upper bound on how far a selected, lifted end card can
+// project. Deciding `panning`/the shrink budget from the BARE arc instead of the
+// SELECTED (lifted) card under-estimated the true on-screen extent by up to
+// several hundred pixels at wide viewports, silently skipping panning exactly
+// when it was needed — this test is the containment guard that would have
+// caught it. It derives the outermost card's projected box from only the
+// public layout fields (radius, angles, pans, lifts) using the SAME composition
+// the renderer's cardIndexAtPoint uses: origin + (pan + x) * scale, pan
+// composed with x BEFORE the perspective divide, not added to an
+// already-projected screen coordinate.
+test('the selected outermost card stays within the viewport across counts, card widths and common breakpoints', () => {
+  const widths = [390, 820, 1024, 1180, 1280, 1366, 1440, 1600, 1920];
+  for (const count of [2, 3, 4]) {
+    for (const cardWidth of [340, 560]) {
+      for (const width of widths) {
+        // Out of drumLayout's contract, not a geometry bug: cardWidth is a GIVEN, not
+        // something this function may shrink, so a card wider than the viewport cannot
+        // be made to fit by any arc/pan/lift choice -- even a single flat, unrotated,
+        // perfectly centred card of that width overflows both edges. The page never
+        // asks for this: the memories level's cardWidth is always
+        // Math.min(560, Math.round(innerWidth*0.92)), which is always < innerWidth.
+        // Measured (before this exclusion): the only 3 of 54 combinations that failed
+        // were exactly cardWidth=560 at width=390 (count 2/3/4) -- every other
+        // combination, including 560 at width=820, passed.
+        if (cardWidth > width) continue;
+        const layout = drumLayout(cardWidth, count, width);
+        const idx = count - 1; // outermost card; symmetric with index 0
+        const a = layout.angles[idx] * Math.PI / 180;
+        const r = layout.radius + liftForCard(idx, layout);
+        const pan = panForCard(idx, layout);
+        const project = (localX) => {
+          const x = localX * Math.cos(a) + r * Math.sin(a);
+          const z = -localX * Math.sin(a) + r * Math.cos(a) - layout.radius;
+          const s = FAN_PERSPECTIVE / (FAN_PERSPECTIVE - z);
+          return (pan + x) * s;
+        };
+        const origin = width / 2;
+        const edges = [project(-cardWidth / 2), project(cardWidth / 2)].map(v => origin + v);
+        const left = Math.min(...edges), right = Math.max(...edges);
+        assert.ok(left >= -0.5 && right <= width + 0.5,
+          `count=${count} cardWidth=${cardWidth} width=${width}: outermost card [${left.toFixed(1)}..${right.toFixed(1)}] must be within 0..${width}`);
+      }
+    }
+  }
 });
 
 test('rotationForCard centers each card in both modes', () => {
