@@ -911,12 +911,21 @@
           if (!ok) { showToast(`Moved ${moved} of ${ids.length}. Re-run the rename to move the rest.`); return false; }
           moved++;
         }
+        // A concurrent delete (SSE) between opening the modal and submitting
+        // can empty `ids` by the time we get here; remapping the tree for a
+        // project that moved zero cards is a no-op renamed as a "success"
+        // (a "Moved 0 cards" toast plus a spurious reconcile), not a real one.
+        if (!ids.length) return false;
         // Only a complete run may remap the tree: a partial one leaves both
         // ids real, and rewriting history to a half-existing project would
         // strand every node that referenced it.
         H.navRemapProject(state.tree, source, target);
         if (state.view.projectId === source) state.view.projectId = target;
-        if (state.view.level === 'projects' && state.view.centeredId === source) {
+        // Test the rendered card itself, not state.view.centeredId: the two
+        // only agree because updateFrontCard keeps them in sync elsewhere,
+        // and depending on that invariant here instead of the source of
+        // truth is exactly what makes a fixup like this easy to break later.
+        if (state.view.level === 'projects' && centeredItem()?.id === source) {
           state.view.centeredId = target;
           // refreshAndReconcile's "before" snapshot reads centeredId from
           // centeredItem() (the currently-rendered item), not from
@@ -926,7 +935,7 @@
           // jumps to whatever was positionally adjacent in the old list —
           // an unrelated project, not the one just renamed.
           const centered = state.items[state.frontIndex];
-          if (centered && centered.id === source) { centered.id = target; if (centered.data) centered.data.id = target; }
+          if (centered) { centered.id = target; if (centered.data) centered.data.id = target; }
         }
         showToast(`Moved ${moved} card${moved === 1 ? '' : 's'} from ${source} to ${target}.`);
         return true;
@@ -940,6 +949,13 @@
     }
 
     async function submitRename(){
+      // The Go button being disabled means a rename is already in flight
+      // (sequential, one round-trip per memory — the window can be long).
+      // The modal's own keydown handler calls this directly, bypassing the
+      // disabled attribute, so a second Rename opened over the greyed-out
+      // button and confirmed with Enter would otherwise start a concurrent
+      // bulkReassign against a different source/target pair.
+      if ($('#renameGoBtn').disabled) return;
       const source = state.renamingProject;
       const typed = $('#renameInput').value.trim();
       if (!source || !typed || typed === source) { $('#renameModalBg').classList.remove('open'); return; }
