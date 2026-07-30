@@ -37,7 +37,7 @@
     @keyframes wallbounce{0%{transform:translateZ(0)}35%{transform:translateZ(-90px)}100%{transform:translateZ(0)}}
     #drum{position:relative;width:var(--cardW);height:var(--cardH);transform-style:preserve-3d}
     #stage[data-level="memories"]{--cardH:500px}
-    .card3d{position:absolute;inset:0;display:flex;flex-direction:column;gap:10px;padding:18px;border-radius:24px;border:1px solid var(--surfaceBorder);background:var(--cardWash),radial-gradient(circle at top right,rgba(96,215,210,.16),transparent 38%),var(--surface);box-shadow:0 18px 40px rgba(0,0,0,.35);backface-visibility:hidden;transition:opacity .3s,box-shadow .3s,border-color .3s;opacity:.55}
+    .card3d{position:absolute;inset:0;display:flex;flex-direction:column;gap:10px;padding:18px;border-radius:24px;border:1px solid var(--surfaceBorder);background:var(--cardWash),radial-gradient(circle at top right,rgba(96,215,210,.16),transparent 38%),var(--surface);box-shadow:0 18px 40px rgba(0,0,0,.35);backface-visibility:hidden;transition:opacity .3s,box-shadow .3s,border-color .3s,transform .25s ease;opacity:.55}
     .card3d.front{opacity:1;border-color:rgba(96,215,210,.4);box-shadow:0 24px 60px rgba(0,0,0,.5),0 0 30px rgba(96,215,210,.12)}
     .card3d .kicker{font-size:.7rem;text-transform:uppercase;letter-spacing:.1em;color:var(--faint)}
     .card3d h2{font-family:var(--font-display);font-size:1.15rem;line-height:1.2}
@@ -150,6 +150,7 @@
       frontIndex: -1,
       frontEl: null,        // the .card3d currently wearing .front, so updates touch two cards, not N
       stepTarget: null,     // arrow-key destination the tick loop eases toward (null = no step pending)
+      selectAccum: 0,      // fan mode: gesture pixels banked toward the next selection step
       gestureGain: 1,       // gesture degrees are scaled by this so a gesture moves a constant number of CARDS
       lastBounceAt: 0,
       editingId: null,
@@ -223,10 +224,19 @@
         state.rotation = 0; state.velocity = 0; state.frontIndex = -1; state.frontEl = null;
         applyDrumTransform(); updateChrome(); return;
       }
-      els.drum.innerHTML = state.items.map((item, i) =>
-        `<div class="card3d" data-idx="${i}" style="transform:rotateY(${state.layout.angles[i]}deg) translateZ(${state.radius}px)">${cardFace(item)}</div>`).join('');
+      // data-tf keeps each card's resting transform so the fan's selected card can
+      // be lifted toward the viewer and set back down without recomputing angles.
+      els.drum.innerHTML = state.items.map((item, i) => {
+        const tf = `rotateY(${state.layout.angles[i]}deg) translateZ(${state.radius}px)`;
+        return `<div class="card3d" data-idx="${i}" data-tf="${tf}" style="transform:${tf}">${cardFace(item)}</div>`;
+      }).join('');
       const idx = Math.max(0, state.items.findIndex(i => i.id === state.view.centeredId));
-      state.rotation = H.rotationForCard(idx, state.layout);
+      // A fan NEVER rotates — that is exactly what keeps every card facing forward.
+      // Rotating to centre an end card is what swung the far cards edge-on, which
+      // defeated the whole point of fanning a small drum out.
+      state.rotation = state.layout.mode === 'fan' ? 0 : H.rotationForCard(idx, state.layout);
+      state.frontIndex = idx;
+      state.selectAccum = 0;
       state.velocity = 0;
       state.frontEl = null; // the old element is gone with the innerHTML it lived in
       applyDrumTransform();
@@ -245,20 +255,40 @@
       if (rs) rs.textContent = text;
     }
 
+    const FAN_LIFT_PX = 40;
+    // On a cylinder the front card is derived from the angle. In a fan nothing
+    // rotates, so there is no angle to read back — state.frontIndex IS the
+    // selection and this is its only source of truth.
+    function frontIndexNow(){
+      if (state.layout.mode !== 'fan') return H.indexAtRotation(state.rotation, state.layout);
+      const count = state.items.length;
+      return count ? Math.min(count - 1, Math.max(0, state.frontIndex)) : -1;
+    }
+    // The lift marks the selection in a fan, since the drum can no longer turn the
+    // chosen card to face you — it already faces you.
+    function setCardLift(el, lifted){
+      if (!el) return;
+      const base = el.dataset.tf || '';
+      el.style.transform = lifted ? `${base} translateZ(${FAN_LIFT_PX}px)` : base;
+    }
     function updateFrontCard(force = false){
-      const idx = H.indexAtRotation(state.rotation, state.layout);
+      const idx = frontIndexNow();
       if (!force && idx === state.frontIndex) return;
       state.frontIndex = idx;
       // Cards are appended in item order, so children[idx] is the card for item idx.
       const next = idx >= 0 ? (els.drum.children[idx] ?? null) : null;
       if (force) {
         // buildDrum just rewrote the drum: every card needs its class settled.
-        els.drum.querySelectorAll('.card3d').forEach((el, i) => el.classList.toggle('front', i === idx));
+        const fan = state.layout.mode === 'fan';
+        els.drum.querySelectorAll('.card3d').forEach((el, i) => {
+          el.classList.toggle('front', i === idx);
+          setCardLift(el, fan && i === idx);
+        });
       } else if (state.frontEl !== next) {
         // Steady state touches two cards. Sweeping all N here ran once per front
         // change, i.e. many times a second during a spin, on every card.
-        if (state.frontEl) { state.frontEl.classList.remove('front'); fillReader(state.frontEl, ''); }
-        if (next) next.classList.add('front');
+        if (state.frontEl) { state.frontEl.classList.remove('front'); fillReader(state.frontEl, ''); setCardLift(state.frontEl, false); }
+        if (next) { next.classList.add('front'); setCardLift(next, state.layout.mode === 'fan'); }
       }
       state.frontEl = next;
       fillReader(next, state.items[idx]?.data?.content ?? '');
@@ -314,17 +344,27 @@
       renderMinimap();
     }
 
+    // Fan selection: move the highlight, never the drum. A force update is cheap
+    // here because a fan is four cards at most.
+    function selectCard(next){
+      const count = state.items.length;
+      if (!count || state.transitioning) return;
+      const idx = Math.min(count - 1, Math.max(0, next));
+      if (idx === state.frontIndex) return;
+      state.frontIndex = idx;
+      updateFrontCard(true);
+    }
+
     function stepBy(n){
       const count = state.items.length;
       if (!count || state.transitioning) return;
-      // A fan has ends: stepping past them is a no-op rather than a wrap.
+      // A fan has ends and no rotation: stepping past an end is a no-op.
+      if (state.layout.mode === 'fan') { selectCard(state.frontIndex + n); return; }
       const raw = state.frontIndex + n;
-      const idx = state.layout.mode === 'fan'
-        ? Math.min(count - 1, Math.max(0, raw))
-        : ((raw % count) + count) % count;
+      const idx = ((raw % count) + count) % count;
       if (idx === state.frontIndex) return;
       const target = H.rotationForCard(idx, state.layout);
-      const goal = state.layout.mode === 'fan' ? target : state.rotation + H.shortestDelta(state.rotation, target);
+      const goal = state.rotation + H.shortestDelta(state.rotation, target);
       state.velocity = 0;
       // One card is ~1deg on a 364-card drum. Assigning the rotation outright
       // moved the drum by a hair in a single frame, which reads as "the arrow
@@ -465,7 +505,9 @@
 
     // ---------- animation loop ----------
     function tick(){
-      if (!state.transitioning && !state.dragging && state.items.length) {
+      // A fan has no rotation to ease, snap or decay; its selection changes
+      // discretely, so the physics loop has nothing to do there.
+      if (!state.transitioning && !state.dragging && state.items.length && state.layout.mode !== 'fan') {
         if (state.stepTarget != null) {
           const d = state.stepTarget - state.rotation;
           if (Math.abs(d) > 0.05) state.rotation += d * 0.14;
@@ -518,6 +560,17 @@
       // already visible would all release at once as a multi-card lurch.
       if (state.transitioning) return;
       state.stepTarget = null; // a live gesture outranks a pending arrow step
+      if (state.layout.mode === 'fan') {
+        // No momentum in a fan — notches bank until they add up to one card.
+        const NOTCH_PX = 110;
+        state.selectAccum += dy;
+        while (Math.abs(state.selectAccum) >= NOTCH_PX) {
+          const dir = state.selectAccum > 0 ? 1 : -1;
+          state.selectAccum -= dir * NOTCH_PX;
+          selectCard(state.frontIndex + dir);
+        }
+        return;
+      }
       state.velocity = Math.max(-30, Math.min(30, state.velocity + dy * 0.02 * state.gestureGain));
     }, { passive: false });
     function ctx(e){ return { level: state.view.level, insideReader: insideReader(e.target) }; }
@@ -586,6 +639,18 @@
         // the swap is about to replace, and banks a velocity that releases into
         // the new view as a lurch. The placeholder has no drum to spin at all.
         if (state.transitioning || !state.items.length) return;
+        if (state.layout.mode === 'fan') {
+          // Dragging right brings the card to the left forward, matching how a drum
+          // would have carried it toward you.
+          const DRAG_PX = 80;
+          state.selectAccum += dx;
+          while (Math.abs(state.selectAccum) >= DRAG_PX) {
+            const dir = state.selectAccum > 0 ? 1 : -1;
+            state.selectAccum -= dir * DRAG_PX;
+            selectCard(state.frontIndex - dir);
+          }
+          return;
+        }
         const spin = dx * 0.22 * state.gestureGain;
         state.rotation = H.clampRotation(state.rotation + spin, state.layout);
         state.velocity = Math.max(-30, Math.min(30, spin)); // same rail as the wheel
@@ -673,11 +738,14 @@
       const action = H.routeGesture(kind, { level: state.view.level, insideReader: false });
       if (action === 'none') return;
       if (idx !== state.frontIndex) {
-        const target = H.rotationForCard(idx, state.layout);
-        state.rotation = state.layout.mode === 'fan' ? target : state.rotation + H.shortestDelta(state.rotation, target);
-        state.velocity = 0;
-        state.stepTarget = null; // centering on a clicked card overrides a pending arrow step
-        applyDrumTransform(); updateFrontCard();
+        if (state.layout.mode === 'fan') {
+          selectCard(idx);
+        } else {
+          state.rotation += H.shortestDelta(state.rotation, H.rotationForCard(idx, state.layout));
+          state.velocity = 0;
+          state.stepTarget = null; // centering on a clicked card overrides a pending arrow step
+          applyDrumTransform(); updateFrontCard();
+        }
       }
       if (action === 'dive' || action === 'centerThenDive') dive();
     });
