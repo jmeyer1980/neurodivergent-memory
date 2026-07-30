@@ -110,19 +110,26 @@ test('fan applies to 1-4 cards only', () => {
   assert.deepEqual([0, 1, 2, 3, 4, 5, 12].map(isFanCount), [false, true, true, true, true, false, false]);
 });
 
-test('fan angles are symmetric and never exceed 60 degrees', () => {
+test('fan angles are symmetric and never exceed 22.5 degrees', () => {
+  // 22.5deg (half of FAN_SPREAD_DEG[4]) is the actual widest angle any fan
+  // reaches today -- the constraint this whole task is built on (centring an
+  // end card leaves the far card at <=45deg total). A looser bound here would
+  // silently pass a regression back toward the old, too-wide spread.
   for (const n of [1, 2, 3, 4]) {
     const { angles, mode } = drumLayout(340, n);
     assert.equal(mode, 'fan');
     assert.equal(angles.length, n);
-    assert.ok(Math.max(...angles.map(Math.abs)) <= 60, `n=${n} exceeded 60deg`);
+    assert.ok(Math.max(...angles.map(Math.abs)) <= 22.5 + 1e-9, `n=${n} exceeded 22.5deg`);
     // symmetric about 0: first and last are equal and opposite
     assert.ok(Math.abs(angles[0] + angles[n - 1]) < 1e-9, `n=${n} not symmetric`);
   }
+  const round1 = a => Math.round(a * 10) / 10;
   assert.deepEqual(drumLayout(340, 1).angles, [0]);
-  assert.deepEqual(drumLayout(340, 2).angles.map(Math.round), [-15, 15]);
-  assert.deepEqual(drumLayout(340, 3).angles.map(Math.round), [-20, 0, 20]);
-  assert.deepEqual(drumLayout(340, 4).angles.map(Math.round), [-22, -7, 8, 23]);
+  assert.deepEqual(drumLayout(340, 2).angles.map(round1), [-15, 15]);
+  assert.deepEqual(drumLayout(340, 3).angles.map(round1), [-20, 0, 20]);
+  // Honest values, not Math.round's -22/-7/8/23 (which reads like an
+  // asymmetry bug): the underlying angles are exactly +/-22.5 and +/-7.5.
+  assert.deepEqual(drumLayout(340, 4).angles.map(round1), [-22.5, -7.5, 7.5, 22.5]);
 });
 
 test('a fan keeps every card face-on enough to be a real click target', () => {

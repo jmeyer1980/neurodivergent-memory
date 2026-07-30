@@ -231,6 +231,10 @@
       state.layout = H.drumLayout(cardW, n);
       state.radius = state.layout.radius;
       els.stage.dataset.level = state.view.level;
+      // No CSS reads this any more (its only consumer was the deleted fan
+      // transition rule) — it is write-only now, kept as a test/debug hook
+      // so a driven browser (or a curious human) can read the live mode off
+      // the DOM without reaching into page-internal state.
       els.stage.dataset.layout = state.layout.mode;
       // Gestures are authored in degrees, but a degree buys wildly different
       // amounts of travel depending on drum size: one card is 30deg at n=12 and
@@ -572,24 +576,56 @@
       // Drives both modes: a fan rotates and clamps at its ends here exactly
       // as a cylinder decays and wraps; selectCard/stepBy only set the target
       // (stepTarget) or nudge velocity, this eases the rotation there.
-      if (!state.transitioning && !state.dragging && state.items.length) {
+      //
+      // The dragging guard is cylinder-only: a cylinder's own pointermove
+      // handler writes state.rotation directly every event (see below), so
+      // this loop must stay out of its way until release. A fan's drag
+      // branch never touches state.rotation itself — each DRAG_PX crossing
+      // calls selectCard, which only sets stepTarget — so without an
+      // exception here the drum would sit frozen on a static pose for the
+      // whole drag and only visibly rotate once the pointer lifts. Fan mode
+      // needs this loop running DURING the drag for the same reason a step
+      // needs it after a keypress: something has to ease stepTarget.
+      const dragBlocksTick = state.dragging && state.layout.mode !== 'fan';
+      if (!state.transitioning && !dragBlocksTick && state.items.length) {
         if (state.stepTarget != null) {
           const d = state.stepTarget - state.rotation;
           if (Math.abs(d) > 0.05) state.rotation += d * 0.14;
           else { state.rotation = state.stepTarget; state.stepTarget = null; }
         } else if (Math.abs(state.velocity) > 0.02) {
           state.rotation += state.velocity;
-          // A small drum DOES clamp at its ends now: a fan has no card past
-          // minRotation/maxRotation to wrap to, so kill the momentum at the
-          // rail instead of grinding against it. A cylinder's minRotation/
-          // maxRotation are +-Infinity, so clampRotation is a no-op there and
-          // this is exactly its old decay-only behaviour, unchanged.
+          // Defensive, not the live mechanism: no fan gesture path (wheel,
+          // drag) ever sets state.velocity away from 0 today — both bank
+          // pixels into discrete selectCard calls instead — so this branch
+          // is unreachable for a fan in practice, and what actually keeps a
+          // fan's rotation from wrapping is selectCard's own index clamp
+          // (Math.min(count-1, Math.max(0, next))). This call stays as a
+          // cheap guard in case a future fan gesture ever does bank velocity;
+          // a cylinder's minRotation/maxRotation are +-Infinity, so
+          // clampRotation is a no-op there and this is exactly its old
+          // decay-only behaviour, unchanged.
           const clamped = H.clampRotation(state.rotation, state.layout);
           if (clamped !== state.rotation) { state.rotation = clamped; state.velocity = 0; }
           state.velocity *= 0.93;
         } else {
           state.velocity = 0;
-          const target = H.snapRotation(state.rotation, state.layout);
+          // A fan's target is state.frontIndex, not the rotation nearest to.
+          // A wheel/drag event unconditionally nulls stepTarget on every call
+          // (a live gesture outranks a pending step), including one that banks
+          // less than a full notch and issues no new selectCard — so a step
+          // can be interrupted mid-ease with no replacement target queued. If
+          // this branch re-derived the target from state.rotation (via
+          // snapRotation -> indexAtRotation), it would find whatever card the
+          // PARTIALLY-eased rotation is nearest — the card being left, not the
+          // one already selected — and ease back to it, while .front, the
+          // position pill and centeredId all already show the new selection.
+          // Keying off state.frontIndex instead makes it the single source of
+          // truth for a fan's resting rotation, exactly as frontIndexNow()
+          // already assumes, so every frame converges on the actual selection
+          // no matter how many times something else nulled stepTarget first.
+          const target = state.layout.mode === 'fan'
+            ? H.rotationForCard(state.frontIndex, state.layout)
+            : H.snapRotation(state.rotation, state.layout);
           const d = target - state.rotation;
           if (Math.abs(d) > 0.05) state.rotation += REDUCED ? d : d * 0.14;
           else state.rotation = target;
@@ -1198,9 +1234,13 @@
     }
     connectEvents();
     els.retryBtn.addEventListener('click', init);
-    // Viewport width is now an input to the layout (shrink/pan decisions and the memories
-    // level's card width), so a resize has to rebuild the drum. Debounced: resize fires
-    // continuously while a window is dragged.
+    // The drum's own geometry (radius/angles) no longer depends on viewport
+    // width at all — only the memories level's card width does
+    // (`Math.min(560, Math.round(innerWidth * 0.92))`), so a resize still has
+    // to rebuild the drum there. Rebuilding at every level on every resize is
+    // harmless (projects/districts just redo the same 340px layout) and
+    // simpler than gating by level. Debounced: resize fires continuously
+    // while a window is dragged.
     let resizeTimer = null;
     function scheduleResizeRebuild(){
       clearTimeout(resizeTimer);
