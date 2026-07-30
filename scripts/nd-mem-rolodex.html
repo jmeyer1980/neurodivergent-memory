@@ -68,10 +68,10 @@
     #minimap{position:fixed;left:0;top:64px;bottom:64px;z-index:9;display:flex;flex-direction:column;justify-content:flex-end;align-items:flex-start;gap:8px;padding:10px;pointer-events:none}
     #minimap>*{pointer-events:auto}
     #mapToggle{font-size:.7rem;letter-spacing:.08em;text-transform:uppercase;padding:6px 10px}
-    #mapBody{max-height:100%;max-width:180px;overflow:auto;border-radius:16px;border:1px solid var(--surfaceBorder);background:var(--surface);backdrop-filter:blur(10px);padding:6px}
+    #mapBody{max-height:100%;max-width:180px;min-width:120px;overflow:auto;border-radius:16px;border:1px solid var(--surfaceBorder);background:var(--surface);backdrop-filter:blur(10px);padding:6px}
     #minimap.collapsed #mapBody{display:none}
     #mapBody svg{display:block}
-    #mapBody .edge{stroke:var(--faint);stroke-width:1.5;opacity:.45}
+    #mapBody .edge{fill:none;stroke:var(--faint);stroke-width:1.5;opacity:.45}
     #mapBody .edge.on{stroke:var(--primary);opacity:.9}
     #mapBody .node{fill:var(--surface);stroke:var(--faint);stroke-width:1.5;cursor:pointer}
     #mapBody .node.on{stroke:var(--primary)}
@@ -305,8 +305,14 @@
       if (els.minimap.classList.contains('collapsed')) return;
       try {
         const laid = H.layoutNavTree(state.tree);
-        const edges = laid.edges.map(e =>
-          `<line class="edge${e.onPath ? ' on' : ''}" x1="${e.x1}" y1="${e.y1}" x2="${e.x2}" y2="${e.y2}" />`).join('');
+        // Elbow, not a straight diagonal: rise from the parent, run across, then rise
+        // into the child. Over a short horizontal gap a diagonal is visually just a
+        // tilted trunk, while an elbow reads unmistakably as a branch. A same-column
+        // edge degenerates to a plain vertical line, as it should.
+        const edges = laid.edges.map(e => {
+          const midY = (e.y1 + e.y2) / 2;
+          return `<path class="edge${e.onPath ? ' on' : ''}" d="M ${e.x1} ${e.y1} V ${midY} H ${e.x2} V ${e.y2}" />`;
+        }).join('');
         const nodes = laid.nodes.map(n =>
           `<circle class="node${n.onPath ? ' on' : ''}${n.isCursor ? ' cursor' : ''}" data-node="${n.id}" cx="${n.x}" cy="${n.y}" r="5"><title>${esc(n.label)} (0^${n.depth})</title></circle>`).join('');
         els.mapBody.innerHTML = `<svg width="${laid.width}" height="${laid.height}" viewBox="0 0 ${laid.width} ${laid.height}">${edges}${nodes}</svg>`;

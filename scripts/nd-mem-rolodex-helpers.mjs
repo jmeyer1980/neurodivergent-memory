@@ -434,8 +434,11 @@ export function navNodeLabel(node) {
   return 'wrap';
 }
 
-const MINIMAP_COL = 26;   // px between sibling columns
-const MINIMAP_ROW = 34;   // px between depth rows
+// Columns are deliberately much wider than a node (r=5, so 10px across): at 26px a
+// fork read as a jog in a trunk rather than a branch. Rows are tighter than columns
+// so a deep chain does not stretch the tree into a thread.
+const MINIMAP_COL = 46;   // px between sibling columns
+const MINIMAP_ROW = 28;   // px between depth rows
 const MINIMAP_PAD = 14;
 
 // Tidy-ish layout: every leaf takes the next column, every parent centers over
