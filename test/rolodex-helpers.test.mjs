@@ -6,8 +6,6 @@ import {
   anglePerCard, drumRadius, normalizeAngle, shortestDelta,
   nearestIndex, rotationForIndex, snapTarget,
   FAN_MAX_CARDS, isFanCount, fanStep, fanSpread, fanRadius, drumLayout,
-  panForCard, liftForCard, fanProjectedHalfWidth, FAN_PERSPECTIVE,
-  FAN_LIFT_MARGIN, FAN_MIN_CHORD_RATIO,
   rotationForCard, indexAtRotation, snapRotation, clampRotation,
   LEVELS, nextLevel, createHistory, pushView, popView, atWall,
   itemIdsForView, reconcileView, reconcilePop,
@@ -123,8 +121,8 @@ test('fan angles are symmetric and never exceed 60 degrees', () => {
   }
   assert.deepEqual(drumLayout(340, 1).angles, [0]);
   assert.deepEqual(drumLayout(340, 2).angles.map(Math.round), [-15, 15]);
-  assert.deepEqual(drumLayout(340, 3).angles.map(Math.round), [-24, 0, 24]);
-  assert.deepEqual(drumLayout(340, 4).angles.map(Math.round), [-33, -11, 11, 33]);
+  assert.deepEqual(drumLayout(340, 3).angles.map(Math.round), [-20, 0, 20]);
+  assert.deepEqual(drumLayout(340, 4).angles.map(Math.round), [-22, -7, 8, 23]);
 });
 
 test('a fan keeps every card face-on enough to be a real click target', () => {
@@ -153,214 +151,15 @@ test('cylinder layout is unchanged from the old uniform math', () => {
 test('fan radius keeps adjacent cards from overlapping, with the 260 floor', () => {
   assert.equal(fanRadius(340, 1), 260);           // single card: floor
   assert.ok(fanRadius(340, 2) > 490, 'two cards need room for a 340px chord');
-  assert.ok(fanRadius(340, 4) > fanRadius(340, 2), 'tighter step needs more radius');
+  assert.ok(fanRadius(340, 4) > fanRadius(340, 2), 'a tighter step needs more radius');
   assert.ok(fanRadius(560, 3) > fanRadius(340, 3), 'wider cards need more radius');
   assert.equal(fanRadius(10, 3), 260);            // tiny cards still respect the floor
-  // Wide cards would otherwise need a radius that flings the outer cards off the
-  // viewport. The old hard-coded cap (a 4th positional maxRadius argument) is gone
-  // now that fanRadius is viewport-aware: a tight viewport budget (3rd argument)
-  // does the same job, binding the radius below the unconstrained no-overlap ideal.
-  const wideIdealRadius = fanRadius(560, 4); // unconstrained: no-overlap ideal
-  assert.ok(fanRadius(560, 4, 900) < wideIdealRadius, 'a tight viewport shrinks a wide-card fan below its ideal radius');
-  assert.ok(fanRadius(340, 4) < wideIdealRadius, 'a normal card is naturally smaller than a wide-card fan');
-});
-
-// The three responses to a narrow viewport are GRADED, not exclusive: shrink the
-// arc first, spending up to (1 - FAN_MIN_CHORD_RATIO) of overlap, and pan on top
-// of that if even the maximum-overlap arc still overflows. This test used to be
-// called "a fan shrinks to fit a narrow viewport before it resorts to panning",
-// which read as if a shrunk fan never pans — but its own 340/3 @820 case does
-// both, so the name described behaviour the assertions never checked. Renamed,
-// and the actual `panning` value pinned at each of the three regimes.
-test('a fan that fits does neither; a tight one shrinks; a too-tight one shrinks AND pans', () => {
-  const roomy = drumLayout(340, 3, 1600);
-  assert.equal(roomy.mode, 'fan');
-  assert.equal(roomy.panning, false, 'a fan that fits stays symmetric about centre');
-  assert.ok(roomy.pans.every(p => p === 0));
-  assert.ok(roomy.overlapRatio <= 0.001, 'and it spends no overlap');
-
-  // Shrinking alone is enough here: the arc tightens, some overlap is spent, and
-  // the selected card still fits without any pan.
-  const shrunk = drumLayout(340, 3, 1024);
-  assert.equal(shrunk.mode, 'fan');
-  assert.ok(shrunk.radius < roomy.radius, 'the arc tightens to fit');
-  assert.ok(shrunk.overlapRatio > 0, 'which necessarily costs some overlap');
-  assert.equal(shrunk.panning, false, 'and at 1024px that alone is enough — no pan');
-  assert.ok(shrunk.pans.every(p => p === 0));
-
-  // iPad portrait. Three 340px cards do not fit 820px even at maximum overlap, so
-  // this case shrinks to the floor AND pans — the two responses compose.
-  const tight = drumLayout(340, 3, 820);
-  assert.equal(tight.mode, 'fan');
-  assert.ok(tight.radius < shrunk.radius, 'a narrower viewport tightens the arc further');
-  assert.ok(tight.overlapRatio > shrunk.overlapRatio, 'spending more overlap to do it');
-  assert.ok(tight.overlapRatio <= 1 - FAN_MIN_CHORD_RATIO + 1e-6,
-    'but never more overlap than FAN_MIN_CHORD_RATIO permits');
-  assert.equal(tight.panning, true, 'and it still overflows at that floor, so it pans too');
-});
-
-test('a fan pans so the selection is centred when even the tightest arc overflows', () => {
-  const phone = drumLayout(340, 4, 390);
-  assert.equal(phone.mode, 'fan');
-  assert.equal(phone.panning, true, 'a 4-card fan cannot fit 390px, so it must pan');
-  // Panning centres the selected card: the pan for card i cancels its own x offset.
-  assert.equal(panForCard(1, phone), phone.pans[1]);
-  assert.ok(panForCard(0, phone) > 0, 'the leftmost card pans right to reach centre');
-  assert.ok(panForCard(3, phone) < 0, 'the rightmost card pans left');
-  assert.ok(Math.abs(panForCard(0, phone) + panForCard(3, phone)) <= 1, 'and the ends mirror');
-  // The selected card is lifted, which shifts its own screen-x by lift*sin(angle);
-  // the pan must cancel THAT (lifted-radius) offset, not the unlifted one, or the
-  // steepest cards land short of centre. Pin the magnitude so this can't regress.
-  const steep = phone.angles[0] * Math.PI / 180;
-  assert.ok(Math.abs(panForCard(0, phone)) > Math.abs(phone.radius * Math.sin(steep)),
-    'the pan must include the lifted radius, not just the base radius');
-});
-
-test('the selected card is lifted to a constant depth whatever its angle', () => {
-  // The old fixed 40px lift under-compensated: an angled card sat further back
-  // than a flat one, so the selection could render smaller than its neighbours.
-  const fan = drumLayout(340, 4, 1600);
-  const lift = i => liftForCard(i, fan);
-  assert.ok(lift(0) > lift(1), 'a steeper card needs more lift to reach the same depth');
-  for (let i = 0; i < fan.count; i++) {
-    const a = fan.angles[i] * Math.PI / 180;
-    const faceZ = (fan.radius + lift(i)) * Math.cos(a) - fan.radius;
-    assert.ok(Math.abs(faceZ - 40) < 1.5, `card ${i} face should land at z~40, got ${faceZ}`);
-  }
-});
-
-test('a cylinder reports zeroed pan and lift so callers stay branch-free', () => {
-  const cyl = drumLayout(340, 12, 390);
-  assert.equal(cyl.mode, 'cylinder');
-  assert.equal(cyl.panning, false);
-  assert.equal(panForCard(3, cyl), 0);
-  assert.equal(liftForCard(3, cyl), 0);
-});
-
-// fanSelectedHalfWidth (internal to helpers.mjs, not exported — measures the
-// outermost card's projected half-width AS SELECTED, i.e. lifted) replaced the
-// bare-arc fanProjectedHalfWidth inside fanRadius's bisection predicate. The
-// bisection's correctness depends entirely on that predicate being monotone in
-// radius over the range it searches; re-derive the same formula here (it isn't
-// exported, matching the sanctioned diff) and sample it rather than assume.
-// The re-derivation below deliberately mirrors helpers.mjs's own formula, so every
-// number in it comes from an EXPORTED constant (FAN_LIFT_MARGIN, FAN_MIN_CHORD_RATIO)
-// or an exported function (fanSpread, fanStep). Inlining 40 / 0.62 / {2:30,3:48,4:66}
-// as literals — as this test originally did — meant a future change to any of those
-// constants would leave the test silently validating the OLD formula while the
-// implementation moved on, which is the one failure mode a pinning test must not have.
-test('fanSelectedHalfWidth is monotone in radius over the range fanRadius bisects', () => {
-  const fanSelectedHalfWidth = (radius, count, cardWidth) => {
-    const spreadHalf = (fanSpread(count) / 2) * Math.PI / 180;
-    const lift = (radius + FAN_LIFT_MARGIN) / Math.cos(spreadHalf) - radius;
-    return fanProjectedHalfWidth(radius + lift, count, cardWidth, undefined, radius);
-  };
-  for (const count of [2, 3, 4]) {
-    for (const cardWidth of [340, 560]) {
-      const step = fanStep(count);
-      const halfChordAngle = Math.sin((step / 2) * Math.PI / 180);
-      const floor = (FAN_MIN_CHORD_RATIO * cardWidth) / (2 * halfChordAngle);
-      const ideal = cardWidth / (2 * halfChordAngle);
-      let prev = -Infinity;
-      for (let i = 0; i <= 20; i++) {
-        const r = floor + (ideal - floor) * (i / 20);
-        const v = fanSelectedHalfWidth(r, count, cardWidth);
-        assert.ok(v >= prev - 1e-6,
-          `count=${count} cardWidth=${cardWidth}: fanSelectedHalfWidth decreased at r=${r.toFixed(1)} (${v} < ${prev})`);
-        prev = v;
-      }
-    }
-  }
-});
-
-// The upper-bound regression guard that used to live in the old `fanRadius`
-// (a hard `maxRadius` cap) is gone now that the radius is viewport-derived, and
-// nothing else pinned an upper bound on how far a selected, lifted end card can
-// project. Deciding `panning`/the shrink budget from the BARE arc instead of the
-// SELECTED (lifted) card under-estimated the true on-screen extent by up to
-// several hundred pixels at wide viewports, silently skipping panning exactly
-// when it was needed — this test is the containment guard that would have
-// caught it. It derives the outermost card's projected box from only the
-// public layout fields (radius, angles, pans, lifts) using the SAME composition
-// the renderer's cardIndexAtPoint uses: origin + (pan + x) * scale, pan
-// composed with x BEFORE the perspective divide, not added to an
-// already-projected screen coordinate.
-// WHY THIS SWEEPS EVERY CARD AT EVERY SELECTION, and not just the outermost card
-// as selected: this test used to measure only card `count-1`, on the assumption
-// that the steepest angle projects furthest. That is true of an UNPANNED fan, but
-// false of a panning one, and a panning fan is exactly the case this guard exists
-// to protect. In pan mode the drum's translateX cancels the selected card's own x
-// offset, so its edges project to
-//     localX * cos(a) * P / (P - FAN_LIFT_MARGIN + localX * sin(a))
-// whose magnitude peaks at sin(a) = (cardWidth/2) / (P - FAN_LIFT_MARGIN), i.e.
-// ~11.9deg -- NOT at the outermost angle. Measured: for cardWidth 560 at count 4
-// the +/-11deg card projects 294.9px from centre against the outermost card's
-// 272.2px (for 340px cards: 175.7 vs 157.4), so the old single-card guard was
-// ~20px looser than its name implied and a regression of that size would pass.
-//
-// WHY THE REQUIREMENT DIFFERS BY MODE -- this is a deliberate, ruled-on
-// distinction, not a loosened bar:
-//   * A fan that FITS (panning === false) must show every card fully, at every
-//     selection. That is the property Task 13 established, and it still holds
-//     whenever the geometry allows it.
-//   * A PANNING fan cannot show every card at once -- the cards genuinely span
-//     more screen than exists (see the note at the top of the fan section in
-//     helpers.mjs: the arc can never be more compact than the same cards laid
-//     flat side by side). For it the requirement is that the SELECTED card is
-//     fully on screen, which is what panning buys. Simultaneous visibility is
-//     the fan's preference; REACHABILITY is its requirement, and reachability
-//     follows directly from the selected-card assertion below: card i is fully
-//     contained at selection i, so stepping reaches every card. The original
-//     field complaint was cards that could neither be seen NOR brought into
-//     view by any gesture; that is what must not regress.
-// Verified in a driven browser at 1600x1000 and 390x844 (see task-14-report.md):
-// the boxes the browser renders match this projection to within a pixel.
-test('every card stays within the viewport at every selection, across counts, card widths and common breakpoints', () => {
-  const widths = [390, 820, 1024, 1180, 1280, 1366, 1440, 1600, 1920];
-  for (const count of [2, 3, 4]) {
-    for (const cardWidth of [340, 560]) {
-      for (const width of widths) {
-        // Out of drumLayout's contract, not a geometry bug: cardWidth is a GIVEN, not
-        // something this function may shrink, so a card wider than the viewport cannot
-        // be made to fit by any arc/pan/lift choice -- even a single flat, unrotated,
-        // perfectly centred card of that width overflows both edges. The page never
-        // asks for this: the memories level's cardWidth is always
-        // Math.min(560, Math.round(innerWidth*0.92)), which is always < innerWidth.
-        // Measured (before this exclusion): the only 3 of 54 combinations that failed
-        // were exactly cardWidth=560 at width=390 (count 2/3/4) -- every other
-        // combination, including 560 at width=820, passed.
-        if (cardWidth > width) continue;
-        const layout = drumLayout(cardWidth, count, width);
-        const origin = width / 2;
-        for (let sel = 0; sel < count; sel++) {
-          // One translateX on the drum, chosen by the selection, moves every card
-          // together — so the pan is the SELECTED card's pan for all of them.
-          const pan = panForCard(sel, layout);
-          for (let idx = 0; idx < count; idx++) {
-            if (layout.panning && idx !== sel) continue; // see the mode note above
-            const a = layout.angles[idx] * Math.PI / 180;
-            // The page lifts exactly one card (setCardLift is called with
-            // `lifted = (i === idx)`), so only the selected card's radius grows.
-            const r = layout.radius + (idx === sel ? liftForCard(idx, layout) : 0);
-            // Same composition the renderer and cardIndexAtPoint use:
-            // origin + (pan + x) * s, with pan composed with x BEFORE the single
-            // perspective divide — not added to an already-projected coordinate.
-            const project = (localX) => {
-              const x = localX * Math.cos(a) + r * Math.sin(a);
-              const z = -localX * Math.sin(a) + r * Math.cos(a) - layout.radius;
-              const s = FAN_PERSPECTIVE / (FAN_PERSPECTIVE - z);
-              return (pan + x) * s;
-            };
-            const edges = [project(-cardWidth / 2), project(cardWidth / 2)].map(v => origin + v);
-            const left = Math.min(...edges), right = Math.max(...edges);
-            assert.ok(left >= -0.5 && right <= width + 0.5,
-              `count=${count} cardWidth=${cardWidth} width=${width} panning=${layout.panning} `
-              + `selection=${sel} card=${idx}: [${left.toFixed(1)}..${right.toFixed(1)}] must be within 0..${width}`);
-          }
-        }
-      }
-    }
-  }
+  // Deliberately large: four 340px cards at the shallow 4-card step come out to
+  // ~1300px, not a four-card diameter — see the FAN_SPREAD_DEG comment.
+  assert.ok(fanRadius(340, 4) > 1250 && fanRadius(340, 4) < 1350, `expected ~1303, got ${fanRadius(340, 4)}`);
+  // The third argument is a floor override, not a viewport budget any more —
+  // fanRadius is no longer viewport-aware (see drumLayout's own comment).
+  assert.equal(fanRadius(10, 3, 500), 500, 'a raised floor still wins over a tiny ideal radius');
 });
 
 test('rotationForCard centers each card in both modes', () => {
@@ -374,13 +173,13 @@ test('rotationForCard centers each card in both modes', () => {
 });
 
 test('fan rotation clamps at the ends; cylinder wraps freely', () => {
-  // These angles track FAN_SPREAD_DEG[3] (currently 48, step 24) — if that
+  // These angles track FAN_SPREAD_DEG[3] (currently 40, step 20) — if that
   // constant moves, the expected values below must move with it.
-  const fan = drumLayout(340, 3);            // angles -24, 0, 24 -> rotation range -24..24
-  assert.equal(fan.maxRotation, 24);
-  assert.equal(fan.minRotation, -24);
-  assert.equal(clampRotation(200, fan), 24);
-  assert.equal(clampRotation(-200, fan), -24);
+  const fan = drumLayout(340, 3);            // angles -20, 0, 20 -> rotation range -20..20
+  assert.equal(fan.maxRotation, 20);
+  assert.equal(fan.minRotation, -20);
+  assert.equal(clampRotation(200, fan), 20);
+  assert.equal(clampRotation(-200, fan), -20);
   assert.equal(clampRotation(10, fan), 10);
   // out-of-range rotations still resolve to the end cards, never past them
   assert.equal(indexAtRotation(-999, fan), 2);
@@ -389,6 +188,26 @@ test('fan rotation clamps at the ends; cylinder wraps freely', () => {
   const cyl = drumLayout(340, 12);
   assert.equal(clampRotation(5000, cyl), 5000, 'cylinder must not clamp');
   assert.equal(clampRotation(-5000, cyl), -5000);
+});
+
+// The property this whole task exists for: reverting the fan from a
+// never-rotating arc back to a rotating one is only safe because a large,
+// shallow arc keeps the far card readable when an end card is centred.
+test('centering an end card leaves the far card readable, not edge-on', () => {
+  // The original defect: at a tight arc, rotating to centre an end card swung
+  // the far card past 90deg (facing away). On a large drum with a shallow
+  // step the far card lands at the total spread, which is capped so cos(angle)
+  // stays comfortable.
+  for (const n of [2, 3, 4]) {
+    const layout = drumLayout(340, n);
+    const rot = rotationForCard(0, layout);                    // centre the first card
+    const farAngle = Math.abs(rot + layout.angles[n - 1]);      // where the last one ends up
+    assert.ok(farAngle <= 45, `n=${n}: far card reaches ${farAngle}deg`);
+    assert.ok(Math.cos(farAngle * Math.PI / 180) >= 0.7, `n=${n}: far card too foreshortened`);
+    // And the centred card is exactly face-on, which is what makes it hit-testable.
+    assert.equal(indexAtRotation(rot, layout), 0);
+    assert.ok(Math.abs(rot + layout.angles[0]) < 1e-9, 'the selected card sits at 0deg');
+  }
 });
 
 test('snapRotation stays near the continuous rotation on a cylinder', () => {

@@ -36,16 +36,6 @@
     #scene.bouncing{animation:wallbounce .45s ease}
     @keyframes wallbounce{0%{transform:translateZ(0)}35%{transform:translateZ(-90px)}100%{transform:translateZ(0)}}
     #drum{position:relative;width:var(--cardW);height:var(--cardH);transform-style:preserve-3d}
-    /* Scoped to fan mode only: a cylinder writes rotateY(...) to #drum's transform
-       every animation frame while spinning, and an unscoped transition here would
-       fight that per-frame write (each new value chases the last one's easing
-       instead of applying immediately), turning a spin into a laggy smear. A fan
-       never spins — its transform only ever changes on a discrete selection step,
-       which is exactly what this eases. A full rebuild (dive, zoom, resize) also
-       writes a fresh transform, but setDrumTransformNow() explicitly suppresses
-       this transition for that write, so a brand-new fan never appears to
-       animate into place — only a live selection step ever eases. */
-    #stage[data-layout="fan"] #drum{transition:transform .25s ease}
     #stage[data-level="memories"]{--cardH:500px}
     .card3d{position:absolute;inset:0;display:flex;flex-direction:column;gap:10px;padding:18px;border-radius:24px;border:1px solid var(--surfaceBorder);background:var(--cardWash),radial-gradient(circle at top right,rgba(96,215,210,.16),transparent 38%),var(--surface);box-shadow:0 18px 40px rgba(0,0,0,.35);backface-visibility:hidden;transition:opacity .3s,box-shadow .3s,border-color .3s,transform .25s ease;opacity:.55}
     .card3d.front{opacity:1;border-color:rgba(96,215,210,.4);box-shadow:0 24px 60px rgba(0,0,0,.5),0 0 30px rgba(96,215,210,.12)}
@@ -99,7 +89,7 @@
     .btn.primary{background:linear-gradient(180deg,rgba(96,215,210,.24),rgba(96,215,210,.12));border-color:rgba(96,215,210,.3)}
     #toast{position:fixed;right:16px;bottom:16px;z-index:50;display:none;max-width:360px;padding:13px 16px;border-radius:16px;background:var(--overlayBg);border:1px solid rgba(96,215,210,.26)}
     #toast.show{display:block}
-    @media (prefers-reduced-motion: reduce){#scene{transition:none}#scene.bouncing,#stage.bounce::after{animation:none}.card3d{transition:none}#stage[data-layout="fan"] #drum{transition:none}}
+    @media (prefers-reduced-motion: reduce){#scene{transition:none}#scene.bouncing,#stage.bounce::after{animation:none}.card3d{transition:none}}
   </style>
 </head>
 <body>
@@ -169,7 +159,7 @@
       rotation: 0,         // live continuous rotation (deg)
       velocity: 0,
       radius: 260,
-      layout: H.drumLayout(340, 0, window.innerWidth),
+      layout: H.drumLayout(340, 0),
       dragging: false,
       transitioning: false,
       frontIndex: -1,
@@ -234,14 +224,11 @@
       // readable content. The CSS var and the radius math share this one number.
       const cardW = state.view.level === 'memories' ? Math.min(560, Math.round(window.innerWidth * 0.92)) : 340;
       els.stage.style.setProperty('--cardW', cardW + 'px');
-      // One descriptor drives placement, hit-testing, snapping, panning and
-      // lifting, so fan and cylinder never need a branch at the call site. It
-      // is assigned before the empty-drum return below, because updateFrontCard
-      // reads it even when there is nothing to show.
-      // The viewport is now part of the geometry: a fan shrinks, then pans, to keep
-      // every card on screen. Without this the fan stranded its end cards off the
-      // side of a phone with no gesture able to reach them.
-      state.layout = H.drumLayout(cardW, n, window.innerWidth);
+      // One descriptor drives placement, hit-testing, snapping and clamping, so
+      // fan and cylinder never need a branch at the call site. It is assigned
+      // before the empty-drum return below, because updateFrontCard reads it
+      // even when there is nothing to show.
+      state.layout = H.drumLayout(cardW, n);
       state.radius = state.layout.radius;
       els.stage.dataset.level = state.view.level;
       els.stage.dataset.layout = state.layout.mode;
@@ -259,56 +246,25 @@
         // sit; at z=0 it renders a drum-radius deep and reads as a recessed card.
         els.drum.innerHTML = `<div class="card3d front placeholder" style="transform:translateZ(${state.radius}px)"><span class="kicker">Empty</span><h2>${state.view.level === 'projects' ? 'No memories yet' : 'Nothing here'}</h2><p>Store a memory through MCP or the classic app and it will appear.</p></div>`;
         state.rotation = 0; state.velocity = 0; state.frontIndex = -1; state.frontEl = null;
-        setDrumTransformNow(); updateChrome(); return;
+        applyDrumTransform(); updateChrome(); return;
       }
-      // data-tf keeps each card's resting transform so the fan's selected card can
-      // be lifted toward the viewer and set back down without recomputing angles.
       els.drum.innerHTML = state.items.map((item, i) => {
         const tf = `rotateY(${state.layout.angles[i]}deg) translateZ(${state.radius}px)`;
-        return `<div class="card3d" data-idx="${i}" data-tf="${tf}" style="transform:${tf}">${cardFace(item)}</div>`;
+        return `<div class="card3d" data-idx="${i}" style="transform:${tf}">${cardFace(item)}</div>`;
       }).join('');
       const idx = Math.max(0, state.items.findIndex(i => i.id === state.view.centeredId));
-      // A fan NEVER rotates — that is exactly what keeps every card facing forward.
-      // Rotating to centre an end card is what swung the far cards edge-on, which
-      // defeated the whole point of fanning a small drum out.
-      state.rotation = state.layout.mode === 'fan' ? 0 : H.rotationForCard(idx, state.layout);
+      state.rotation = H.rotationForCard(idx, state.layout);
       state.frontIndex = idx;
       state.wheelAccum = 0;
       state.dragAccum = 0;
       state.velocity = 0;
       state.frontEl = null; // the old element is gone with the innerHTML it lived in
-      setDrumTransformNow();
-      // The second argument tells updateFrontCard not to re-apply the drum
-      // transform itself: setDrumTransformNow() just wrote it, transition
-      // suppressed. Without this, updateFrontCard's own fan-mode re-apply
-      // (below) writes the identical value again — but this time with the
-      // transition no longer suppressed, which was enough to make the fan
-      // CSS transition fire on every rebuild, animating a brand-new fan into
-      // place from wherever the previous drum's transform happened to be.
-      updateFrontCard(true, true);
+      applyDrumTransform();
+      updateFrontCard(true);
     }
 
     function applyDrumTransform(){
-      // translateX is outermost so it happens in the parent's (camera) space, where a
-      // shift does not change any card's depth — the perspective scale cancels and the
-      // centring is exact. 0 unless the fan is too wide to fit, and always 0 on a cylinder.
-      const pan = H.panForCard(state.frontIndex, state.layout);
-      els.drum.style.transform = `translateX(${pan}px) translateZ(${-state.radius}px) rotateY(${state.rotation}deg)`;
-    }
-
-    // buildDrum's own writes must never animate: a rebuild can land while the
-    // PREVIOUS drum's transform is still mid-transition (diving from a spun
-    // cylinder straight into a fresh fan, say), and the fan CSS transition would
-    // then ease the brand-new drum's first pose in from wherever the old one
-    // left off — a fan visibly rotating/panning into place, which the design
-    // says never happens. Only a later selection step (via updateFrontCard's
-    // own applyDrumTransform call) should ever animate. Same suppress-then-
-    // restore pattern transitionTo already uses for its own pose commit.
-    function setDrumTransformNow(){
-      els.drum.style.transition = 'none';
-      applyDrumTransform();
-      void els.drum.offsetWidth; // commit this write with no transition before restoring it
-      els.drum.style.transition = '';
+      els.drum.style.transform = `translateZ(${-state.radius}px) rotateY(${state.rotation}deg)`;
     }
 
     // The reader's text lives on exactly one card at a time. Keeping it in the
@@ -319,45 +275,25 @@
       if (rs) rs.textContent = text;
     }
 
-    // On a cylinder the front card is derived from the angle. In a fan nothing
-    // rotates, so there is no angle to read back — state.frontIndex IS the
-    // selection and this is its only source of truth.
+    // On a cylinder the front card is derived from the angle. A fan still keeps
+    // state.frontIndex as its own source of truth rather than deriving it from
+    // the angle: a gesture selects discretely (one card per notch/step), and
+    // the rotation then eases to follow the selection — see selectCard.
     function frontIndexNow(){
       if (state.layout.mode !== 'fan') return H.indexAtRotation(state.rotation, state.layout);
       const count = state.items.length;
       return count ? Math.min(count - 1, Math.max(0, state.frontIndex)) : -1;
     }
-    // The lift marks the selection in a fan, since the drum can no longer turn the
-    // chosen card to face you — it already faces you. The lift is angle-dependent:
-    // an angled card has to come further forward than a flat one to bring its face
-    // to the same depth. A fixed lift left a selected end card sitting behind its
-    // own neighbour and rendering slightly smaller.
-    function setCardLift(el, lifted, idx){
-      if (!el) return;
-      const base = el.dataset.tf || '';
-      const lift = lifted ? H.liftForCard(idx, state.layout) : 0;
-      el.style.transform = lift ? `${base} translateZ(${lift}px)` : base;
-    }
-    function updateFrontCard(force = false, skipTransform = false){
+    function updateFrontCard(force = false){
       const idx = frontIndexNow();
       if (!force && idx === state.frontIndex) return;
       state.frontIndex = idx;
-      // A panning fan re-centres on the new selection, so the drum transform depends on
-      // frontIndex and must be rewritten here — tick() does not run for fans. `skipTransform`
-      // is only true when buildDrum just called this: it already wrote this exact transform
-      // via setDrumTransformNow() with the transition suppressed, so re-applying it here too
-      // is both redundant and, on a fan, enough to trigger the CSS transition on a rebuild.
-      // selectCard's live selection step leaves skipTransform false — that write is what
-      // actually produces the eased pan for a real step.
-      if (state.layout.mode === 'fan' && !skipTransform) applyDrumTransform();
       // Cards are appended in item order, so children[idx] is the card for item idx.
       const next = idx >= 0 ? (els.drum.children[idx] ?? null) : null;
       if (force) {
         // buildDrum just rewrote the drum: every card needs its class settled.
-        const fan = state.layout.mode === 'fan';
         els.drum.querySelectorAll('.card3d').forEach((el, i) => {
           el.classList.toggle('front', i === idx);
-          setCardLift(el, fan && i === idx, i);
           // selectCard forces this path on a live drum (not just buildDrum's
           // fresh markup), so a previously-selected memory card's full content
           // must be cleared from its hidden .reader-scroll here too.
@@ -366,8 +302,8 @@
       } else if (state.frontEl !== next) {
         // Steady state touches two cards. Sweeping all N here ran once per front
         // change, i.e. many times a second during a spin, on every card.
-        if (state.frontEl) { state.frontEl.classList.remove('front'); fillReader(state.frontEl, ''); setCardLift(state.frontEl, false, state.frontIndex); }
-        if (next) { next.classList.add('front'); setCardLift(next, state.layout.mode === 'fan', idx); }
+        if (state.frontEl) { state.frontEl.classList.remove('front'); fillReader(state.frontEl, ''); }
+        if (next) next.classList.add('front');
       }
       state.frontEl = next;
       fillReader(next, state.items[idx]?.data?.content ?? '');
@@ -453,8 +389,11 @@
       renderMinimap();
     }
 
-    // Fan selection: move the highlight, never the drum. A force update is cheap
-    // here because a fan is four cards at most.
+    // Fan selection: mark the new front card immediately (a force update is cheap
+    // here — a fan is four cards at most), then ease the drum's own rotation to
+    // bring it to centre, reusing the same stepTarget machinery arrow-stepping
+    // uses. The class/reader update and the rotation are deliberately not the
+    // same write: a gesture selects discretely, and the rotation catches up.
     function selectCard(next){
       const count = state.items.length;
       if (!count || state.transitioning) return;
@@ -462,12 +401,17 @@
       if (idx === state.frontIndex) return;
       state.frontIndex = idx;
       updateFrontCard(true);
+      state.velocity = 0;
+      const goal = H.rotationForCard(idx, state.layout);
+      if (REDUCED) { state.stepTarget = null; state.rotation = goal; applyDrumTransform(); }
+      else state.stepTarget = goal;
     }
 
     function stepBy(n){
       const count = state.items.length;
       if (!count || state.transitioning) return;
-      // A fan has ends and no rotation: stepping past an end is a no-op.
+      // A fan has ends: stepping past one is a no-op rather than a wrap
+      // (selectCard's own clamp), and selectCard drives the rotation there.
       if (state.layout.mode === 'fan') { selectCard(state.frontIndex + n); return; }
       const raw = state.frontIndex + n;
       const idx = ((raw % count) + count) % count;
@@ -612,10 +556,10 @@
     });
     // The rail sits over the drum's bottom-left corner, which is exactly where a
     // narrow-viewport memory card lives — an always-open rail there steals both
-    // taps and drag-scroll from the card, the same class of bug this feature's
-    // viewport-fitting fan just fixed. A stored preference always wins once the
-    // user has set one; absent that, default collapsed below ~760px (phones and
-    // narrow tablets) and open at wider (tablet-landscape and desktop) widths.
+    // taps and drag-scroll from the card. A stored preference always wins once
+    // the user has set one; absent that, default collapsed below ~760px (phones
+    // and narrow tablets) and open at wider (tablet-landscape and desktop)
+    // widths.
     const MAP_NARROW_PX = 760;
     try {
       const stored = localStorage.getItem(MAP_KEY);
@@ -625,19 +569,23 @@
 
     // ---------- animation loop ----------
     function tick(){
-      // A fan has no rotation to ease, snap or decay; its selection changes
-      // discretely, so the physics loop has nothing to do there.
-      if (!state.transitioning && !state.dragging && state.items.length && state.layout.mode !== 'fan') {
+      // Drives both modes: a fan rotates and clamps at its ends here exactly
+      // as a cylinder decays and wraps; selectCard/stepBy only set the target
+      // (stepTarget) or nudge velocity, this eases the rotation there.
+      if (!state.transitioning && !state.dragging && state.items.length) {
         if (state.stepTarget != null) {
           const d = state.stepTarget - state.rotation;
           if (Math.abs(d) > 0.05) state.rotation += d * 0.14;
           else { state.rotation = state.stepTarget; state.stepTarget = null; }
         } else if (Math.abs(state.velocity) > 0.02) {
-          // A fan does not spin at all (the outer guard above already excludes
-          // fan mode from this whole block), so there is no rail to grind
-          // against and nothing here to clamp — decay is the only thing this
-          // branch has ever needed to do.
           state.rotation += state.velocity;
+          // A small drum DOES clamp at its ends now: a fan has no card past
+          // minRotation/maxRotation to wrap to, so kill the momentum at the
+          // rail instead of grinding against it. A cylinder's minRotation/
+          // maxRotation are +-Infinity, so clampRotation is a no-op there and
+          // this is exactly its old decay-only behaviour, unchanged.
+          const clamped = H.clampRotation(state.rotation, state.layout);
+          if (clamped !== state.rotation) { state.rotation = clamped; state.velocity = 0; }
           state.velocity *= 0.93;
         } else {
           state.velocity = 0;
@@ -776,8 +724,8 @@
           }
           return;
         }
-        // Cylinder only — the fan branch above already returned, and a fan
-        // never spins in the first place, so there is no end to clamp against.
+        // Cylinder only — the fan branch above already returned and delegates
+        // to selectCard, which drives the fan's own rotation instead.
         const spin = dx * 0.22 * state.gestureGain;
         state.rotation += spin;
         state.velocity = Math.max(-30, Math.min(30, spin)); // same rail as the wheel
@@ -806,42 +754,30 @@
     // containing the point. Exact for the horizontal extent (both edges are
     // projected); the vertical band uses the larger edge scale, which is
     // slightly generous at strong angles and errs toward accepting clicks.
-    const PERSPECTIVE = 1400; // keep in sync with #stage{perspective:1400px}
     function cardIndexAtPoint(clientX, clientY){
       const n = state.items.length;
       if (!n) return -1;
       const rect = els.stage.getBoundingClientRect();
       const originX = rect.left + rect.width / 2, originY = rect.top + rect.height / 2;
-      const panX = H.panForCard(state.frontIndex, state.layout);
       const styles = getComputedStyle(els.stage);
       const cardW = parseFloat(styles.getPropertyValue('--cardW')) || 340;
       const cardH = parseFloat(styles.getPropertyValue('--cardH')) || 230;
       const angles = state.layout.angles;
       // Screen position + depth of the point localX along card face at angle a:
-      // the card transform is rotateY(a) translateZ(r) inside a drum at
-      // translateZ(-state.radius), so (localX, 0, 0) lands at the coordinates
-      // below. r is a parameter, not state.radius directly, because the fan's
-      // selected card renders at state.radius + FAN_LIFT_PX, and hit-testing it
-      // at the unlifted radius left its outer edge un-clickable.
-      const project = (localX, a, r) => {
+      // the card transform is rotateY(a) translateZ(radius) inside a drum at
+      // translateZ(-radius), so (localX, 0, 0) lands at the coordinates below.
+      const project = (localX, a) => {
         const sin = Math.sin(a), cos = Math.cos(a);
-        const x = localX * cos + r * sin;
-        const z = -localX * sin + r * cos - state.radius; // toward viewer, <= 0; the drum's own translateZ(-state.radius) is constant regardless of this card's radius
-        const s = PERSPECTIVE / (PERSPECTIVE - z);
-        // pan is composed into the SAME matrix as x, before the perspective divide
-        // (translateX(pan) translateZ(-r) rotateY(rot) is one matrix multiply, not
-        // pan added to an already-projected screen coordinate) — so it must be
-        // inside the (... ) * s, not added after. Adding it after left a
-        // pan*(1-s) gap that shrank the hit box on exactly the far side of the
-        // selected card Chromium's own hit-test also fails on.
-        return { sx: originX + (panX + x) * s, s, z };
+        const x = localX * cos + state.radius * sin;
+        const z = -localX * sin + state.radius * cos - state.radius; // toward viewer, <= 0
+        const s = H.FAN_PERSPECTIVE / (H.FAN_PERSPECTIVE - z);
+        return { sx: originX + x * s, s, z };
       };
       let best = -1, bestZ = -Infinity;
       for (let i = 0; i < n; i++) {
         const a = (state.rotation + angles[i]) * Math.PI / 180;
         if (Math.cos(a) <= 0.05) continue; // facing away or edge-on: not clickable
-        const r = state.radius + (i === state.frontIndex ? H.liftForCard(i, state.layout) : 0);
-        const L = project(-cardW / 2, a, r), R = project(cardW / 2, a, r);
+        const L = project(-cardW / 2, a), R = project(cardW / 2, a);
         const lo = Math.min(L.sx, R.sx), hi = Math.max(L.sx, R.sx);
         const halfH = (cardH / 2) * Math.max(L.s, R.s);
         const centerZ = (L.z + R.z) / 2;
@@ -868,12 +804,19 @@
       // Reading is still safe — wheel-inside-the-reader scrolls (see
       // insideReader), and a text-selection drag exceeds the click threshold
       // and suppresses its own click.
-      // Chromium cannot hit-test the far-rotated half of a card, so on a fan the browser
-      // reports #scene for a button on that half: the guard below misses, the click falls
-      // through to the geometric card test, and it DIVES instead of opening the modal.
-      // Measured on a 3-card fan: Edit worked at -24deg and 0deg, dived at +24deg. Buttons
-      // only ever live on the front card, whose element we already track, so test their
-      // projected boxes directly and dispatch to the real handler.
+      // Belt-and-braces, not load-bearing any more: a fan now rotates to bring
+      // the selected card to 0deg — flat, facing the camera — instead of
+      // lifting it in place at whatever angle it fanned to, so the front card
+      // is exactly the case Chromium's own hit-testing already gets right.
+      // This rect-based check stays because it is still correct and costs
+      // nothing, and because it is the only thing that would save an Edit/
+      // Rename click if a button were ever rendered on a non-centred card (it
+      // is not, today — buttons only live on `.card3d.front`). Historically
+      // (before this revert) a fan's selected card could sit anywhere from
+      // -33deg to +33deg, and Chromium reported #scene for a button on the far
+      // half of an angled card, so this check was the only thing standing
+      // between that click and a wrong dive; measured on a 3-card fan back
+      // then, Edit worked at -24deg and 0deg but dived at +24deg without it.
       const overFrontButton = (() => {
         if (!state.frontEl) return null;
         for (const el of state.frontEl.querySelectorAll('button, a')) {

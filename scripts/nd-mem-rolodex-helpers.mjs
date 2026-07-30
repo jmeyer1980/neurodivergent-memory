@@ -106,64 +106,52 @@ export function snapTarget(rotation, count) {
 }
 
 // A 1-4 card cylinder is degenerate: two cards face away from each other, four
-// make a cube showing one face. Small drums instead fan forward so every card
-// is visible at once, which is how you see at a glance that a project has
-// exactly three districts. Fan mode trades wrap-around for discrete selection
-// stepping: a fan does not spin at all, so there is no rotation to clamp.
+// make a cube showing one face. Small drums instead fan forward on a large,
+// shallow arc so several cards read at once, and ROTATE to bring the selected
+// card to centre — clamped at the ends (`clampRotation`) rather than wrapping,
+// since there is no card past the last one to wrap to.
 //
-// WHY THIS SECTION CHANGED — the fan's radius was derived from card width alone
-// and capped by a constant, so it never knew how wide the screen was. A 3-card
-// district fan projects ~887px wide; on an iPad in portrait (820px) the end
-// cards hang 58px off each edge, and on a phone 273px. Since a fan never
-// rotates, there was also no mechanism that could ever bring an off-screen card
-// back. Three things fix it, in this order of preference:
+// HISTORY, so the reasoning survives the code that carried it: the original
+// defect was misdiagnosed as "rotation is the problem", because the fan sat at
+// a tight, four-card-diameter radius where rotating to centre an end card swung
+// the far card past 90deg, facing away. That misdiagnosis produced three layers
+// of machinery, each one patching the previous layer's consequence: a fan that
+// never rotates (so the selection had to be marked by lifting it instead), a
+// pan to bring an off-screen selection to centre (since a non-rotating fan
+// cannot), and viewport-aware arc-shrinking to keep that pan on screen. The
+// real defect was the radius, not the rotation: at the shallow FAN_SPREAD_DEG
+// steps below, the far card of a centred end selection lands at only ~45deg
+// (cos 0.7 — still readable), so rotation was fine all along once the drum was
+// sized to avoid the tight arc. Reverting to rotation deletes all three layers
+// at once. See `docs/superpowers/specs/2026-07-29-rolodex-navigation-aids-design.md`
+// §4 for the fuller account.
 //
-//   1. Shrink the arc to fit the viewport, spending overlap to do it.
-//   2. If even the maximum-overlap arc is wider than the screen, PAN the drum
-//      (translateX) so the selection is centred. Panning, not rotating: a
-//      forward-facing card that is merely displaced still renders at full width,
-//      whereas rotating the arc to centre an end card swings the opposite end
-//      toward edge-on and re-creates the sliver problem FAN_SPREAD_DEG was
-//      tuned to avoid.
-//   3. Lift the selection by however much the arc set it back, so "selected"
-//      never renders smaller than its unselected neighbours.
+// A second-order effect worth keeping deliberately: because centring is done by
+// rotation, the selected card always sits at 0deg — flat, full width, at z=0 —
+// which is what makes it hit-testable by the browser (see cardIndexAtPoint's
+// comment in nd-mem-rolodex.html).
 //
 // A note on what is NOT achievable: for a non-overlapping arc of forward-facing
 // cards, the projected width tends to count * cardWidth as the spread narrows —
 // the arc can never be more compact than the same cards laid flat side by side,
 // whatever spread you choose. Perspective foreshortening buys back roughly
-// 15-20%, and that is all. So three 340px cards genuinely cannot all be shown
-// un-overlapped below ~890px of viewport. Overlap or panning is not a shortcut
-// here; it is the only remaining move.
+// 15-20%, and that is all. So four non-overlapping 340px cards genuinely cannot
+// be shown at once below ~1090px of viewport — accepted, not engineered around.
 
 export const FAN_MAX_CARDS = 4;
 
-// Total arc each count spreads over. Kept deliberately shallow: a card's readable
-// (and clickable) width shrinks with cos(angle), so the end cards of a wide arc
-// become slivers. At a 100deg spread the end cards of a 4-card fan measured 123px
-// against the middle card's 316px, and users could not reliably hit them — which
-// matters because a click is how you both select and dive. The widest angle here is
-// 33deg (cos 0.84), so no card reads much narrower than the one facing you.
-const FAN_SPREAD_DEG = { 1: 0, 2: 30, 3: 48, 4: 66 };
+// Total arc each count spreads over. Chosen so that when an END card is centred by
+// rotation, the far card sits at no more than ~45deg (cos 0.7 — still clearly
+// readable). That is the constraint the old tight arc violated: at a 66deg spread on
+// a small radius, centring an end card swung the far one to 100deg, facing away.
+// The radius follows from non-overlap at these steps and comes out large (~1300px for
+// four 340px cards), which is exactly the "not a four-card diameter" the design wants.
+const FAN_SPREAD_DEG = { 1: 0, 2: 30, 3: 40, 4: 45 };
 
-// Keep in sync with #stage{perspective:1400px} and the PERSPECTIVE constant in
-// nd-mem-rolodex.html. Geometry that decides what fits on screen has to agree
-// with the projection the browser actually performs.
+// Keep in sync with #stage{perspective:1400px} in nd-mem-rolodex.html, which
+// imports this rather than redeclaring its own copy. Geometry that decides
+// what the browser projects has to agree with the projection it performs.
 export const FAN_PERSPECTIVE = 1400;
-
-// How much of a card may be hidden by its neighbour before we stop shrinking the
-// arc and start panning instead. At 0.62, adjacent centres sit 62% of a card
-// apart, so ~38% of a side card is occluded — enough to still read its heading
-// and land a tap, which is all a non-selected card needs to do. Below ~0.5 the
-// side cards stop being independently clickable.
-export const FAN_MIN_CHORD_RATIO = 0.62;
-
-// Breathing room left between the outermost card edge and the viewport edge.
-export const FAN_VIEWPORT_MARGIN = 24;
-
-// Baseline z the selected card is raised to. At angle 0 this reproduces the old
-// fixed FAN_LIFT_PX exactly, so the flat case looks and feels unchanged.
-export const FAN_LIFT_MARGIN = 40;
 
 export function isFanCount(count) {
   return count > 0 && count <= FAN_MAX_CARDS;
@@ -178,140 +166,29 @@ export function fanSpread(count) {
   return count <= 1 ? 0 : (FAN_SPREAD_DEG[count] ?? FAN_SPREAD_DEG[FAN_MAX_CARDS]);
 }
 
-/**
- * Projected distance from stage centre to the outer edge of the outermost card,
- * using the same transform chain the renderer uses: the card is
- * rotateY(a) translateZ(radius) inside a drum at translateZ(-radius), so the
- * front card's face sits on the camera plane at z=0 and everything else recedes.
- *
- * `radius` is the CARD's own distance from the drum axis (which is larger than
- * the drum's own radius when the card is lifted — see `fanSelectedHalfWidth`);
- * `drumRadius` is what the drum itself is pulled back by (translateZ(-drumRadius)),
- * which stays the bare radius regardless of any one card's lift. They default to
- * the same value, which keeps every existing caller and test — none of which
- * measure a lifted card — byte-for-byte unchanged.
- */
-export function fanProjectedHalfWidth(radius, count, cardWidth, perspective = FAN_PERSPECTIVE, drumRadius = radius) {
-  const a = (fanSpread(count) / 2) * Math.PI / 180;
-  const sin = Math.sin(a), cos = Math.cos(a);
-  const x = (cardWidth / 2) * cos + radius * sin;
-  const z = -(cardWidth / 2) * sin + radius * cos - drumRadius; // <= 0, away from viewer
-  return x * (perspective / (perspective - z));
-}
-
-/**
- * The outermost card's projected half-width AS SELECTED — i.e. lifted. A
- * selected card is pulled toward the camera by `liftForCard`'s amount, which
- * pushes its outer edge both further out (lift*sin(angle)) and nearer the lens
- * (larger perspective scale), so it projects substantially wider than the bare
- * arc `fanProjectedHalfWidth(radius, ...)` reports. Measuring the bare arc
- * under-estimated the true on-screen extent by up to several hundred pixels at
- * wide viewports, which meant `fanRadius` and `drumLayout` could both decide
- * panning was unnecessary when the selected card would in fact hang off the
- * edge of the screen — under-panning, not over-panning: the dangerous
- * direction, since it silently fails to invoke the mechanism this whole file
- * exists to provide.
- */
-function fanSelectedHalfWidth(radius, count, cardWidth, perspective = FAN_PERSPECTIVE) {
-  const a = (fanSpread(count) / 2) * Math.PI / 180;
-  const lift = (radius + FAN_LIFT_MARGIN) / Math.cos(a) - radius;
-  return fanProjectedHalfWidth(radius + lift, count, cardWidth, perspective, radius);
-}
-
-/**
- * Adjacent card centres sit a chord apart on the arc. A chord of one full card
- * width means no overlap; FAN_MIN_CHORD_RATIO of one is the most overlap we
- * accept. Between those two radii we take the largest that still fits the
- * viewport.
- *
- * `viewportWidth` defaults to Infinity, which makes the budget unbounded and
- * returns the no-overlap radius — byte-for-byte the old behaviour, so existing
- * callers and tests that pass two arguments are unaffected.
- */
-export function fanRadius(cardWidth, count, viewportWidth = Infinity, options = {}) {
+// Adjacent card centres sit a chord apart on the arc; the chord must be at least a card
+// wide or the faces overlap and hide each other. With the shallow steps above this comes
+// out deliberately large — a big drum with a small arc, not a tight ring of four cards.
+export function fanRadius(cardWidth, count, minRadius = 260) {
   const step = fanStep(count);
-  if (step <= 0) return options.minRadius ?? 260;
-  const perspective = options.perspective ?? FAN_PERSPECTIVE;
-  const margin = options.margin ?? FAN_VIEWPORT_MARGIN;
-  const chordRatio = options.minChordRatio ?? FAN_MIN_CHORD_RATIO;
-
-  const halfChordAngle = Math.sin((step / 2) * Math.PI / 180);
-  const ideal = cardWidth / (2 * halfChordAngle);            // zero overlap
-  const floor = (chordRatio * cardWidth) / (2 * halfChordAngle); // max overlap
-
-  const minRadius = options.minRadius ?? 260;
-  const budget = viewportWidth / 2 - margin;
-  // The card that has to fit is the SELECTED (lifted) one, not the bare arc —
-  // measuring the bare arc under-estimated the true extent and let this return
-  // "fits" when the selected card would in fact hang off the screen.
-  if (!Number.isFinite(budget) || fanSelectedHalfWidth(ideal, count, cardWidth, perspective) <= budget) {
-    return Math.ceil(Math.max(minRadius, ideal));
-  }
-
-  // fanSelectedHalfWidth is monotonically increasing in radius (verified by
-  // sampling — see "fanSelectedHalfWidth is monotone in radius over the range
-  // fanRadius bisects" in the test suite), so bisection finds the fitting
-  // radius without the algebra needed to invert the perspective divide — and
-  // stays correct if the projection model is ever refined.
-  let lo = floor, hi = ideal;
-  for (let i = 0; i < 40; i++) {
-    const mid = (lo + hi) / 2;
-    if (fanSelectedHalfWidth(mid, count, cardWidth, perspective) <= budget) lo = mid;
-    else hi = mid;
-  }
-  return Math.ceil(Math.max(minRadius, floor, lo));
+  if (step <= 0) return minRadius;
+  const chordHalfAngle = (step / 2) * Math.PI / 180;
+  return Math.max(minRadius, Math.ceil(cardWidth / (2 * Math.sin(chordHalfAngle))));
 }
 
 // One descriptor per drum build. Every geometry consumer (placement, hit
-// testing, snapping, clamping, panning, lifting) reads from this, so fan and
-// cylinder never need branching at the call site.
-export function drumLayout(cardWidth, count, viewportWidth = Infinity) {
+// testing, snapping, clamping) reads from this, so fan and cylinder never
+// need branching at the call site.
+export function drumLayout(cardWidth, count) {
   if (isFanCount(count)) {
     const step = fanStep(count);
     const mid = (count - 1) / 2;
     const angles = Array.from({ length: count }, (_, i) => (i - mid) * step);
-    const radius = fanRadius(cardWidth, count, viewportWidth);
-    // The selected card is the one that must stay on screen, and it renders
-    // lifted — nearer the camera and pushed outward by lift*sin(angle) — so it
-    // projects wider than the bare arc. Deciding `panning` from the bare arc's
-    // half-width under-estimated the true extent (by up to several hundred
-    // pixels at wide viewports) and could leave `panning` false while the
-    // selected card actually hung off the edge of the screen.
-    const halfWidth = fanSelectedHalfWidth(radius, count, cardWidth);
-    const budget = viewportWidth / 2 - FAN_VIEWPORT_MARGIN;
-    // Only pan when the arc genuinely overflows. A fan that fits stays
-    // symmetric about centre, which is the composition the design wants.
-    const panning = Number.isFinite(budget) && halfWidth > budget + 0.5;
-    // Extra translateZ that puts the selected card's face at
-    // z = FAN_LIFT_MARGIN regardless of its angle. Without this the fixed
-    // 40px lift under-compensated: the selected end card of a 4-fan landed at
-    // z=-110 while an unselected middle card sat at z=-16, so the selection
-    // rendered ~6% smaller AND painted behind its own neighbour.
-    const lifts = angles.map(a => {
-      const cos = Math.cos(a * Math.PI / 180);
-      return Math.round((radius + FAN_LIFT_MARGIN) / cos - radius);
-    });
-    // Precomputed per card, like `angles`, so consumers never redo trig.
-    // Centring card i needs translateX(-radius*sin(angle_i)): the drum's own
-    // translateZ is unchanged by an X shift, so the perspective scale cancels
-    // and the correction is exact at any depth.
-    //
-    // The pan has to cancel the SELECTED card's x offset, and a selected card is
-    // lifted — so its face sits at (radius + lift) * sin(angle), not radius *
-    // sin(angle). Ignoring the lift term left the steepest cards short of centre by
-    // lift * sin(angle): zero at 0deg, ~29px at 33deg, which is exactly the residual
-    // overflow measured on a 390px viewport.
-    const pans = angles.map((a, i) => (panning
-      ? -Math.round((radius + lifts[i]) * Math.sin(a * Math.PI / 180))
-      : 0));
+    const radius = fanRadius(cardWidth, count);
     return {
       mode: 'fan', count, step, radius, angles,
       minRotation: -angles[count - 1],
       maxRotation: -angles[0],
-      pans,
-      lifts,
-      panning,
-      overlapRatio: 1 - (2 * radius * Math.sin((step / 2) * Math.PI / 180)) / cardWidth,
     };
   }
   const step = count > 0 ? 360 / count : 0;
@@ -321,25 +198,7 @@ export function drumLayout(cardWidth, count, viewportWidth = Infinity) {
     angles: Array.from({ length: count }, (_, i) => i * step),
     minRotation: -Infinity,
     maxRotation: Infinity,
-    // A cylinder centres by rotating, so the front card is already at x~0 and
-    // needs no shift. Present as zeros so callers stay branch-free.
-    pans: Array.from({ length: count }, () => 0),
-    lifts: Array.from({ length: count }, () => 0),
-    panning: false,
-    overlapRatio: 0,
   };
-}
-
-/** Camera-space X shift that centres card `index`. 0 whenever the arc fits. */
-export function panForCard(index, layout) {
-  if (!layout || !layout.pans || index < 0 || index >= layout.count) return 0;
-  return layout.pans[index] || 0;
-}
-
-/** translateZ to add to a selected card's own radius. 0 in cylinder mode. */
-export function liftForCard(index, layout) {
-  if (!layout || !layout.lifts || index < 0 || index >= layout.count) return 0;
-  return layout.lifts[index] || 0;
 }
 
 export function rotationForCard(index, layout) {
@@ -366,13 +225,11 @@ export function snapRotation(rotation, layout) {
   return layout.mode === 'fan' ? target : rotation + shortestDelta(rotation, target);
 }
 
-// Cylinder-only in practice on the shipped page: a fan never spins (selecting
-// a card lifts it instead of rotating the drum — see `drumLayout`), so every
-// call site in nd-mem-rolodex.html is gated to run only when
-// `layout.mode !== 'fan'`, which is exactly the branch below that returns
-// `rotation` unchanged. The clamp below, and the finite `minRotation`/
-// `maxRotation` a fan layout carries, are real and exercised directly by this
-// file's unit tests, but the page itself never reaches them.
+// Live for fans again: a small drum rotates to centre its selection just like
+// a cylinder does, but it has no card past its ends to wrap to, so it clamps
+// at `minRotation`/`maxRotation` instead — the page's tick() calls this on
+// every frame a fan's momentum is decaying, exactly as it does for a cylinder
+// (which never clamps, since `layout.mode !== 'fan'` short-circuits below).
 export function clampRotation(rotation, layout) {
   if (!layout || layout.mode !== 'fan') return rotation;
   return Math.min(layout.maxRotation, Math.max(layout.minRotation, rotation));

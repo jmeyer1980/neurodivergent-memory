@@ -169,55 +169,77 @@ badge shows the one depth number and remains unambiguous.
 
 ## 4. Fan layout for small drums (≤ 4 cards)
 
-> **Post-implementation correction (2026-07-30):** the bullets below
-> originally described pre-implementation intent that measurement during
-> the build forced off course — viewport-aware radius, panning instead of
-> end-clamping, and narrower spread angles than first proposed. This
-> section is corrected in place to match what shipped, following the same
-> precedent as this document's earlier mid-flight revision (see git
-> history), so the next session is not misled by a design that was never
-> built. The ruling that justifies the change is recorded in the
-> decisions log below.
+> **Post-implementation correction (2026-07-30, second revision):** the
+> bullets below replace the shrink/pan/lift design corrected in place
+> earlier the same day (see the prior version of this note, still in git
+> history). That design worked, but the user reviewed it and correctly
+> diagnosed the actual defect: not rotation, but the fan's radius. What
+> follows describes what shipped after the revert; the three-layer
+> never-rotates → lift → pan → viewport-shrink apparatus is deleted, not
+> narrated as history here — see the decisions log below for the ruling,
+> and `.superpowers/sdd/2026-07-29-rolodex-navigation-aids/task-15-*` for
+> the fuller account.
 
 - **Rule: cards ≤ 4 → fan; cards ≥ 5 → full cylinder.** Applies at every
   level; a drum crossing the threshold via live changes re-lays out on the
   next rebuild.
 - Fan geometry: cards sit on a forward arc, angled outward on the cylinder
-  surface (consistent 3D language). Spread scales with count and is capped
-  so no card passes 33° (edge-on is unreadable):
-  1 card = flat center; 2 cards ≈ ±15°; 3 ≈ ±24°; 4 ≈ ±33°.
-  Radius is viewport-aware, not a fixed non-overlap chord: it starts from
-  the non-overlap chord constraint with the existing 260px floor, then
-  shrinks toward it — spending up to 38% chord overlap between adjacent
-  cards (`FAN_MIN_CHORD_RATIO` 0.62) — before the drum resorts to panning.
-- A fan does not spin at all, so there is nothing to clamp and no
-  rubber-band in fan mode — that bounce is cylinder- and wall-only. Wheel
-  and drag instead bank accumulated pixels into discrete selection steps
-  (one card per step); arrows, click-to-center, dive, coordinate, and
-  geometric click hit-testing keep their semantics (the hit-test already
-  handles arbitrary card angles).
-- When even the maximum-overlap arc is wider than the viewport, the drum
-  pans (`translateX`) so the selected card is centered at full width, and
-  lifts it toward the camera to cancel the arc's own foreshortening.
-  Reachability wins over simultaneous visibility here: every card is
-  reachable by stepping to it and letting the pan bring it to center,
-  even on viewports where not every card can be shown at once. A fan that
-  fits the viewport never pans and still shows every card, unchanged from
-  the original intent.
-- Cylinder drums (≥ 5 cards) are unchanged, **including wrap-around**:
-  spinning past the last card continues to the first, exactly as shipped.
-  The pan/lift behavior above applies only in fan mode.
-- Shipped pure helpers (superseding the `fanAngles(count)` /
-  `clampFanRotation(rotation, count)` names originally proposed here,
-  which do not exist): `drumLayout(cardWidth, count, viewportWidth)` is
-  the single source of truth for a drum's angles, radius, pans, and
-  lifts; `fanStep(count)`, `fanSpread(count)`, `fanRadius(cardWidth,
-  count, viewportWidth, options)`, and `fanProjectedHalfWidth(...)`
-  support it; `panForCard(index, layout)` and `liftForCard(index,
-  layout)` read the per-card pan/lift back out. These sit alongside the
-  existing `rotationForCard`, `indexAtRotation`, `snapRotation`, and
-  `clampRotation` — the last of which is cylinder-only in practice, since
-  a fan's `minRotation`/`maxRotation` are unreachable (a fan never spins).
+  surface — the same language a cylinder uses, just over a much smaller
+  total sweep. Spread scales with count and is capped so that centring an
+  END card by rotation leaves the FAR card at no more than ~45° (cos 0.7,
+  still clearly readable):
+  1 card = flat center; 2 cards ±15°; 3 ±20°; 4 ±22.5°
+  (`FAN_SPREAD_DEG = { 1: 0, 2: 30, 3: 40, 4: 45 }`, halved and mirrored
+  about 0 for the per-card angles).
+- Radius is pure non-overlap at that shallow step, with the existing
+  260px floor and no viewport awareness: `fanRadius(cardWidth, count,
+  minRadius = 260)`. Because the step is shallow, the no-overlap radius
+  comes out large — about 1300px for four 340px cards — which is exactly
+  the "not a four-card diameter" the design wants. `drumLayout(cardWidth,
+  count)` is the single source of truth for a drum's mode, radius,
+  angles, and rotation bounds; it no longer takes a viewport-width
+  argument.
+- **The fan rotates again.** Selecting a card rotates the drum to bring
+  it to centre — `rotationForCard`, `indexAtRotation`, `snapRotation` and
+  `clampRotation` are all live in fan mode, the same functions a cylinder
+  uses. The one difference from a cylinder: a fan **clamps** at
+  `minRotation`/`maxRotation` (the first/last card's angle) instead of
+  wrapping, since there is no card beyond the ends to wrap to. Wheel and
+  drag still bank accumulated pixels into discrete per-card steps rather
+  than free-spinning the shallow arc, unchanged from before the revert —
+  but each step now eases the rotation to the new centre via the same
+  `stepTarget` machinery arrow-stepping uses, instead of merely marking a
+  selection by lifting it.
+- Because centring is done by rotation, the selected card always sits at
+  0°, flat and full width at z=0, which makes it hit-testable by the
+  browser's ordinary DOM hit-testing. This closes the rotated-button
+  defect (a click on Edit/Rename landing on a rotated card and diving
+  instead of opening the modal) structurally, rather than by the
+  geometric `cardIndexAtPoint` workaround that used to be load-bearing
+  for it. That workaround (the front card's rect-based button test) is
+  kept — it is still correct, and still helps if a button ever renders on
+  a non-centred card — but it is now belt-and-braces.
+- **One geometry, every viewport** — asked and answered directly with the
+  user rather than assumed: no viewport-aware shrinking, panning, or
+  lifting. On a screen too narrow for all four cards, fewer are in view at
+  once (you see the centred card and parts of its neighbours), but
+  rotating still reaches every card; nothing is unreachable.
+- **Accepted, not engineered around:** four non-overlapping 340px cards
+  span roughly 1090px of screen regardless of the chosen radius
+  (perspective foreshortening buys back only ~15-20%). With the middle
+  card selected, all four fit on a normal desktop viewport; with an end
+  card selected, the far card clips at the viewport edge on a narrow one.
+  That is what "just centre the selected card" implies, and is expected.
+- Cylinder drums (≥ 5 cards) are unchanged, **including wrap-around and
+  free spin**, exactly as shipped.
+- Shipped pure helpers: `drumLayout(cardWidth, count)`, `fanStep(count)`,
+  `fanSpread(count)`, `fanRadius(cardWidth, count, minRadius)`,
+  `rotationForCard`, `indexAtRotation`, `snapRotation`, `clampRotation`.
+  `panForCard`, `liftForCard`, `fanProjectedHalfWidth`,
+  `FAN_MIN_CHORD_RATIO`, `FAN_VIEWPORT_MARGIN`, and `FAN_LIFT_MARGIN` are
+  deleted along with the viewport-fitting machinery they supported.
+  `FAN_PERSPECTIVE` remains (the page imports it rather than redeclaring
+  its own copy).
 
 ## 5. Click-through at the memories level
 
@@ -262,17 +284,21 @@ badge shows the one depth number and remains unambiguous.
   and appears in the tree; fork a branch and confirm two branches render
   with the active one bright; click a dead-branch node → single-animation
   jump; rename a project → coordinate/trail show the new id; a 4-card drum
-  renders as a fan with the selected card fully on screen and stepping
-  reaches every card in turn (a fan does not clamp — it does not spin at
-  all); a 5-card drum stays a cylinder and wraps past the ends; clicking a
-  centered memory card's body dives onward while the Edit button still
-  opens the modal; clicking a side memory card centers and dives.
-  [Corrected 2026-07-30 — see the §4 note; this line originally read
-  "renders as a fan with all cards' faces visible and rotation clamps."]
-- **Manual:** feel of the fan's pan/lift on a step (not a clamp bounce —
-  a fan never spins), minimap legibility, rename confirm flow. [Corrected
-  2026-07-30; this line originally read "feel of the fan clamp bounce,
-  minimap legibility, rename confirm flow."]
+  renders as a fan on a large, shallow arc, rotates to bring the selected
+  card to full-width centre, and clamps rather than wraps at the ends; a
+  5-card drum stays a cylinder, spins freely and wraps past the ends;
+  clicking a centered memory card's body dives onward while the Edit
+  button still opens the modal at every fan selection (the structural fix
+  a face-on selected card buys); clicking a side memory card centers and
+  dives. [Corrected again 2026-07-30 (task 15) — the fan reverted to
+  rotating and clamping, which is what this line said before the earlier
+  2026-07-30 correction above swapped it to "does not clamp — it does not
+  spin at all." Both corrections landed the same day; this one is later
+  and is the one that matches the shipped code.]
+- **Manual:** feel of the fan's rotation ease into a clamp at the ends
+  (not a pan/lift), minimap legibility, rename confirm flow. [Corrected
+  again 2026-07-30 (task 15) — see the note above; the clamp-bounce feel
+  this line originally described is back.]
 
 ## Decisions log (from brainstorming)
 
@@ -284,11 +310,15 @@ badge shows the one depth number and remains unambiguous.
 - Rename lives on the front project card, reuses classic helpers via the
   bridge-served module, remaps the whole tree on success.
 - Fan-vs-cylinder is a count rule (≤ 4 fan, ≥ 5 cylinder) at every level,
-  spread capped at 33° (±15°/±24°/±33° for 2/3/4 cards); a fan never
-  spins, so fan mode has no clamp and no rubber-band; cylinder wrap-around
-  is preserved. [Corrected 2026-07-30 — see the note at the top of §4;
-  this line originally read "spread capped at 60°, clamped rubber-band
-  spin in fan mode."]
+  spread capped at 22.5° (±15°/±20°/±22.5° for 2/3/4 cards) so that
+  centring an end card by rotation leaves the far card at ≤45° (cos 0.7);
+  a fan rotates and clamps at its ends, exactly like a cylinder rotates
+  and wraps at its ends. [Corrected again 2026-07-30 (task 15) — see the
+  note at the top of §4. This line has now read three different things in
+  one day: "spread capped at 60°, clamped rubber-band spin in fan mode"
+  (original) → "spread capped at 33°... a fan never spins, so fan mode has
+  no clamp" (first correction) → the rotating-again version above (this
+  correction, which matches the shipped code).]
 - Memories-level clicks dive through (except interactive controls),
   making click routing uniform at all levels — field-tested revision of
   the shipped reading-surface rule.
@@ -302,3 +332,26 @@ badge shows the one depth number and remains unambiguous.
   to keep the selection centered and reachable. This retires the "every
   card visible at once" promise, but only for fans that actually pan — a
   fan that fits the viewport is unaffected and still shows every card.
+  [Superseded by the task-15 ruling below: the shrink/pan apparatus this
+  entry describes was deleted the same day, in favor of just rotating a
+  larger drum. Left in place rather than deleted so the reasoning that led
+  to it — and the reasoning that later reversed it — both survive.]
+- Post-implementation ruling (2026-07-30, task 15): the user reverted the
+  fan to a rotating drum after diagnosing the real defect correctly — it
+  was never rotation, it was the four-card diameter. At the shallow
+  `FAN_SPREAD_DEG` steps in §4, centring an end card by rotation leaves
+  the far card at ≤45° (cos 0.7), comfortably readable, so rotation needed
+  no workaround once the drum was sized correctly. This deletes the entire
+  never-rotates / lift / pan / viewport-shrink apparatus recorded above
+  and in the two earlier 2026-07-30 corrections: `panForCard`,
+  `liftForCard`, `fanProjectedHalfWidth`, `FAN_MIN_CHORD_RATIO`,
+  `FAN_VIEWPORT_MARGIN`, `FAN_LIFT_MARGIN`, and `drumLayout`'s
+  `viewportWidth` parameter are all removed rather than kept for
+  compatibility. One geometry serves every viewport (asked and answered
+  with the user directly): a narrow screen just shows fewer cards at once
+  and reaches the rest by rotating. A second-order benefit follows from
+  centring-by-rotation: the selected card always sits at 0°, flat and
+  face-on, and is therefore hit-testable by the browser — closing the
+  rotated-button defect structurally instead of by the geometric
+  `cardIndexAtPoint` workaround, which is kept only as a belt-and-braces
+  fallback.

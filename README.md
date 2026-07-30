@@ -774,18 +774,15 @@ Navigation aids:
   otherwise, so it never sits on top of the drum on a phone or a portrait
   tablet. The rail is width-capped and scrolls, keeping the newest column
   in view.
-- **Small drums fan out** — a drum of four cards or fewer spreads into a
-  shallow forward arc, so you can see the cards at once where there is
-  room; five or more keeps the rotating cylinder, which still wraps past
-  its ends. A fan never rotates: selecting a card lifts it toward you
-  rather than turning the drum, which is what keeps every card facing
-  forward. The selected card is always fully on screen at full width. On
-  a screen too narrow for the whole arc, the fan first shrinks — trading
-  away some of the cards' separation, so adjacent cards overlap — and, if
-  that is still not enough, slides the whole drum sideways to keep the
-  selection centered, so stepping to any card brings it, in turn, to
-  center at full size. The arc is deliberately shallow so the end cards
-  stay large enough to click comfortably.
+- **Small drums rotate on a wide, shallow arc** — a drum of four cards or
+  fewer spreads over a large-radius, shallow arc, so several cards read at
+  once; five or more keeps the plain rotating cylinder, which still wraps
+  past its ends. Selecting a card rotates the drum to bring it to
+  center — stopping at the ends rather than wrapping, since a fan has no
+  card past them — so the selected card is always flat, full width, and
+  centered on screen. On a screen too narrow for the whole arc, fewer
+  cards are in view at once, but rotating still reaches every one of
+  them; nothing is unreachable.
 - **Rename projects in place** — the front project card has a `Rename…`
   button with the same merge and "did you mean" behavior as the classic
   app; it imports the classic app's helpers rather than reimplementing
