@@ -150,7 +150,8 @@
       frontIndex: -1,
       frontEl: null,        // the .card3d currently wearing .front, so updates touch two cards, not N
       stepTarget: null,     // arrow-key destination the tick loop eases toward (null = no step pending)
-      selectAccum: 0,      // fan mode: gesture pixels banked toward the next selection step
+      wheelAccum: 0,       // fan mode: wheel pixels banked toward the next selection step
+      dragAccum: 0,        // fan mode: drag pixels banked toward the next selection step
       gestureGain: 1,       // gesture degrees are scaled by this so a gesture moves a constant number of CARDS
       lastBounceAt: 0,
       editingId: null,
@@ -236,7 +237,8 @@
       // defeated the whole point of fanning a small drum out.
       state.rotation = state.layout.mode === 'fan' ? 0 : H.rotationForCard(idx, state.layout);
       state.frontIndex = idx;
-      state.selectAccum = 0;
+      state.wheelAccum = 0;
+      state.dragAccum = 0;
       state.velocity = 0;
       state.frontEl = null; // the old element is gone with the innerHTML it lived in
       applyDrumTransform();
@@ -283,6 +285,10 @@
         els.drum.querySelectorAll('.card3d').forEach((el, i) => {
           el.classList.toggle('front', i === idx);
           setCardLift(el, fan && i === idx);
+          // selectCard forces this path on a live drum (not just buildDrum's
+          // fresh markup), so a previously-selected memory card's full content
+          // must be cleared from its hidden .reader-scroll here too.
+          if (i !== idx) fillReader(el, '');
         });
       } else if (state.frontEl !== next) {
         // Steady state touches two cards. Sweeping all N here ran once per front
@@ -568,12 +574,16 @@
       state.stepTarget = null; // a live gesture outranks a pending arrow step
       if (state.layout.mode === 'fan') {
         // No momentum in a fan — notches bank until they add up to one card.
-        const NOTCH_PX = 110;
-        state.selectAccum += dy;
-        while (Math.abs(state.selectAccum) >= NOTCH_PX) {
-          const dir = state.selectAccum > 0 ? 1 : -1;
-          state.selectAccum -= dir * NOTCH_PX;
-          selectCard(state.frontIndex + dir);
+        // Kept below a typical ~100px Chromium wheel notch so a single scroll
+        // click always moves the selection instead of reading as dead input.
+        const NOTCH_PX = 90;
+        state.wheelAccum += dy;
+        while (Math.abs(state.wheelAccum) >= NOTCH_PX) {
+          const dir = state.wheelAccum > 0 ? 1 : -1;
+          state.wheelAccum -= dir * NOTCH_PX;
+          // Matches the cylinder: dy > 0 raises rotation, which lowers the
+          // index there, so scrolling down must also step the fan backward.
+          selectCard(state.frontIndex - dir);
         }
         return;
       }
@@ -605,6 +615,7 @@
         pinchStart = Math.hypot(a.x - b.x, a.y - b.y);
       } else if (pointers.size === 1) {
         dragMoved = 0;
+        state.dragAccum = 0; // a fresh press must not inherit a residue banked by the wheel
         dragOrigin = { x: e.clientX, y: e.clientY };
         // Kept for the click handler: pointer capture retargets the click to
         // #stage, and this preserves what the press actually landed on for
@@ -649,10 +660,10 @@
           // Dragging right brings the card to the left forward, matching how a drum
           // would have carried it toward you.
           const DRAG_PX = 80;
-          state.selectAccum += dx;
-          while (Math.abs(state.selectAccum) >= DRAG_PX) {
-            const dir = state.selectAccum > 0 ? 1 : -1;
-            state.selectAccum -= dir * DRAG_PX;
+          state.dragAccum += dx;
+          while (Math.abs(state.dragAccum) >= DRAG_PX) {
+            const dir = state.dragAccum > 0 ? 1 : -1;
+            state.dragAccum -= dir * DRAG_PX;
             selectCard(state.frontIndex - dir);
           }
           return;
@@ -696,12 +707,15 @@
       const cardH = parseFloat(styles.getPropertyValue('--cardH')) || 230;
       const angles = state.layout.angles;
       // Screen position + depth of the point localX along card face at angle a:
-      // the card transform is rotateY(a) translateZ(radius) inside a drum at
-      // translateZ(-radius), so (localX, 0, 0) lands at the coordinates below.
-      const project = (localX, a) => {
+      // the card transform is rotateY(a) translateZ(r) inside a drum at
+      // translateZ(-state.radius), so (localX, 0, 0) lands at the coordinates
+      // below. r is a parameter, not state.radius directly, because the fan's
+      // selected card renders at state.radius + FAN_LIFT_PX, and hit-testing it
+      // at the unlifted radius left its outer edge un-clickable.
+      const project = (localX, a, r) => {
         const sin = Math.sin(a), cos = Math.cos(a);
-        const x = localX * cos + state.radius * sin;
-        const z = -localX * sin + state.radius * cos - state.radius; // toward viewer, <= 0
+        const x = localX * cos + r * sin;
+        const z = -localX * sin + r * cos - state.radius; // toward viewer, <= 0; the drum's own translateZ(-state.radius) is constant regardless of this card's radius
         const s = PERSPECTIVE / (PERSPECTIVE - z);
         return { sx: originX + x * s, s, z };
       };
@@ -709,7 +723,8 @@
       for (let i = 0; i < n; i++) {
         const a = (state.rotation + angles[i]) * Math.PI / 180;
         if (Math.cos(a) <= 0.05) continue; // facing away or edge-on: not clickable
-        const L = project(-cardW / 2, a), R = project(cardW / 2, a);
+        const r = state.radius + (state.layout.mode === 'fan' && i === state.frontIndex ? FAN_LIFT_PX : 0);
+        const L = project(-cardW / 2, a, r), R = project(cardW / 2, a, r);
         const lo = Math.min(L.sx, R.sx), hi = Math.max(L.sx, R.sx);
         const halfH = (cardH / 2) * Math.max(L.s, R.s);
         const centerZ = (L.z + R.z) / 2;
