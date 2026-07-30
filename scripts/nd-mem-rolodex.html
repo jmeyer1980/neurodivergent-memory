@@ -64,6 +64,7 @@
     .field textarea{min-height:140px}
     .span2{grid-column:span 2}
     .foot{display:flex;justify-content:flex-end;gap:10px;margin-top:16px}
+    .hint{color:var(--muted);font-size:.82rem;line-height:1.5;margin-top:10px}
     #hud{position:fixed;inset:auto 0 0 0;z-index:10;display:flex;justify-content:center;padding:16px;pointer-events:none}
     #minimap{position:fixed;left:0;top:64px;bottom:64px;z-index:9;display:flex;flex-direction:column;justify-content:flex-end;align-items:flex-start;gap:8px;padding:10px;pointer-events:none}
     #minimap>*{pointer-events:auto}
@@ -124,11 +125,25 @@
       <div class="foot"><button class="btn" id="editCancelBtn">Cancel</button><button class="btn primary" id="editSaveBtn">Save changes</button></div>
     </div>
   </div>
+  <div class="modalbg" id="renameModalBg">
+    <div class="modal">
+      <h2>Rename project</h2>
+      <div class="grid">
+        <div class="field span2"><label>New project id</label><input id="renameInput" /></div>
+      </div>
+      <p class="hint" id="renameHint"></p>
+      <div class="foot"><button class="btn" id="renameCancelBtn">Cancel</button><button class="btn primary" id="renameGoBtn">Rename</button></div>
+    </div>
+  </div>
   <div id="toast"></div>
 
   <script type="module">
     const BRIDGE = location.protocol.startsWith('http') ? location.origin : 'http://localhost:3737';
     const H = await import(BRIDGE + '/nd-mem-rolodex-helpers.mjs');
+    // Rename/merge semantics are the classic app's; import them rather than
+    // reimplement, so both UIs always agree on what counts as a collision.
+    let RENAME_HELPERS = null;
+    try { RENAME_HELPERS = await import(BRIDGE + '/nd-mem-app-helpers.mjs'); } catch { /* rename button explains when clicked */ }
     const REDUCED = matchMedia('(prefers-reduced-motion: reduce)').matches;
 
     const $ = s => document.querySelector(s);
@@ -156,6 +171,7 @@
       lastBounceAt: 0,
       editingId: null,
       editingDistrict: null, // district the edit modal was seeded with, to detect a real change
+      renamingProject: null,
     };
 
     function esc(v){ return String(v ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
@@ -175,7 +191,14 @@
 
     function cardFace(item){
       const d = item.data;
-      if (item.kind === 'project') return `<span class="kicker">Project</span><h2>${esc(d.id)}</h2><div class="chips"><span class="chip">${d.memoryCount} memories</span><span class="chip">${d.districtCount} district${d.districtCount === 1 ? '' : 's'}</span></div>`;
+      if (item.kind === 'project') {
+        // Only the front card shows actions (see `.card3d .actions`), and the
+        // unassigned bucket is not a project you can rename.
+        const canRename = d.id !== H.UNASSIGNED;
+        return `<span class="kicker">Project</span><h2>${esc(d.id)}</h2>`
+          + `<div class="chips"><span class="chip">${d.memoryCount} memories</span><span class="chip">${d.districtCount} district${d.districtCount === 1 ? '' : 's'}</span></div>`
+          + (canRename ? `<div class="actions"><button class="btn" data-rename="${esc(d.id)}">Rename…</button></div>` : '');
+      }
       if (item.kind === 'district') return `<span class="kicker">District</span><h2>${esc(d.id)}</h2><div class="chips"><span class="chip">${d.memoryCount} memories</span>${d.topTags.map(t => `<span class="chip">${esc(t)}</span>`).join('')}</div>`;
       const metaRow = (label, value) => `<div class="mini"><label>${label}</label><span>${esc(value)}</span></div>`;
       // Content is deliberately NOT baked in twice (or in full) here. A real
@@ -858,6 +881,127 @@
         showToast('Update failed — the modal is untouched, fix and retry.');
       }
     }
+
+    // ---------- project rename ----------
+    function openRenameModal(projectId){
+      if (!RENAME_HELPERS) { showToast('Rename helpers unavailable — is the bridge running?'); return; }
+      state.renamingProject = projectId;
+      $('#renameInput').value = projectId;
+      $('#renameHint').textContent = 'Renaming onto an existing project merges into it.';
+      $('#renameModalBg').classList.add('open');
+      $('#renameInput').focus();
+      $('#renameInput').select();
+    }
+
+    // Sequential, not parallel: every write goes through the single-writer
+    // daemon, and a partial run must leave a coherent store the user can
+    // finish by re-running the rename.
+    async function bulkReassign(ids, target, source){
+      setWritesDisabled(true);
+      let moved = 0;
+      try {
+        for (const id of ids) {
+          showToast(`Moving ${moved + 1}/${ids.length} into ${target}…`);
+          let ok = false;
+          try {
+            const res = await fetch(`${BRIDGE}/update`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ memoryId: id, projectId: target }) });
+            const data = await res.json();
+            ok = res.ok && data.ok;
+          } catch { ok = false; }
+          if (!ok) { showToast(`Moved ${moved} of ${ids.length}. Re-run the rename to move the rest.`); return false; }
+          moved++;
+        }
+        // Only a complete run may remap the tree: a partial one leaves both
+        // ids real, and rewriting history to a half-existing project would
+        // strand every node that referenced it.
+        H.navRemapProject(state.tree, source, target);
+        if (state.view.projectId === source) state.view.projectId = target;
+        if (state.view.level === 'projects' && state.view.centeredId === source) {
+          state.view.centeredId = target;
+          // refreshAndReconcile's "before" snapshot reads centeredId from
+          // centeredItem() (the currently-rendered item), not from
+          // state.view.centeredId directly, so the fixup above is invisible
+          // to it unless the rendered item itself agrees. Without this, the
+          // reconcile that follows sees the OLD id, decides it vanished, and
+          // jumps to whatever was positionally adjacent in the old list —
+          // an unrelated project, not the one just renamed.
+          const centered = state.items[state.frontIndex];
+          if (centered && centered.id === source) { centered.id = target; if (centered.data) centered.data.id = target; }
+        }
+        showToast(`Moved ${moved} card${moved === 1 ? '' : 's'} from ${source} to ${target}.`);
+        return true;
+      } finally {
+        setWritesDisabled(false);
+      }
+    }
+
+    function setWritesDisabled(disabled){
+      for (const id of ['renameGoBtn', 'editSaveBtn']) { const el = $('#' + id); if (el) el.disabled = disabled; }
+    }
+
+    async function submitRename(){
+      const source = state.renamingProject;
+      const typed = $('#renameInput').value.trim();
+      if (!source || !typed || typed === source) { $('#renameModalBg').classList.remove('open'); return; }
+      const { normalizeProjectId, nearMissOf } = RENAME_HELPERS;
+      if (normalizeProjectId(typed) === normalizeProjectId(H.UNASSIGNED)) { showToast('That name is reserved for unassigned cards.'); return; }
+
+      const others = H.deriveProjects(state.snapshot).filter(p => p.id !== H.UNASSIGNED && p.id !== source);
+      const collision = others.find(o => normalizeProjectId(o.id) === normalizeProjectId(typed));
+      // Every memory in the project, across all its districts. Keyed the same
+      // way the helpers read the snapshot, so a record without its own `id`
+      // field still resolves.
+      const ids = Object.entries(state.snapshot.memories || {})
+        .filter(([, m]) => H.projectOf(m) === source)
+        .map(([key, m]) => String(m.id ?? key));
+
+      let target = typed;
+      if (collision) {
+        if (!confirm(`Project "${collision.id}" already exists (${collision.memoryCount} cards). Move all ${ids.length} cards from "${source}" into it?`)) return;
+        target = collision.id; // the existing spelling is canonical
+      } else {
+        const near = nearMissOf(typed, others.map(o => o.id));
+        if (near && confirm(`Did you mean "${near}"? OK moves all ${ids.length} cards into "${near}"; Cancel keeps "${typed}".`)) target = near;
+      }
+
+      $('#renameModalBg').classList.remove('open');
+      const ok = await bulkReassign(ids, target, source);
+      try {
+        await loadSnapshot();
+        // The daemon can acknowledge a write before it flushes to disk, and
+        // readSnapshot() (GET /memories) reads that file directly -- so this
+        // reload can race the flush and still show these ids under `source`.
+        // Every write above already succeeded, so patch the reload instead of
+        // letting a lagging read undo the remap bulkReassign just did.
+        if (ok) {
+          const movedIds = new Set(ids);
+          for (const [key, m] of Object.entries(state.snapshot.memories || {})) {
+            if (movedIds.has(String(m.id ?? key)) && H.projectOf(m) === source) m.project_id = target;
+          }
+        }
+        refreshAndReconcile();
+      } catch {}
+      if (ok) state.renamingProject = null;
+    }
+
+    $('#renameCancelBtn').addEventListener('click', () => $('#renameModalBg').classList.remove('open'));
+    $('#renameGoBtn').addEventListener('click', submitRename);
+    $('#renameModalBg').addEventListener('click', (e) => { if (e.target.id === 'renameModalBg') $('#renameModalBg').classList.remove('open'); });
+    $('#renameModalBg').addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') { e.stopPropagation(); $('#renameModalBg').classList.remove('open'); return; }
+      if (e.key === 'Enter') { e.stopPropagation(); e.preventDefault(); submitRename(); }
+    });
+    els.stage.addEventListener('click', (e) => {
+      if (dragMoved > 8 || state.transitioning) return;
+      let hit = (pressTarget && pressTarget.isConnected) ? pressTarget : (e.target instanceof Element ? e.target : null);
+      if (!hit || !hit.closest('[data-rename]')) {
+        const under = document.elementFromPoint(e.clientX, e.clientY);
+        if (under instanceof Element) hit = under;
+      }
+      const btn = hit ? hit.closest('[data-rename]') : null;
+      if (btn) openRenameModal(btn.dataset.rename);
+    });
+
     els.stage.addEventListener('click', (e) => {
       if (dragMoved > 8 || state.transitioning) return; // a drag-spin that ended over the button, not a click
       // Same retargeting caveat as the card handler above: the pointerdown's
