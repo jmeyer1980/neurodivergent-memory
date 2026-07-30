@@ -170,11 +170,13 @@ test('rotationForCard centers each card in both modes', () => {
 });
 
 test('fan rotation clamps at the ends; cylinder wraps freely', () => {
-  const fan = drumLayout(340, 3);            // angles -35, 0, 35 -> rotation range -35..35
-  assert.equal(fan.maxRotation, 35);
-  assert.equal(fan.minRotation, -35);
-  assert.equal(clampRotation(200, fan), 35);
-  assert.equal(clampRotation(-200, fan), -35);
+  // These angles track FAN_SPREAD_DEG[3] (currently 48, step 24) — if that
+  // constant moves, the expected values below must move with it.
+  const fan = drumLayout(340, 3);            // angles -24, 0, 24 -> rotation range -24..24
+  assert.equal(fan.maxRotation, 24);
+  assert.equal(fan.minRotation, -24);
+  assert.equal(clampRotation(200, fan), 24);
+  assert.equal(clampRotation(-200, fan), -24);
   assert.equal(clampRotation(10, fan), 10);
   // out-of-range rotations still resolve to the end cards, never past them
   assert.equal(indexAtRotation(-999, fan), 2);
@@ -189,9 +191,11 @@ test('snapRotation stays near the continuous rotation on a cylinder', () => {
   const cyl = drumLayout(340, 12); // step 30
   assert.equal(snapRotation(-359, cyl), -360);
   assert.equal(snapRotation(3601, cyl), 3600);
-  const fan = drumLayout(340, 2);     // angles -20, 20
-  assert.equal(snapRotation(19, fan), 20);
-  assert.equal(snapRotation(-19, fan), -20);
+  // These angles track FAN_SPREAD_DEG[2] (currently 30) — if that constant
+  // moves, the expected values below must move with it.
+  const fan = drumLayout(340, 2);     // angles -15, 15
+  assert.equal(snapRotation(19, fan), 15);
+  assert.equal(snapRotation(-19, fan), -15);
 });
 
 test('nextLevel cycles projects -> districts -> memories -> projects', () => {
