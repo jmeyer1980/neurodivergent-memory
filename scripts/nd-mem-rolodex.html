@@ -135,6 +135,17 @@
       #spin{inset:auto 0 0 0;display:flex;justify-content:space-between;padding:0 14px 14px}
       #hud{padding:16px 76px}
     }
+    /* Below ~360px the 76px side padding just above (added to clear the spin
+       buttons) leaves #wallCopy's flex line only ~168px wide -- its
+       min(560px,92vw) max-width is inert there, since the padding binds
+       first. The 108-character line wraps to five rows and pushes #hud tall
+       enough to sit on top of the card (measured: 240px of #hud against a
+       230px-tall card at 320x568, ~31% of the card covered). #hudHint has no
+       such problem -- it is a handful of words -- so only the long orienting
+       string needs to go; the short hint keeps showing. */
+    @media (max-width:360px){
+      #wallCopy{display:none}
+    }
     #minimap{position:fixed;left:0;top:calc(var(--chromeH, 64px) + 8px);bottom:64px;z-index:9;display:flex;flex-direction:column;justify-content:flex-end;align-items:flex-start;gap:8px;padding:10px;pointer-events:none}
     #minimap>*{pointer-events:auto}
     #mapToggle{font-size:.7rem;letter-spacing:.08em;text-transform:uppercase;padding:6px 10px}
@@ -184,13 +195,22 @@
     }
     /* A phone held sideways: plenty of width, almost no height. Nothing here is
        about width — it is about buying the card back the vertical space the
-       chrome and the hint bar were taking. The hint goes entirely: at 393px
-       tall it was sitting on the card, and landscape has no room to spare for
-       it — the ? panel is where a landscape user gets the full story. */
+       chrome and the hud text were taking. Both #hudHint and #wallCopy go
+       entirely: at 393px tall either one was sitting on the card (measured at
+       500x393: #hud grew to 111px against a 230px-tall card, ~13% covered
+       with #wallCopy alone; #hudHint would only make that worse), and
+       landscape has no room to spare for prose -- the ? panel is where a
+       landscape user gets the full story. */
     @media (max-height: 500px){
-      #chrome{padding:8px 12px;row-gap:6px}
+      /* Tighter than the max-width:560px padding above (8px/6px), not just
+         that rule repeated: #stage centres the card in the FULL viewport with
+         no space reserved for #chrome at all, so at a genuinely short height
+         every pixel #chrome spends is a pixel closer to the card. See the
+         #chrome .cluster rule below for the row count this combines with. */
+      #chrome{padding:6px 12px;row-gap:4px}
       #chrome .pill{padding:6px 10px;font-size:.74rem}
       #hudHint{display:none}
+      #wallCopy{display:none}
       #minimap{bottom:48px}
       /* Landscape has width to spare but not much height, so the band trims
          its own padding rather than claiming extra vertical space. It still
@@ -202,6 +222,21 @@
          hint bar above already gave back its own row. */
       #locus{flex:1 1 auto;padding:5px 10px}
       #crumb{font-size:.82rem}
+      /* The max-width:560px rule above stacks each cluster onto its own row --
+         a fix for a PORTRAIT phone, where the two clusters genuinely do not
+         fit side by side (measured at 393px width: 575px of controls against
+         ~370px available). A short LANDSCAPE viewport has the opposite
+         problem: 500-852px of width to spare and ~390px of height to lose.
+         Forcing the same three-row stack there (2 clusters + #locus, on top of
+         a card with no headroom reserved for #chrome at all) measured out to
+         a 110px #chrome sitting 28px into a 230px wall card at 500x393. Both
+         clusters together need ~350px, which fits easily once they are
+         allowed to share a row again -- #chrome's own flex-wrap (see the
+         comment on #chrome itself) still drops #locus to a row of its own
+         beneath them exactly as it does today. Combined with the tighter
+         padding above, #chrome now ends at 72px against that same card's
+         81.5px top: a 9.5px margin, not a coincidence of one measurement. */
+      #chrome .cluster{flex:1 1 auto}
     }
   </style>
 </head>
