@@ -7,20 +7,34 @@
   <link rel="preconnect" href="https://api.fontshare.com">
   <link href="https://api.fontshare.com/v2/css?f[]=satoshi@300,400,500,700,900&f[]=clash-display@400,500,600,700&display=swap" rel="stylesheet">
   <style>
-    :root,[data-theme="light"]{--bg:#f7f6f2;--border:#d4d1ca;--text:#28251d;--muted:#7a7974;--faint:#8d8c86;--primary:#01696f;--cardW:340px;--cardH:230px;--font-display:'Clash Display','Inter',sans-serif;--font-body:'Satoshi','Inter',sans-serif;--surface:rgba(255,255,255,.75);--surfaceBorder:rgba(0,0,0,.12);--bgEnd:#efece6;--overlayBg:rgba(250,249,246,.96);--cardWash:linear-gradient(180deg,rgba(255,255,255,.55),rgba(255,255,255,.3))}
-    [data-theme="dark"]{--bg:#111318;--border:#37404b;--text:#edf2f4;--muted:#a3b0b8;--faint:#6e7a84;--primary:#60d7d2;--surface:rgba(16,20,24,.72);--surfaceBorder:rgba(255,255,255,.1);--bgEnd:#0d0f13;--overlayBg:rgba(20,24,29,.96);--cardWash:linear-gradient(180deg,rgba(255,255,255,.08),rgba(255,255,255,.03))}
+    /* Light is a warm SEPIA, not a white page. The old light theme was built
+       from #f7f6f2 over a near-white translucent surface and read as glare on a
+       phone. These are parchment tones a couple of steps down in luminance, and
+       the surfaces stay warm so translucency over them never trends back toward
+       white. Text/muted hold >=4.5:1 against --bg; --faint is a label tone only. */
+    :root,[data-theme="light"]{--bg:#ded4c2;--border:#b8ab95;--text:#2b2419;--muted:#5d5446;--faint:#736958;--primary:#08574f;--cardW:340px;--cardH:230px;--font-display:'Clash Display','Inter',sans-serif;--font-body:'Satoshi','Inter',sans-serif;--surface:rgba(243,236,224,.8);--surfaceBorder:rgba(64,52,36,.22);--bgEnd:#cfc2ab;--overlayBg:rgba(232,223,206,.97);--cardWash:linear-gradient(180deg,rgba(255,250,240,.18),rgba(90,74,50,.04));--optionBg:#f6f1e6;--optionText:#2b2419;--wash:rgba(64,52,36,.06);--washStrong:rgba(64,52,36,.11);--cardBase:#ebe2d1}
+    [data-theme="dark"]{--bg:#111318;--border:#37404b;--text:#edf2f4;--muted:#a3b0b8;--faint:#6e7a84;--primary:#60d7d2;--surface:rgba(16,20,24,.72);--surfaceBorder:rgba(255,255,255,.1);--bgEnd:#0d0f13;--overlayBg:rgba(20,24,29,.96);--cardWash:linear-gradient(180deg,rgba(255,255,255,.08),rgba(255,255,255,.03));--optionBg:#1b1f24;--optionText:#edf2f4;--wash:rgba(255,255,255,.05);--washStrong:rgba(255,255,255,.12);--cardBase:rgba(16,20,24,.72)}
     *{box-sizing:border-box;margin:0;padding:0}
     html,body{height:100%;overflow:hidden;overscroll-behavior:none}
     body{font-family:var(--font-body);color:var(--text);background:radial-gradient(circle at top left,rgba(96,215,210,.1),transparent 24%),linear-gradient(180deg,var(--bg),var(--bgEnd));user-select:none}
     button{font:inherit;color:inherit;cursor:pointer}
-    #chrome{position:fixed;inset:0 0 auto 0;z-index:10;display:flex;justify-content:space-between;align-items:center;gap:12px;padding:14px 18px;pointer-events:none}
-    #chrome .cluster{display:flex;gap:10px;align-items:center;pointer-events:auto}
+    /* flex-wrap is on at EVERY width, not just below the phone breakpoint. The
+       first version of this treated "narrow" as the only way to overflow, and
+       landscape proved otherwise: a phone on its side is ~737-852px CSS wide,
+       so it missed the 560px query, fell back to the one-row desktop layout,
+       and pushed the right-hand cluster off screen — with #crumb's 52vw alone
+       claiming ~383px of it. Wrapping means no viewport width can overflow; the
+       clusters just drop onto their own rows when they stop fitting. */
+    #chrome{position:fixed;inset:0 0 auto 0;z-index:10;display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:12px;row-gap:8px;padding:14px 18px;pointer-events:none}
+    #chrome .cluster{display:flex;gap:10px;align-items:center;min-width:0;pointer-events:auto}
     .pill{padding:9px 14px;border-radius:999px;border:1px solid var(--surfaceBorder);background:var(--surface);backdrop-filter:blur(10px);font-size:.82rem;color:var(--muted)}
     .pill strong{color:var(--text);font-weight:500}
     a.pill{text-decoration:none}
     #backBtn{font-size:1rem;line-height:1}
     #levelName{font-family:var(--font-display);text-transform:uppercase;letter-spacing:.14em;font-size:.74rem}
-    #crumb{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:.78rem;letter-spacing:.02em;max-width:52vw;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    /* min-width:0 defeats the min-content floor every flex item gets, so the
+       ellipsis can actually do its job instead of forcing the row wider. */
+    #crumb{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:.78rem;letter-spacing:.02em;max-width:52vw;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
     #crumb .seg{background:none;border:0;padding:0 2px;font:inherit;color:var(--muted);cursor:pointer;border-radius:4px}
     #crumb .seg:hover{color:var(--text);background:rgba(96,215,210,.14)}
     #crumb .seg.depth{color:var(--primary);font-weight:600}
@@ -36,20 +50,24 @@
     #scene.bouncing{animation:wallbounce .45s ease}
     @keyframes wallbounce{0%{transform:translateZ(0)}35%{transform:translateZ(-90px)}100%{transform:translateZ(0)}}
     #drum{position:relative;width:var(--cardW);height:var(--cardH);transform-style:preserve-3d}
-    #stage[data-level="memories"]{--cardH:500px}
-    .card3d{position:absolute;inset:0;display:flex;flex-direction:column;gap:10px;padding:18px;border-radius:24px;border:1px solid var(--surfaceBorder);background:var(--cardWash),radial-gradient(circle at top right,rgba(96,215,210,.16),transparent 38%),var(--surface);box-shadow:0 18px 40px rgba(0,0,0,.35);backface-visibility:hidden;transition:opacity .3s,box-shadow .3s,border-color .3s,transform .25s ease;opacity:.55}
+    /* A flat 500px did not fit a phone held sideways — the viewport is only
+       ~393px tall there, so memory cards were clipped top and bottom. Tie it to
+       the viewport: 78vh only bites below ~640px of height, so portrait and
+       desktop keep the 500px they always had. */
+    #stage[data-level="memories"]{--cardH:min(500px, 78vh)}
+    .card3d{position:absolute;inset:0;display:flex;flex-direction:column;gap:10px;padding:18px;border-radius:24px;border:1px solid var(--surfaceBorder);background:var(--cardWash),radial-gradient(circle at top right,rgba(96,215,210,.16),transparent 38%),var(--cardBase);box-shadow:0 18px 40px rgba(0,0,0,.35);backface-visibility:hidden;transition:opacity .3s,box-shadow .3s,border-color .3s,transform .25s ease;opacity:.55}
     .card3d.front{opacity:1;border-color:rgba(96,215,210,.4);box-shadow:0 24px 60px rgba(0,0,0,.5),0 0 30px rgba(96,215,210,.12)}
     .card3d .kicker{font-size:.7rem;text-transform:uppercase;letter-spacing:.1em;color:var(--faint)}
     .card3d h2{font-family:var(--font-display);font-size:1.15rem;line-height:1.2}
     .card3d p{color:var(--muted);line-height:1.5;font-size:.9rem;overflow:hidden}
     .chips{display:flex;gap:8px;flex-wrap:wrap}
-    .chip{padding:6px 10px;border-radius:999px;background:rgba(255,255,255,.05);border:1px solid var(--surfaceBorder);font-size:.74rem;color:var(--muted)}
+    .chip{padding:6px 10px;border-radius:999px;background:var(--wash);border:1px solid var(--surfaceBorder);font-size:.74rem;color:var(--muted)}
     .card3d .reader-scroll{display:none;flex:1;min-height:0;overflow:auto;padding-right:6px;line-height:1.6;color:var(--text);font-size:.92rem;white-space:pre-wrap;user-select:text;touch-action:pan-y;overscroll-behavior:contain}
     .card3d.front .reader-scroll{display:block}
     .card3d.front .preview{display:none}
     .card3d .meta{display:none;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:8px}
     .card3d.front .meta{display:grid}
-    .mini{padding:8px 10px;border-radius:12px;background:rgba(255,255,255,.04);border:1px solid var(--surfaceBorder)}
+    .mini{padding:8px 10px;border-radius:12px;background:var(--wash);border:1px solid var(--surfaceBorder)}
     .mini label{display:block;font-size:.66rem;color:var(--faint);text-transform:uppercase;letter-spacing:.08em;margin-bottom:3px}
     .mini span{font-size:.8rem}
     .card3d .actions{display:none;justify-content:flex-end}
@@ -61,6 +79,11 @@
     .grid{display:grid;grid-template-columns:repeat(2,1fr);gap:12px}
     .field label{display:block;margin-bottom:6px;font-size:.72rem;color:var(--muted);text-transform:uppercase;letter-spacing:.08em}
     .field input,.field select,.field textarea{width:100%;padding:11px 13px;border-radius:13px;border:1px solid var(--surfaceBorder);background:var(--surface);font:inherit;color:inherit}
+    /* The native <option> list is drawn by the OS on its OWN background, which
+       is usually white — so inheriting the app's text colour left every option
+       near-invisible until it was hovered. Options need their own explicit
+       pair; they cannot borrow the page's. */
+    select option{background-color:var(--optionBg);color:var(--optionText)}
     .field textarea{min-height:140px}
     .span2{grid-column:span 2}
     .foot{display:flex;justify-content:flex-end;gap:10px;margin-top:16px}
@@ -85,7 +108,7 @@
     #overlay .box{max-width:420px;text-align:center;padding:28px;border-radius:24px;background:var(--overlayBg);border:1px solid var(--surfaceBorder)}
     #overlay h2{font-family:var(--font-display);margin-bottom:10px}
     #overlay p{color:var(--muted);margin-bottom:16px;line-height:1.55}
-    .btn{padding:11px 16px;border-radius:999px;border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.05)}
+    .btn{padding:11px 16px;border-radius:999px;border:1px solid var(--washStrong);background:var(--wash)}
     .btn.primary{background:linear-gradient(180deg,rgba(96,215,210,.24),rgba(96,215,210,.12));border-color:rgba(96,215,210,.3)}
     #toast{position:fixed;right:16px;bottom:16px;z-index:50;display:none;max-width:360px;padding:13px 16px;border-radius:16px;background:var(--overlayBg);border:1px solid rgba(96,215,210,.26)}
     #toast.show{display:block}
@@ -119,6 +142,18 @@
          is what lets the ellipsis do its job instead of forcing the overflow. */
       #crumb{max-width:none;flex:1 1 auto;min-width:0}
       #minimap{top:108px} /* clear the bar, which is two rows tall here */
+    }
+    /* A phone held sideways: plenty of width, almost no height. Nothing here is
+       about width — it is about buying the card back the vertical space the
+       chrome and the hint bar were taking. The hint goes entirely: it is four
+       clauses of desktop instructions ("right-click", "Ctrl+scroll") that mean
+       nothing to a thumb, and at 393px tall it was sitting on the card. */
+    @media (max-height: 500px){
+      #chrome{padding:8px 12px;row-gap:6px}
+      #chrome .pill{padding:6px 10px;font-size:.74rem}
+      #levelName{display:none}
+      #hudHint{display:none}
+      #minimap{top:56px;bottom:48px}
     }
   </style>
 </head>
@@ -993,6 +1028,45 @@
     window.addEventListener('pointerup', releasePointer);
     window.addEventListener('pointercancel', releasePointer);
     window.addEventListener('lostpointercapture', releasePointer);
+
+    // ---------- input: iOS pinch ----------
+    // Pinch-together is the zoom-OUT gesture, and it was routed purely off
+    // counting two pointers on #stage. That works right up until Safari decides
+    // the two fingers mean "zoom the document" — after which the page stops
+    // seeing the gesture at all. At the memories level the front card is mostly
+    // reader text, and a pinch starting over text is exactly the case Safari
+    // claims, so surfacing from a memory was "next to impossible" on an iPhone
+    // while working fine on a desktop trackpad.
+    // gesturestart/change/end are WebKit-only and non-standard, which here is a
+    // feature: they are the events iOS actually delivers for a pinch, and
+    // claiming them is also what stops the document zoom. Blink never fires
+    // them, so the pointer path above remains the only one that runs there.
+    // Modals are exempt — pinch-zooming a text form is legitimate.
+    let pinchHandled = false;
+    const modalOpen = () => !!document.querySelector('.modalbg.open');
+    addEventListener('gesturestart', (e) => {
+      if (modalOpen()) return;
+      e.preventDefault();
+      pinchHandled = false;
+    }, { passive: false });
+    addEventListener('gesturechange', (e) => {
+      if (modalOpen()) return;
+      e.preventDefault(); // stays above the guards so the page never zooms mid-transition
+      if (pinchHandled || state.transitioning) return;
+      // Same thresholds as the pointer pinch, so the two paths cannot disagree
+      // about how far a pinch has to travel to count.
+      const kind = e.scale > 1.25 ? 'pinchSpread' : e.scale < 0.8 ? 'pinchTogether' : null;
+      if (!kind) return;
+      pinchHandled = true; // one level per gesture; releasing arms the next
+      const action = H.routeGesture(kind, { level: state.view.level, insideReader: false });
+      if (action === 'dive') dive();
+      else if (action === 'zoomOut') zoomOut();
+    }, { passive: false });
+    addEventListener('gestureend', (e) => {
+      if (modalOpen()) return;
+      e.preventDefault();
+      pinchHandled = false;
+    }, { passive: false });
 
     // ---------- input: click, context menu, keys ----------
     // Chromium's hit-testing — pointer events AND elementFromPoint — misses
