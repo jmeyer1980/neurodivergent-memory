@@ -1504,6 +1504,21 @@
       if (!t.nodes.some(n => n.id === t.cursor)) return false; // the cursor has to resolve
       state.tree = t;
       state.view = saved.view;
+      // Drop any drum built before this point. connectEvents() runs at module
+      // load and its `hello` handler reconciles immediately, so by the time
+      // init() gets here a PROJECTS drum usually already exists — and
+      // currentViewSnapshot would then read a project id off it as the
+      // "centered card" of the memories view being restored. Reconciliation
+      // would not find that id among the memories, fall through to its
+      // neighbour branch, and silently land on card 1. A restore replaces the
+      // view wholesale, so any drum built for the previous one is stale by
+      // definition; clearing it makes the snapshot fall back to the restored
+      // view's own centeredId, which is the only correct source here.
+      state.items = [];
+      state.frontIndex = -1;
+      state.frontEl = null;
+      state.drumMarkup = null;
+      state.drumAnchor = null;
       // Rotation is deliberately NOT restored: buildDrum recomputes it from
       // centeredId, and that precondition is the page's oldest invariant.
       return true;
