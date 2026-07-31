@@ -39,9 +39,10 @@
     #locus{flex:1 1 100%;display:flex;align-items:baseline;gap:10px;min-width:0;pointer-events:auto;
       padding:8px 14px;border-radius:16px;border:1px solid var(--surfaceBorder);
       background:var(--surface);backdrop-filter:blur(10px)}
-    /* row-gap is nonzero, not 0: wrapping is the everyday case now (Finding 1,
-       task-4 review round 2), not a rare fallback, so two wrapped lines need
-       real leading or they read as one squashed block. */
+    /* row-gap is nonzero, not 0: #crumb wraps to two lines on ordinary
+       coordinates at real narrow-viewport widths, not just on pathological
+       ones, so it needs real leading between them or the two lines read as
+       one squashed block. */
     #crumb{flex:1 1 auto;min-width:0;display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 2px;
       font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:.95rem;
       letter-spacing:.02em;color:var(--text)}
@@ -74,8 +75,12 @@
        every real button lives on .card3d.front only. A pseudo-element adds no
        node to hit, and pointer-events:none makes that belt-and-braces. The
        whole card is already clickable (routeGesture clickOther =>
-       centerThenDive); this just admits it. */
-    .card3d:not(.front)::after{content:'›';position:absolute;right:16px;bottom:12px;
+       centerThenDive); this just admits it. The `/ ''` alt text is load-
+       bearing, not decorative: without it, a screen reader has no way to know
+       this glyph is purely decorative and may announce "single right-pointing
+       angle quotation mark" on every one of the ~24 non-front cards in the
+       rendered window. */
+    .card3d:not(.front)::after{content:'›' / '';position:absolute;right:16px;bottom:12px;
       font-size:1.5rem;line-height:1;color:var(--faint);pointer-events:none}
     .card3d{cursor:pointer}
     @media (hover:hover){.card3d:not(.front):hover{opacity:.75}}
