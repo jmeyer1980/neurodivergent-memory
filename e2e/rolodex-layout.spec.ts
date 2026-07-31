@@ -155,3 +155,20 @@ test('the hint bar speaks the pointer it is being read by', async ({ page }, tes
     expect(hint).toMatch(/right-click/);
   }
 });
+
+// The map's labels lived only in <title>, so on touch it was a field of
+// identical dots with no text at all.
+test('the branch map labels its nodes as text, not only as tooltips', async ({ page }) => {
+  test.slow();
+  expect(await diveToMemories(page)).toBe('memories');
+  // Narrow viewports default the rail to collapsed, and the render itself is
+  // gated behind that class — flipping it directly (bypassing the toggle
+  // button) leaves #mapBody never-rendered and empty. Use the real control.
+  const collapsed = await page.evaluate(() => document.querySelector('#minimap')!.classList.contains('collapsed'));
+  if (collapsed) await page.click('#mapToggle');
+  await page.waitForTimeout(300);
+  const labels = await page.locator('#mapBody svg text.nodeLabel').allTextContents();
+  expect(labels.length, 'every node should carry a text label').toBeGreaterThan(1);
+  expect(labels.every((l) => l.trim().length > 0)).toBe(true);
+  expect(labels.every((l) => l.length <= 10), `labels over 10 chars: ${labels}`).toBe(true);
+});

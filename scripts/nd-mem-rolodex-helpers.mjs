@@ -514,10 +514,32 @@ export function navNodeLabel(node) {
   return 'wrap';
 }
 
+// The map's only label used to be an SVG <title>, which requires a hover — so
+// on touch the tree was a field of identical dots. Labels now render as text,
+// which means they have to fit: elide the MIDDLE, because project ids share
+// heads ("twg-…") and district names share tails ("…_analysis"/"…_monitoring"),
+// and dropping either end alone collapses distinct nodes into the same string.
+export function truncateNodeLabel(label, max = NODE_LABEL_MAX) {
+  const s = String(label ?? '');
+  if (s.length <= max) return s;
+  const keep = max - 1;                 // one char is spent on the ellipsis
+  // Tail gets the extra char when keep is odd, not head: word endings
+  // ("-ation" vs "-ution") carry more distinguishing signal than a shared
+  // prefix, so biasing the split toward the tail keeps more labels apart.
+  const head = Math.floor(keep / 2);
+  const tail = keep - head;
+  return `${s.slice(0, head)}…${tail ? s.slice(-tail) : ''}`;
+}
+
 // Columns are deliberately much wider than a node (r=5, so 10px across): at 26px a
 // fork read as a jog in a trunk rather than a branch. Rows are tighter than columns
 // so a deep chain does not stretch the tree into a thread.
-const MINIMAP_COL = 46;   // px between sibling columns
+// Widened from 46 to fit a 10-char label beside each node: ~58px of text plus
+// the node's own r=5 and a 4px gap needs ~67px of clearance. (The 26 in the
+// comment above is an even older value this constant already superseded —
+// derive from the constant, never from the prose.)
+export const MINIMAP_COL = 76;   // px between sibling columns
+export const NODE_LABEL_MAX = 10;
 const MINIMAP_ROW = 28;   // px between depth rows
 const MINIMAP_PAD = 14;
 

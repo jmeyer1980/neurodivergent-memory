@@ -92,7 +92,7 @@
     #minimap{position:fixed;left:0;top:64px;bottom:64px;z-index:9;display:flex;flex-direction:column;justify-content:flex-end;align-items:flex-start;gap:8px;padding:10px;pointer-events:none}
     #minimap>*{pointer-events:auto}
     #mapToggle{font-size:.7rem;letter-spacing:.08em;text-transform:uppercase;padding:6px 10px}
-    #mapBody{max-height:100%;max-width:180px;overflow:auto;border-radius:16px;border:1px solid var(--surfaceBorder);background:var(--surface);backdrop-filter:blur(10px);padding:6px}
+    #mapBody{max-height:100%;max-width:260px;overflow:auto;border-radius:16px;border:1px solid var(--surfaceBorder);background:var(--surface);backdrop-filter:blur(10px);padding:6px}
     #minimap.collapsed #mapBody{display:none}
     #mapBody svg{display:block}
     #mapBody .edge{fill:none;stroke:var(--faint);stroke-width:1.5;opacity:.45}
@@ -101,6 +101,8 @@
     #mapBody .node.on{stroke:var(--primary)}
     #mapBody .node.cursor{fill:var(--primary);stroke:var(--primary)}
     #mapBody .node:hover{stroke:var(--text)}
+    #mapBody .nodeLabel{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:.6rem;fill:var(--faint);pointer-events:none;user-select:none}
+    #mapBody .nodeLabel.on{fill:var(--muted)}
     @media (prefers-reduced-motion: no-preference){#mapBody .node.cursor{animation:pulse 1.8s ease-in-out infinite}}
     @keyframes pulse{0%,100%{r:5}50%{r:7}}
     #overlay{position:fixed;inset:0;z-index:20;display:none;align-items:center;justify-content:center;background:rgba(7,10,12,.7)}
@@ -213,6 +215,7 @@
     // Matched once at load, not per render: a pointer type does not change
     // mid-session, and matchMedia in a hot path is wasted work.
     const POINTER_KIND = matchMedia('(pointer: coarse)').matches ? 'coarse' : 'fine';
+    const NODE_LABEL_PX = 58; // 10 monospace chars at .6rem; see truncateNodeLabel
 
     const $ = s => document.querySelector(s);
     const els = { stage: $('#stage'), scene: $('#scene'), drum: $('#drum'), crumb: $('#crumb'), levelName: $('#levelName'), position: $('#position'), connState: $('#connState'), backBtn: $('#backBtn'), overlay: $('#overlay'), overlayMsg: $('#overlayMsg'), retryBtn: $('#retryBtn'), toast: $('#toast'), hudHint: $('#hudHint'), minimap: $('#minimap'), mapBody: $('#mapBody'), mapToggle: $('#mapToggle') };
@@ -521,9 +524,16 @@
           const midY = (e.y1 + e.y2) / 2;
           return `<path class="edge${e.onPath ? ' on' : ''}" d="M ${e.x1} ${e.y1} V ${midY} H ${e.x2} V ${e.y2}" />`;
         }).join('');
+        // The label is a sibling <text>, not a child of <circle>: SVG will not
+        // render text inside a shape, and the circle stays the only click
+        // target so the existing [data-node] delegation is untouched.
         const nodes = laid.nodes.map(n =>
-          `<circle class="node${n.onPath ? ' on' : ''}${n.isCursor ? ' cursor' : ''}" data-node="${n.id}" cx="${n.x}" cy="${n.y}" r="5"><title>${esc(n.label)} (0^${n.depth})</title></circle>`).join('');
-        els.mapBody.innerHTML = `<svg width="${laid.width}" height="${laid.height}" viewBox="0 0 ${laid.width} ${laid.height}">${edges}${nodes}</svg>`;
+          `<circle class="node${n.onPath ? ' on' : ''}${n.isCursor ? ' cursor' : ''}" data-node="${n.id}" cx="${n.x}" cy="${n.y}" r="5"><title>${esc(n.label)} (0^${n.depth})</title></circle>`
+          + `<text class="nodeLabel${n.onPath ? ' on' : ''}" x="${n.x + 9}" y="${n.y + 3.5}">${esc(H.truncateNodeLabel(n.label))}</text>`).join('');
+        // laid.width measures dot positions only; the rightmost label overhangs it.
+        const labelOverhang = 9 + NODE_LABEL_PX;
+        const w = laid.width + labelOverhang;
+        els.mapBody.innerHTML = `<svg width="${w}" height="${laid.height}" viewBox="0 0 ${w} ${laid.height}">${edges}${nodes}</svg>`;
         els.mapBody.scrollTop = 0; // deepest row is at the top; keep the frontier in view
         els.mapBody.scrollLeft = els.mapBody.scrollWidth; // newest column (rightmost) is the frontier; keep it in view
       } catch (err) {

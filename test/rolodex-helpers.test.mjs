@@ -11,6 +11,7 @@ import {
   itemIdsForView, reconcileView, reconcilePop,
   routeGesture, DRAG_AXIS_THRESHOLD_PX, classifyDragAxis, routeDragAxis,
   hintFor,
+  truncateNodeLabel, MINIMAP_COL,
 } from '../scripts/nd-mem-rolodex-helpers.mjs';
 
 // Fixture: alpha has 3 memories in 2 districts, beta has 2 (one custom district),
@@ -628,4 +629,40 @@ test('hintFor falls back rather than returning undefined for unknown input', () 
   assert.equal(hintFor('districts', 'fine'), hintFor('projects', 'fine'));
   assert.equal(hintFor('projects', 'nonsense'), hintFor('projects', 'fine'));
   assert.equal(typeof hintFor(undefined, undefined), 'string');
+});
+
+test('truncateNodeLabel leaves short labels untouched', () => {
+  assert.equal(truncateNodeLabel('start'), 'start');
+  assert.equal(truncateNodeLabel('alpha'), 'alpha');
+  assert.equal(truncateNodeLabel('0123456789'), '0123456789'); // exactly at the limit
+});
+
+test('truncateNodeLabel elides the middle, keeping head and tail', () => {
+  // District names diverge at BOTH ends; a head-only truncation loses the word
+  // that distinguishes vigilant_monitoring from vigilant_anything_else.
+  const out = truncateNodeLabel('logical_analysis');
+  assert.equal(out.length, 10);
+  assert.ok(out.startsWith('logi'), `expected a head, got ${out}`);
+  assert.ok(out.endsWith('ysis'), `expected a tail, got ${out}`);
+  assert.match(out, /…/);
+});
+
+test('truncateNodeLabel keeps distinct long labels distinct', () => {
+  const a = truncateNodeLabel('practical_execution');
+  const b = truncateNodeLabel('practical_evaluation');
+  assert.notEqual(a, b);
+});
+
+test('truncateNodeLabel tolerates junk without throwing', () => {
+  assert.equal(truncateNodeLabel(''), '');
+  assert.equal(truncateNodeLabel(null), '');
+  assert.equal(truncateNodeLabel(undefined), '');
+  assert.equal(typeof truncateNodeLabel(12345678901234), 'string');
+});
+
+test('layoutNavTree columns leave room for a truncated label', () => {
+  // 10 chars at .6rem monospace is ~58px; a node is r=5 and wants a 4px gap.
+  // If the pitch ever drops back below that, labels from adjacent columns
+  // collide and the map becomes less readable than the bare dots it replaced.
+  assert.ok(MINIMAP_COL >= 67, `MINIMAP_COL is ${MINIMAP_COL}, too tight for a 10-char label`);
 });
