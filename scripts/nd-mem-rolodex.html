@@ -172,7 +172,7 @@
     </div>
   </div>
   <div id="stage" data-level="projects"><div id="scene"><div id="drum"></div></div></div>
-  <div id="hud"><span class="pill" id="hudHint">Scroll to spin · click a card to dive · right-click / Esc to zoom out · Ctrl+scroll zooms</span></div>
+  <div id="hud"><span class="pill" id="hudHint"></span></div>
   <div id="minimap"><div id="mapBody"></div><button class="pill" id="mapToggle" title="Toggle the exploration map">Map 0^0</button></div>
   <div id="overlay"><div class="box"><h2>Bridge offline</h2><p id="overlayMsg">Could not reach the bridge. Start it with <code>node scripts/nd-mem-bridge-server.mjs</code> and retry.</p><button class="btn primary" id="retryBtn">Retry</button></div></div>
   <div class="modalbg" id="editModalBg">
@@ -210,6 +210,9 @@
     let RENAME_HELPERS = null;
     try { RENAME_HELPERS = await import(BRIDGE + '/nd-mem-app-helpers.mjs'); } catch { /* rename button explains when clicked */ }
     const REDUCED = matchMedia('(prefers-reduced-motion: reduce)').matches;
+    // Matched once at load, not per render: a pointer type does not change
+    // mid-session, and matchMedia in a hot path is wasted work.
+    const POINTER_KIND = matchMedia('(pointer: coarse)').matches ? 'coarse' : 'fine';
 
     const $ = s => document.querySelector(s);
     const els = { stage: $('#stage'), scene: $('#scene'), drum: $('#drum'), crumb: $('#crumb'), levelName: $('#levelName'), position: $('#position'), connState: $('#connState'), backBtn: $('#backBtn'), overlay: $('#overlay'), overlayMsg: $('#overlayMsg'), retryBtn: $('#retryBtn'), toast: $('#toast'), hudHint: $('#hudHint'), minimap: $('#minimap'), mapBody: $('#mapBody'), mapToggle: $('#mapToggle') };
@@ -556,9 +559,7 @@
       }).join('');
       els.crumb.dataset.segments = JSON.stringify(segs.map(s => s.target));
       els.position.textContent = state.items.length ? `card ${state.frontIndex + 1} / ${state.items.length}` : '—';
-      els.hudHint.textContent = level === 'memories'
-        ? 'Scroll to spin · scroll inside the card to read · click to dive onward · right-click / Esc goes back'
-        : 'Scroll to spin · click a card to dive · right-click / Esc to zoom out · Ctrl+scroll zooms';
+      els.hudHint.textContent = H.hintFor(level, POINTER_KIND);
       renderMinimap();
       schedulePersist(); // coalesced; see persistNav
     }

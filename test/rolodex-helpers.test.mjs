@@ -10,6 +10,7 @@ import {
   LEVELS, nextLevel, createHistory, pushView, popView, atWall,
   itemIdsForView, reconcileView, reconcilePop,
   routeGesture, DRAG_AXIS_THRESHOLD_PX, classifyDragAxis, routeDragAxis,
+  hintFor,
 } from '../scripts/nd-mem-rolodex-helpers.mjs';
 
 // Fixture: alpha has 3 memories in 2 districts, beta has 2 (one custom district),
@@ -603,4 +604,28 @@ test('layoutNavTree handles a lone root', () => {
   assert.equal(laid.nodes.length, 1);
   assert.equal(laid.edges.length, 0);
   assert.equal(laid.nodes[0].isCursor, true);
+});
+
+test('hintFor gives coarse pointers touch verbs and never desktop-only ones', () => {
+  for (const level of ['projects', 'districts', 'memories']) {
+    const hint = hintFor(level, 'coarse');
+    assert.doesNotMatch(hint, /right-click|Ctrl|scroll to spin/i, `${level} coarse hint leaks desktop wording`);
+    assert.match(hint, /^Swipe to spin/, `${level} coarse hint should lead with the spin gesture`);
+  }
+});
+
+test('hintFor keeps the shipped desktop wording for fine pointers', () => {
+  assert.match(hintFor('projects', 'fine'), /right-click \/ Esc to zoom out/);
+  assert.match(hintFor('memories', 'fine'), /scroll inside the card to read/);
+});
+
+test('hintFor distinguishes the memories level, where the card is a reading surface', () => {
+  assert.notEqual(hintFor('memories', 'coarse'), hintFor('projects', 'coarse'));
+  assert.match(hintFor('memories', 'coarse'), /drag inside the card to read/);
+});
+
+test('hintFor falls back rather than returning undefined for unknown input', () => {
+  assert.equal(hintFor('districts', 'fine'), hintFor('projects', 'fine'));
+  assert.equal(hintFor('projects', 'nonsense'), hintFor('projects', 'fine'));
+  assert.equal(typeof hintFor(undefined, undefined), 'string');
 });

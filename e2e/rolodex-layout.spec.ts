@@ -143,3 +143,15 @@ test('an unexpected reload keeps your place', async ({ page }) => {
   await page.waitForTimeout(2000);
   expect(await where()).toEqual(before);
 });
+
+// A thumb has no right-click and no Ctrl key. The hint bar told it to use both.
+test('the hint bar speaks the pointer it is being read by', async ({ page }, testInfo) => {
+  const hint = await page.locator('#hudHint').textContent();
+  const isTouch = testInfo.project.name === 'mobile-safari';
+  if (isTouch) {
+    expect(hint).not.toMatch(/right-click|Ctrl/i);
+    expect(hint).toMatch(/^Swipe to spin/);
+  } else {
+    expect(hint).toMatch(/right-click/);
+  }
+});

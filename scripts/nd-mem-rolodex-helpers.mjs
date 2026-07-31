@@ -572,3 +572,25 @@ export function layoutNavTree(tree) {
 
   return { nodes, edges, width: MINIMAP_PAD * 2 + Math.max(0, nextColumn - 1) * MINIMAP_COL, height };
 }
+
+// ---------- hint bar wording ----------
+
+// The hint bar shipped as one desktop sentence shown to everyone, then hidden
+// outright in landscape. A thumb has no right-click and no Ctrl key, so the
+// portrait phone was being given instructions it could not follow. Wording is
+// data keyed by (level, pointerKind) so it can be tested without a browser.
+export const HINTS = {
+  fine: {
+    default: 'Scroll to spin · click a card to dive · right-click / Esc to zoom out · Ctrl+scroll zooms',
+    memories: 'Scroll to spin · scroll inside the card to read · click to dive onward · right-click / Esc goes back',
+  },
+  coarse: {
+    default: 'Swipe to spin · tap a card to open · pinch in to go back',
+    memories: 'Swipe to spin · drag inside the card to read · tap to go onward · pinch in to go back',
+  },
+};
+
+export function hintFor(level, pointerKind) {
+  const table = HINTS[pointerKind] ?? HINTS.fine;
+  return table[level] ?? table.default;
+}
