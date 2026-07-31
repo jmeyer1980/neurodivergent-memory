@@ -196,24 +196,35 @@ test('outer cards show a chevron that never steals the click', async ({ page }) 
 // The existing diveToMemories helper clicks the centre card, which never
 // exercises an outer one. Click directly over where the chevron is drawn to
 // prove the pseudo-element is not swallowing the tap meant for the card.
+//
+// The DOM's first non-front card (ascending neighbour, index 1) is not the
+// only outer card rendered: at the root level (20 items -- above
+// isFanCount's FAN_MAX_CARDS=4 -- the drum runs in cylinder mode, not a
+// fan), the wrap-side neighbour (index 19, front's OTHER neighbour) sits
+// only ~18deg off-axis and lands its chevron corner on-screen even when the
+// ascending neighbour's does not. Scan every rendered outer card for the
+// first one whose chevron corner is actually on-screen, rather than
+// hardcoding "the first DOM match" and treating an off-canvas corner as a
+// reason to skip: a genuinely clickable candidate is present every run.
 test('clicking an outer card on its chevron still centres and dives', async ({ page }) => {
   const before = await page.evaluate(() => (document.querySelector('#stage') as HTMLElement).dataset.level);
-  const box = await page.evaluate(() => {
-    const card = document.querySelector('#drum .card3d:not(.front)');
-    if (!card) return null;
-    const r = card.getBoundingClientRect();
-    // Bottom-right corner, where the ::after is drawn.
-    return { x: r.right - 20, y: r.bottom - 16, w: r.width };
+  const corners = await page.evaluate(() => {
+    const cards = [...document.querySelectorAll('#drum .card3d:not(.front)')] as HTMLElement[];
+    return cards.map((card) => {
+      const r = card.getBoundingClientRect();
+      // Bottom-right corner, where the ::after is drawn.
+      return { x: r.right - 20, y: r.bottom - 16, w: r.width };
+    });
   });
-  // A card fanned at a steep angle can have most of its box off-canvas even
-  // though its DOM width is comfortably wide (measured: 323px wide, corner at
-  // x=670 against a 393px-wide iPhone 15 viewport). A point outside the
-  // viewport is exactly as unclickable to a real thumb as it is to
-  // page.mouse.click, so the guard must check on-screen-ness, not just width.
   const vp = page.viewportSize();
-  const onScreen = !!box && !!vp && box.x >= 0 && box.x <= vp.width && box.y >= 0 && box.y <= vp.height;
-  test.skip(!box || box.w < 20 || !onScreen, 'no outer card presents an on-screen, flat-enough corner to click at this viewport');
-  await page.mouse.click(box!.x, box!.y);
+  const candidate = vp
+    ? corners.find((c) => c.w >= 20 && c.x >= 0 && c.x <= vp.width && c.y >= 0 && c.y <= vp.height)
+    : undefined;
+  // Last resort only: every rendered outer card's corner is genuinely
+  // off-canvas or too edge-on at this viewport. Not expected to trigger on
+  // either configured project/viewport pairing.
+  test.skip(!candidate, 'no rendered outer card presents an on-screen, flat-enough corner to click at this viewport');
+  await page.mouse.click(candidate!.x, candidate!.y);
   await page.waitForTimeout(1700);
   const after = await page.evaluate(() => (document.querySelector('#stage') as HTMLElement).dataset.level);
   expect(after, 'the chevron swallowed the click instead of the card taking it').not.toBe(before);
