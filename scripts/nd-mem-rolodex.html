@@ -111,6 +111,23 @@
     .foot{display:flex;justify-content:flex-end;gap:10px;margin-top:16px}
     .hint{color:var(--muted);font-size:.82rem;line-height:1.5;margin-top:10px}
     #hud{position:fixed;inset:auto 0 0 0;z-index:10;display:flex;justify-content:center;padding:16px;pointer-events:none}
+    /* A 3x3 grid where only the middle row's outer cells are filled. The middle
+       COLUMN's outer rows are deliberately left empty: that is the reserved
+       slot for the deferred floor chevrons, so adding them is an insertion
+       rather than a relayout. */
+    #spin{position:fixed;inset:0;z-index:8;display:grid;grid-template-columns:auto 1fr auto;
+      grid-template-rows:1fr auto 1fr;align-items:center;padding:0 10px;pointer-events:none}
+    #spin>*{pointer-events:auto}
+    #spinPrev{grid-column:1;grid-row:2}
+    #spinNext{grid-column:3;grid-row:2}
+    #spin.hidden{display:none}
+    .spinBtn{font-size:1.05rem;line-height:1;padding:12px 14px}
+    /* A phone card is near-full-width, so a side gutter would sit on top of it.
+       The bottom row is both clear of the card and where thumbs already are. */
+    @media (max-width:560px){
+      #spin{inset:auto 0 0 0;display:flex;justify-content:space-between;padding:0 14px 14px}
+      #hud{padding:16px 76px}
+    }
     #minimap{position:fixed;left:0;top:calc(var(--chromeH, 64px) + 8px);bottom:64px;z-index:9;display:flex;flex-direction:column;justify-content:flex-end;align-items:flex-start;gap:8px;padding:10px;pointer-events:none}
     #minimap>*{pointer-events:auto}
     #mapToggle{font-size:.7rem;letter-spacing:.08em;text-transform:uppercase;padding:6px 10px}
@@ -194,6 +211,10 @@
     <div id="locus"><span id="crumb"></span><span id="position">—</span></div>
   </div>
   <div id="stage" data-level="projects"><div id="scene"><div id="drum"></div></div></div>
+  <div id="spin">
+    <button class="pill spinBtn" id="spinPrev" aria-label="Previous card">◀</button>
+    <button class="pill spinBtn" id="spinNext" aria-label="Next card">▶</button>
+  </div>
   <div id="hud"><span class="pill" id="hudHint"></span></div>
   <div id="minimap"><div id="mapBody"></div><button class="pill" id="mapToggle" title="Toggle the exploration map">Map 0^0</button></div>
   <div id="overlay"><div class="box"><h2>Bridge offline</h2><p id="overlayMsg">Could not reach the bridge. Start it with <code>node scripts/nd-mem-bridge-server.mjs</code> and retry.</p><button class="btn primary" id="retryBtn">Retry</button></div></div>
@@ -238,7 +259,7 @@
     const NODE_LABEL_PX = 58; // 10 monospace chars at .6rem; see truncateNodeLabel
 
     const $ = s => document.querySelector(s);
-    const els = { stage: $('#stage'), scene: $('#scene'), drum: $('#drum'), crumb: $('#crumb'), position: $('#position'), connState: $('#connState'), backBtn: $('#backBtn'), overlay: $('#overlay'), overlayMsg: $('#overlayMsg'), retryBtn: $('#retryBtn'), toast: $('#toast'), hudHint: $('#hudHint'), minimap: $('#minimap'), mapBody: $('#mapBody'), mapToggle: $('#mapToggle') };
+    const els = { stage: $('#stage'), scene: $('#scene'), drum: $('#drum'), crumb: $('#crumb'), position: $('#position'), connState: $('#connState'), backBtn: $('#backBtn'), overlay: $('#overlay'), overlayMsg: $('#overlayMsg'), retryBtn: $('#retryBtn'), toast: $('#toast'), hudHint: $('#hudHint'), minimap: $('#minimap'), mapBody: $('#mapBody'), mapToggle: $('#mapToggle'), spin: $('#spin'), spinPrev: $('#spinPrev'), spinNext: $('#spinNext') };
 
     // Three hand-tuned offsets (64/108/56) each encoded a guess at how tall
     // #chrome renders at that breakpoint. The band would have needed a fourth.
@@ -603,6 +624,8 @@
       els.crumb.dataset.segments = JSON.stringify(segs.map(s => s.target));
       els.position.textContent = state.items.length ? `card ${state.frontIndex + 1} of ${state.items.length}` : '—';
       els.hudHint.textContent = H.hintFor(level, POINTER_KIND);
+      // One card cannot be stepped between, and a lone ◀ ▶ pair implies it can.
+      els.spin.classList.toggle('hidden', state.items.length < 2);
       renderMinimap();
       schedulePersist(); // coalesced; see persistNav
     }
@@ -1273,6 +1296,17 @@
       else if (action === 'stepNext') stepBy(1);
     });
     els.backBtn.addEventListener('click', () => zoomOut());
+    // Routed through the shipped gesture table rather than calling stepBy
+    // directly, so a tap and an arrow key can never drift apart -- the same
+    // reason pointer drags go through classifyDragAxis/routeDragAxis.
+    function spinFromButton(kind){
+      if (state.transitioning) return;
+      const action = H.routeGesture(kind, { level: state.view.level, insideReader: false });
+      if (action === 'stepPrev') stepBy(-1);
+      else if (action === 'stepNext') stepBy(1);
+    }
+    els.spinPrev.addEventListener('click', () => spinFromButton('arrowLeft'));
+    els.spinNext.addEventListener('click', () => spinFromButton('arrowRight'));
 
     // ---------- edit modal ----------
     const CANONICAL = H.CANONICAL_DISTRICTS;

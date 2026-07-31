@@ -311,3 +311,65 @@ test('the location band wraps instead of escaping a narrow viewport', async ({ p
     expect(wrap.ellipsised, `no segment should be truncated with an ellipsis at ${vp.name}`).toEqual([]);
   }
 });
+
+// Spinning was discoverable only if you already knew to scroll or drag.
+// A card-width step eases in on a rAF loop (see tick()'s `d * 0.14` decay
+// toward state.stepTarget), not on a fixed timer. The brief's prescribed
+// `waitForTimeout(600)` converged reliably on desktop-chrome but was measured
+// (via a temporary rAF/setInterval tick counter, since removed) to sometimes
+// still be mid-ease on mobile-safari's WebKit at 600ms -- the same rotation
+// delta rendered visibly fewer frames per wall-clock second there. Rather than
+// pick a bigger fixed guess that would still be a guess, poll for the position
+// readout to actually reach the target card, so the test's tolerance is
+// "however long this browser's compositor needs", not a magic number.
+function waitForCard(page: Page, expected: number, label: string) {
+  return page.waitForFunction(
+    (want) => Number((document.querySelector('#position')!.textContent!.match(/card\s+(\d+)/) ?? [])[1] ?? 0) === want,
+    expected,
+    { timeout: 5000 },
+  ).catch((e) => { throw new Error(`${label}: ${e.message}`); });
+}
+
+test('an edge chevron advances the selection by exactly one', async ({ page }) => {
+  const at = () => page.evaluate(() =>
+    Number((document.querySelector('#position')!.textContent!.match(/card\s+(\d+)/) ?? [])[1] ?? 0));
+  const total = await page.evaluate(() =>
+    Number((document.querySelector('#position')!.textContent!.match(/of\s+(\d+)/) ?? [])[1] ?? 0));
+  test.skip(total < 2, 'needs at least two cards to step between');
+  const before = await at();
+  const expectedNext = before === total ? 1 : before + 1;
+  await page.locator('#spinNext').click();
+  await waitForCard(page, expectedNext, `expected step to card ${expectedNext}`);
+  const after = await at();
+  const forward = ((after - before) + total) % total;
+  expect(forward, `expected one step forward, got ${before} -> ${after}`).toBe(1);
+
+  await page.locator('#spinPrev').click();
+  await waitForCard(page, before, `expected step back to card ${before}`);
+  expect(await at()).toBe(before);
+});
+
+// The prescribed geometry check compares the buttons against the front card's
+// box. On a phone the front card is near-full-width and the buttons move into
+// the bottom HUD row (see the max-width:560px rule) rather than sitting beside
+// the card in the side gutters -- so "clear of the card" has to be checked
+// against where the buttons actually render at each width, not assumed.
+test('the spin controls stay on screen and clear of the cards', async ({ page }) => {
+  for (const vp of [{ width: 393, height: 852 }, { width: 852, height: 393 }, { width: 1440, height: 900 }]) {
+    await page.setViewportSize(vp);
+    await page.waitForTimeout(200);
+    const geom = await page.evaluate(() => {
+      const b = (s: string) => document.querySelector(s)!.getBoundingClientRect();
+      const prev = b('#spinPrev'), next = b('#spinNext'), front = b('#drum .card3d.front');
+      const clear = (r: DOMRect) => !(r.right > front.left + 0.5 && front.right > r.left + 0.5
+        && r.bottom > front.top + 0.5 && front.bottom > r.top + 0.5);
+      return {
+        onScreen: [prev, next].every((r) => r.left >= -0.5 && r.right <= window.innerWidth + 0.5
+          && r.top >= -0.5 && r.bottom <= window.innerHeight + 0.5),
+        clearOfCard: clear(prev) && clear(next),
+      };
+    });
+    expect(geom.onScreen, `spin controls escaped at ${vp.width}x${vp.height}`).toBe(true);
+    expect(geom.clearOfCard, `spin controls overlapped the card at ${vp.width}x${vp.height}`).toBe(true);
+  }
+});
