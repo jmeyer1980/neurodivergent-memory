@@ -371,7 +371,12 @@ test('an edge chevron advances the selection by exactly one', async ({ page }) =
     Number((document.querySelector('#position')!.textContent!.match(/card\s+(\d+)/) ?? [])[1] ?? 0));
   const total = await page.evaluate(() =>
     Number((document.querySelector('#position')!.textContent!.match(/of\s+(\d+)/) ?? [])[1] ?? 0));
-  test.skip(total < 2, 'needs at least two cards to step between');
+  // A skip here is a silent no-op: beforeEach only waits for #drum .card3d to
+  // be non-empty, so a store with exactly one project would satisfy that and
+  // then quietly skip the only behavioural test of this branch's edge-chevron
+  // control, every run, forever. Fail loudly instead -- a degenerate dataset
+  // should surface as a failing test, not a green run that tested nothing.
+  expect(total, 'needs at least two cards to step between').toBeGreaterThan(1);
   const before = await at();
   const expectedNext = before === total ? 1 : before + 1;
   await page.locator('#spinNext').click();
