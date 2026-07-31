@@ -334,7 +334,7 @@ test('the branch map labels its nodes as text, not only as tooltips', async ({ p
 
 - [ ] **Step 8: Run both suites**
 
-Run: `npm test` — 283 pass / 2 known failures.
+Run: `npm test` — expect the 2 known pre-existing `agent-customization-wording` failures and no others. The pass count keeps growing as this slice adds tests, so treat the *number* as whatever the controller states as your inherited baseline, not as a fixed 283.
 Run: `npx playwright test` — expected 20/20.
 
 - [ ] **Step 9: Commit**
@@ -634,7 +634,7 @@ In `e2e/rolodex-layout.spec.ts`:
 
 - [ ] **Step 8: Run both suites**
 
-Run: `npm test` — 283 pass / 2 known failures.
+Run: `npm test` — expect the 2 known pre-existing `agent-customization-wording` failures and no others. The pass count keeps growing as this slice adds tests, so treat the *number* as whatever the controller states as your inherited baseline, not as a fixed 283.
 Run: `npx playwright test` — expected 28/28. Pay attention to `an unexpected reload keeps your place`: it is the guard that nav restore survived this task.
 
 - [ ] **Step 9: Commit**
@@ -775,7 +775,7 @@ Expected: PASS on both projects.
 
 - [ ] **Step 7: Run both suites**
 
-Run: `npm test` — 283 pass / 2 known failures.
+Run: `npm test` — expect the 2 known pre-existing `agent-customization-wording` failures and no others. The pass count keeps growing as this slice adds tests, so treat the *number* as whatever the controller states as your inherited baseline, not as a fixed 283.
 Run: `npx playwright test` — expected 32/32. Re-check `chrome bar keeps every control on screen`: `#spin` is fixed and outside `#chrome`, so it must not have disturbed the bar.
 
 - [ ] **Step 8: Commit**
@@ -901,7 +901,7 @@ Expected: PASS.
 
 - [ ] **Step 7: Run both suites**
 
-Run: `npm test` — 283 pass / 2 known failures.
+Run: `npm test` — expect the 2 known pre-existing `agent-customization-wording` failures and no others. The pass count keeps growing as this slice adds tests, so treat the *number* as whatever the controller states as your inherited baseline, not as a fixed 283.
 Run: `npx playwright test` — expected 36/36. Re-check `chrome bar keeps every control on screen` at all five viewports: `#helpBtn` is a sixth control in the right-hand cluster and is exactly the kind of addition that overflowed the bar before.
 
 - [ ] **Step 8: Commit**
