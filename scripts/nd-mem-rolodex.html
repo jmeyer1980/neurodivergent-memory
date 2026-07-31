@@ -31,16 +31,25 @@
     .pill strong{color:var(--text);font-weight:500}
     a.pill{text-decoration:none}
     #backBtn{font-size:1rem;line-height:1}
-    #levelName{font-family:var(--font-display);text-transform:uppercase;letter-spacing:.14em;font-size:.74rem}
-    /* min-width:0 defeats the min-content floor every flex item gets, so the
-       ellipsis can actually do its job instead of forcing the row wider. */
-    #crumb{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:.78rem;letter-spacing:.02em;max-width:52vw;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-    #crumb .seg{background:none;border:0;padding:0 2px;font:inherit;color:var(--muted);cursor:pointer;border-radius:4px}
-    #crumb .seg:hover{color:var(--text);background:rgba(96,215,210,.14)}
-    #crumb .seg.depth{color:var(--primary);font-weight:600}
+    /* One band, one answer to "where am I". It is a flex item of #chrome with
+       flex-basis:100%, so it always takes its own row without a second fixed
+       element to position around. coordinateOf returns at most four segments
+       however deep 0^N goes, so wrapping is always enough and nothing is ever
+       dropped -- the per-segment ellipsis below only guards one absurd id. */
+    #locus{flex:1 1 100%;display:flex;align-items:baseline;gap:10px;min-width:0;pointer-events:auto;
+      padding:8px 14px;border-radius:16px;border:1px solid var(--surfaceBorder);
+      background:var(--surface);backdrop-filter:blur(10px)}
+    #crumb{flex:1 1 auto;min-width:0;display:flex;flex-wrap:wrap;align-items:baseline;gap:0 2px;
+      font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:.95rem;
+      letter-spacing:.02em;color:var(--text)}
+    #crumb .seg{background:none;border:0;padding:0 2px;font:inherit;color:var(--muted);cursor:pointer;
+      border-radius:4px;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    #crumb .seg:hover{color:var(--text);background:var(--washStrong)}
+    #crumb .seg.depth{color:var(--primary);font-weight:600;white-space:nowrap}
     #crumb .seg.leaf,#crumb .seg:disabled{color:var(--text);cursor:default}
     #crumb .seg:disabled:hover{background:none}
     #crumb .sep{color:var(--faint);padding:0 1px}
+    #position{flex:0 0 auto;font-size:.78rem;color:var(--muted);white-space:nowrap}
     #stage{position:fixed;inset:0;perspective:1400px;overflow:hidden;touch-action:none}
     #stage.bounce::after{content:'';position:absolute;inset:0;pointer-events:none;box-shadow:inset 0 0 120px rgba(96,215,210,.35);animation:edgeflash .45s ease}
     @keyframes edgeflash{from{opacity:1}to{opacity:0}}
@@ -99,7 +108,7 @@
     .foot{display:flex;justify-content:flex-end;gap:10px;margin-top:16px}
     .hint{color:var(--muted);font-size:.82rem;line-height:1.5;margin-top:10px}
     #hud{position:fixed;inset:auto 0 0 0;z-index:10;display:flex;justify-content:center;padding:16px;pointer-events:none}
-    #minimap{position:fixed;left:0;top:64px;bottom:64px;z-index:9;display:flex;flex-direction:column;justify-content:flex-end;align-items:flex-start;gap:8px;padding:10px;pointer-events:none}
+    #minimap{position:fixed;left:0;top:calc(var(--chromeH, 64px) + 8px);bottom:64px;z-index:9;display:flex;flex-direction:column;justify-content:flex-end;align-items:flex-start;gap:8px;padding:10px;pointer-events:none}
     #minimap>*{pointer-events:auto}
     #mapToggle{font-size:.7rem;letter-spacing:.08em;text-transform:uppercase;padding:6px 10px}
     #mapBody{max-height:100%;max-width:260px;overflow:auto;border-radius:16px;border:1px solid var(--surfaceBorder);background:var(--surface);backdrop-filter:blur(10px);padding:6px}
@@ -132,28 +141,19 @@
        all, while the coordinate ellipsised away to "0^2 > proj_a >…". Nothing
        was overlapping and nothing had been squeezed — the clusters were at
        their natural width and the row simply overflowed.
-       So: give each cluster its own row. Both fit unsqueezed (278px and 267px),
-       and #levelName goes, because it reads "Memories · 0^2" and the crumb
-       already carries the depth as its first segment and names the current view
-       in its last. That hands the coordinate ~316px instead of 93px, which
-       matters more than the label: every segment of it is a tap target. */
+       So: give each cluster its own row. Both fit unsqueezed (278px and 267px).
+       #levelName and the #crumb width override that used to live here are gone
+       along with it: the location band (#locus) replaced both, taking its own
+       full-width row below the clusters instead of squeezing into one. */
     @media (max-width: 560px){
       #chrome{flex-wrap:wrap;row-gap:8px;padding:10px 12px}
-      /* Tighter than the desktop pill so the four status/controls fit on ONE
-         line at real content widths. "card 8 / 124" and "Bridge :3941" are
-         wider than they look: at the desktop 14px/18px padding the row needs
-         ~405px against the ~369px a 393px phone offers, and each pill then
-         wraps its own text to two lines. Deliberately NOT white-space:nowrap —
-         if a longer project id ever does overflow, wrapping keeps the text
-         readable, where an ellipsis would just hide it. */
+      /* Tighter than the desktop pill so this cluster's controls stay on ONE
+         line at real content widths — "Bridge :3941" is wider than it looks.
+         The coordinate and the card count used to compete for this same row;
+         they now live in #locus, a full-width row of their own below. */
       #chrome .pill{padding:7px 10px;font-size:.76rem}
       #chrome .cluster{flex:1 1 100%;gap:8px}
       #chrome .cluster:last-child{justify-content:flex-end}
-      #levelName{display:none}
-      /* min-width:0 defeats the min-content floor every flex item gets, which
-         is what lets the ellipsis do its job instead of forcing the overflow. */
-      #crumb{max-width:none;flex:1 1 auto;min-width:0}
-      #minimap{top:108px} /* clear the bar, which is two rows tall here */
     }
     /* A phone held sideways: plenty of width, almost no height. Nothing here is
        about width — it is about buying the card back the vertical space the
@@ -163,9 +163,12 @@
     @media (max-height: 500px){
       #chrome{padding:8px 12px;row-gap:6px}
       #chrome .pill{padding:6px 10px;font-size:.74rem}
-      #levelName{display:none}
       #hudHint{display:none}
-      #minimap{top:56px;bottom:48px}
+      #minimap{bottom:48px}
+      /* Landscape has width to spare and no height at all: the band goes back
+         inline rather than claiming a second row. */
+      #locus{flex:1 1 auto;padding:5px 10px}
+      #crumb{font-size:.82rem;flex-wrap:nowrap;overflow:hidden}
     }
   </style>
 </head>
@@ -173,15 +176,13 @@
   <div id="chrome">
     <div class="cluster">
       <button class="pill" id="backBtn" title="Zoom out (Esc / right-click)">⤺</button>
-      <span class="pill" id="crumb"><strong>All projects</strong></span>
-      <span class="pill" id="levelName">Projects</span>
     </div>
     <div class="cluster">
-      <span class="pill" id="position">—</span>
       <span class="pill" id="connState">Connecting…</span>
       <button class="pill" id="themeBtn" title="Toggle theme">◐</button>
       <a class="pill" href="/">Classic view</a>
     </div>
+    <div id="locus"><span id="crumb"></span><span id="position">—</span></div>
   </div>
   <div id="stage" data-level="projects"><div id="scene"><div id="drum"></div></div></div>
   <div id="hud"><span class="pill" id="hudHint"></span></div>
@@ -228,7 +229,15 @@
     const NODE_LABEL_PX = 58; // 10 monospace chars at .6rem; see truncateNodeLabel
 
     const $ = s => document.querySelector(s);
-    const els = { stage: $('#stage'), scene: $('#scene'), drum: $('#drum'), crumb: $('#crumb'), levelName: $('#levelName'), position: $('#position'), connState: $('#connState'), backBtn: $('#backBtn'), overlay: $('#overlay'), overlayMsg: $('#overlayMsg'), retryBtn: $('#retryBtn'), toast: $('#toast'), hudHint: $('#hudHint'), minimap: $('#minimap'), mapBody: $('#mapBody'), mapToggle: $('#mapToggle') };
+    const els = { stage: $('#stage'), scene: $('#scene'), drum: $('#drum'), crumb: $('#crumb'), position: $('#position'), connState: $('#connState'), backBtn: $('#backBtn'), overlay: $('#overlay'), overlayMsg: $('#overlayMsg'), retryBtn: $('#retryBtn'), toast: $('#toast'), hudHint: $('#hudHint'), minimap: $('#minimap'), mapBody: $('#mapBody'), mapToggle: $('#mapToggle') };
+
+    // Three hand-tuned offsets (64/108/56) each encoded a guess at how tall
+    // #chrome renders at that breakpoint. The band would have needed a fourth.
+    // Measure it once and let CSS read the answer.
+    const syncChromeHeight = () => document.documentElement.style
+      .setProperty('--chromeH', `${Math.ceil($('#chrome').getBoundingClientRect().height)}px`);
+    new ResizeObserver(syncChromeHeight).observe($('#chrome'));
+    syncChromeHeight();
 
     const state = {
       snapshot: { memories: {} },
@@ -554,7 +563,6 @@
     }
     function updateChrome(){
       const { level, projectId, districtId } = state.view;
-      els.levelName.textContent = `${level[0].toUpperCase() + level.slice(1)} · 0^${depthNow()}`;
       // `0^N > project > district > card`: N answers "how deep", the path
       // answers "where", and each segment is a way back to that view.
       const segs = H.coordinateOf(state.view, depthNow(), centeredItem()?.id ?? null);
@@ -575,10 +583,16 @@
         // already fixed for context segments.
         const atWallBadge = s.kind === 'depth' && H.navAtWall(state.tree);
         const jumpable = !atCurrent && !atWallBadge && (s.kind === 'depth' || s.target != null);
-        return sep + `<button class="seg ${s.kind}" data-seg="${i}"${jumpable ? '' : ' disabled'}>${esc(s.text)}</button>`;
+        // The ⌂ is added here, not in coordinateOf: the helper stays pure text
+        // so its unit tests and any non-visual caller are unaffected.
+        const label = s.kind === 'depth' ? `⌂ ${s.text}` : s.text;
+        return sep + `<button class="seg ${s.kind}" data-seg="${i}"${jumpable ? '' : ' disabled'}>${esc(label)}</button>`;
       }).join('');
+      // An empty store has no centered card, so the coordinate collapses to a
+      // lone depth badge and the band would read "⌂ 0^0" and nothing else.
+      if (segs.length <= 1) els.crumb.innerHTML += '<span class="sep">·</span><span class="seg leaf">All projects</span>';
       els.crumb.dataset.segments = JSON.stringify(segs.map(s => s.target));
-      els.position.textContent = state.items.length ? `card ${state.frontIndex + 1} / ${state.items.length}` : '—';
+      els.position.textContent = state.items.length ? `card ${state.frontIndex + 1} of ${state.items.length}` : '—';
       els.hudHint.textContent = H.hintFor(level, POINTER_KIND);
       renderMinimap();
       schedulePersist(); // coalesced; see persistNav

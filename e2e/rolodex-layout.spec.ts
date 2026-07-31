@@ -61,14 +61,20 @@ for (const vp of [
     await page.setViewportSize({ width: vp.width, height: vp.height });
     // Worst realistic content, not whatever the root view happens to show.
     await page.evaluate(() => {
-      document.querySelector('#position')!.textContent = 'card 124 / 124';
+      document.querySelector('#position')!.textContent = 'card 124 of 124';
       document.querySelector('#connState')!.textContent = 'Bridge :3799';
     });
     const bar = await chromeBar(page);
     expect(bar.offscreen, `pills off screen at ${vp.width}x${vp.height}`).toEqual([]);
     expect(bar.overlaps, `pills overlapping at ${vp.width}x${vp.height}`).toEqual([]);
-    // The coordinate is the primary navigation aid and must never be the thing dropped.
-    expect(bar.ids).toContain('crumb');
+    // The coordinate is the primary navigation aid and must never be the thing
+    // dropped. It is no longer a .pill, so assert on the band itself.
+    const locus = await page.evaluate(() => {
+      const r = document.querySelector('#locus')!.getBoundingClientRect();
+      return { onScreen: r.right <= window.innerWidth + 0.5 && r.left >= -0.5, visible: r.width > 0 };
+    });
+    expect(locus.visible, `the location band vanished at ${vp.width}x${vp.height}`).toBe(true);
+    expect(locus.onScreen, `the location band escaped at ${vp.width}x${vp.height}`).toBe(true);
   });
 }
 
@@ -80,7 +86,7 @@ test('the drum renders a bounded window regardless of bucket size', async ({ pag
   expect(await diveToMemories(page)).toBe('memories');
   const stats = await page.evaluate(() => ({
     rendered: document.querySelectorAll('#drum .card3d').length,
-    total: Number((document.querySelector('#position')!.textContent!.match(/\/\s*(\d+)/) ?? [])[1] ?? 0),
+    total: Number((document.querySelector('#position')!.textContent!.match(/of\s+(\d+)/) ?? [])[1] ?? 0),
     domNodes: document.querySelectorAll('*').length,
     fronts: document.querySelectorAll('#drum .card3d.front').length,
   }));
@@ -228,4 +234,39 @@ test('clicking an outer card on its chevron still centres and dives', async ({ p
   await page.waitForTimeout(1700);
   const after = await page.evaluate(() => (document.querySelector('#stage') as HTMLElement).dataset.level);
   expect(after, 'the chevron swallowed the click instead of the card taking it').not.toBe(before);
+});
+
+// Location was split across #crumb, #levelName and #position -- three identical
+// pills, none dominant -- and 0^N was printed twice. One band, one answer.
+test('one band owns the location, and says the depth once', async ({ page }) => {
+  test.slow();
+  expect(await diveToMemories(page)).toBe('memories');
+  const band = await page.evaluate(() => {
+    const locus = document.querySelector('#locus');
+    return {
+      exists: !!locus,
+      text: (locus?.textContent ?? '').trim(),
+      levelNameGone: !document.querySelector('#levelName'),
+      segments: [...document.querySelectorAll('#crumb .seg')].map((s) => s.textContent!.trim()),
+    };
+  });
+  expect(band.exists).toBe(true);
+  expect(band.levelNameGone, '#levelName should be deleted, not hidden').toBe(true);
+  expect(band.segments.length).toBeGreaterThan(1);
+  expect(band.segments[0]).toMatch(/^⌂ 0\^\d+$/);
+  // The depth must appear exactly once across the whole band.
+  expect((band.text.match(/0\^\d+/g) ?? []).length).toBe(1);
+});
+
+test('the location band wraps instead of escaping a narrow viewport', async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 568 });
+  await page.evaluate(() => {
+    document.querySelector('#position')!.textContent = 'card 124 of 124';
+  });
+  const fits = await page.evaluate(() => {
+    const r = document.querySelector('#locus')!.getBoundingClientRect();
+    return { right: r.right, left: r.left, w: window.innerWidth };
+  });
+  expect(fits.right).toBeLessThanOrEqual(fits.w + 0.5);
+  expect(fits.left).toBeGreaterThanOrEqual(-0.5);
 });
