@@ -258,7 +258,41 @@ test('one band owns the location, and says the depth once', async ({ page }) => 
   expect((band.text.match(/0\^\d+/g) ?? []).length).toBe(1);
 });
 
-// Review round 2, Finding 2: the original version of this test only checked that
+// The design spec's §6 requires "a band segment click jumps back to that
+// view". Task 4 rewrote #crumb from a single .pill span into a flex container
+// of <button class="seg" data-seg="i"> elements carrying index-based jump-back
+// delegation (see the els.crumb click handler), changed the label (prefixing
+// "⌂"), and appended a no-data-seg leaf for the empty-store case -- and
+// nothing exercised whether the delegation itself still resolves to the right
+// place. The reload test above only ever compares textContent, which would
+// stay green even if every click silently did nothing. Asserting the
+// resulting level AND the project/district identity (not just "something
+// changed") is what keeps this from passing vacuously if the wiring breaks.
+test('clicking an earlier band segment jumps back to that view', async ({ page }) => {
+  test.slow();
+  expect(await diveToMemories(page)).toBe('memories');
+  const read = () => page.evaluate(() => ({
+    level: (document.querySelector('#stage') as HTMLElement).dataset.level,
+    segs: [...document.querySelectorAll('#crumb .seg')].map((s) => s.textContent!.trim()),
+  }));
+  const before = await read();
+  expect(before.segs.length, 'precondition: depth + project + district segments are all present').toBeGreaterThanOrEqual(3);
+  const projectText = before.segs[1];
+  const districtText = before.segs[2];
+
+  // Segment 1 is always the project segment at the memories level -- see
+  // H.coordinateOf: depth, then project, then district, then the leaf.
+  await page.locator('#crumb .seg[data-seg="1"]').click();
+  await page.waitForTimeout(1000);
+  const after = await read();
+
+  expect(after.level, 'clicking the project segment should land one level back, at districts').toBe('districts');
+  expect(after.segs[1], 'should land back on the SAME project it was clicked from').toBe(projectText);
+  expect(after.segs[2], 'should be centred on the SAME district it dived out of, not just any district')
+    .toBe(districtText);
+});
+
+// An earlier version of this test only checked that
 // #locus's own box stayed inside the viewport at the (unnavigated) root level.
 // #locus is pinned to its row's width by flex-basis:100%+min-width:0 regardless
 // of its children's content, and the root coordinate is the SHORTEST one the app
@@ -288,8 +322,10 @@ test('one band owns the location, and says the depth once', async ({ page }) => 
 // breakpoints together (a landscape-shaped viewport narrow enough to matter --
 // e.g. a compact device or a split-screen pane), and was confirmed by direct
 // measurement (both projects) to force a genuine second line with zero
-// ellipsis under the fix. See the fix report for the reintroduced-nowrap
-// failure demonstration.
+// ellipsis under the fix. Confirmed as a real guard, not just a passing
+// assertion, by temporarily reintroducing the old nowrap+overflow:hidden rule
+// on #crumb: this test failed on the reintroduced ellipsis at both viewports,
+// then passed again once the rule was removed.
 test('the location band wraps instead of escaping a narrow viewport', async ({ page }) => {
   test.slow();
   expect(await diveToMemories(page)).toBe('memories');
@@ -371,6 +407,32 @@ test('the spin controls stay on screen and clear of the cards', async ({ page })
     });
     expect(geom.onScreen, `spin controls escaped at ${vp.width}x${vp.height}`).toBe(true);
     expect(geom.clearOfCard, `spin controls overlapped the card at ${vp.width}x${vp.height}`).toBe(true);
+  }
+});
+
+// Every geometric assertion above this line checks an element against the
+// VIEWPORT, never against the card itself -- except the spin-button test just
+// above, whose clear(front) overlap check this one reuses for #chrome and
+// #hud. That gap is exactly how #wallCopy's five-line wrap at 320x568 (the
+// pill's max-width is inert once the surrounding #hud padding narrows its
+// line below it) and #hud's grown box at 500x393 both sat on top of the wall
+// card without any existing test noticing: chromeBar() only ever looks inside
+// #chrome's own .pill children, so it cannot see #hud at all, and nothing
+// else measures either bar against the card. These are the two viewports
+// where it actually broke.
+test('the chrome bar and hud stay clear of the card at the viewports that broke it', async ({ page }) => {
+  for (const vp of [{ width: 320, height: 568 }, { width: 500, height: 393 }]) {
+    await page.setViewportSize(vp);
+    await page.waitForTimeout(200);
+    const geom = await page.evaluate(() => {
+      const b = (s: string) => document.querySelector(s)!.getBoundingClientRect();
+      const chrome = b('#chrome'), hud = b('#hud'), front = b('#drum .card3d.front');
+      const clear = (r: DOMRect) => !(r.right > front.left + 0.5 && front.right > r.left + 0.5
+        && r.bottom > front.top + 0.5 && front.bottom > r.top + 0.5);
+      return { chromeClear: clear(chrome), hudClear: clear(hud) };
+    });
+    expect(geom.chromeClear, `#chrome overlapped the card at ${vp.width}x${vp.height}`).toBe(true);
+    expect(geom.hudClear, `#hud overlapped the card at ${vp.width}x${vp.height}`).toBe(true);
   }
 });
 
