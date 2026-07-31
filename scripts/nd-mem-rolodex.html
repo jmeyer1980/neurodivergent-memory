@@ -90,6 +90,36 @@
     #toast{position:fixed;right:16px;bottom:16px;z-index:50;display:none;max-width:360px;padding:13px 16px;border-radius:16px;background:var(--overlayBg);border:1px solid rgba(96,215,210,.26)}
     #toast.show{display:block}
     @media (prefers-reduced-motion: reduce){#scene{transition:none}#scene.bouncing,#stage.bounce::after{animation:none}.card3d{transition:none}}
+    /* Phones. The chrome bar wants 575px of controls; a portrait phone offers
+       ~370. Measured at 393px before this rule: the right-hand cluster (live
+       connection state, theme toggle, Classic view) began at x=308 and ended at
+       x=575, so all three sat past the right edge and could not be tapped at
+       all, while the coordinate ellipsised away to "0^2 > proj_a >…". Nothing
+       was overlapping and nothing had been squeezed — the clusters were at
+       their natural width and the row simply overflowed.
+       So: give each cluster its own row. Both fit unsqueezed (278px and 267px),
+       and #levelName goes, because it reads "Memories · 0^2" and the crumb
+       already carries the depth as its first segment and names the current view
+       in its last. That hands the coordinate ~316px instead of 93px, which
+       matters more than the label: every segment of it is a tap target. */
+    @media (max-width: 560px){
+      #chrome{flex-wrap:wrap;row-gap:8px;padding:10px 12px}
+      /* Tighter than the desktop pill so the four status/controls fit on ONE
+         line at real content widths. "card 8 / 124" and "Bridge :3941" are
+         wider than they look: at the desktop 14px/18px padding the row needs
+         ~405px against the ~369px a 393px phone offers, and each pill then
+         wraps its own text to two lines. Deliberately NOT white-space:nowrap —
+         if a longer project id ever does overflow, wrapping keeps the text
+         readable, where an ellipsis would just hide it. */
+      #chrome .pill{padding:7px 10px;font-size:.76rem}
+      #chrome .cluster{flex:1 1 100%;gap:8px}
+      #chrome .cluster:last-child{justify-content:flex-end}
+      #levelName{display:none}
+      /* min-width:0 defeats the min-content floor every flex item gets, which
+         is what lets the ellipsis do its job instead of forcing the overflow. */
+      #crumb{max-width:none;flex:1 1 auto;min-width:0}
+      #minimap{top:108px} /* clear the bar, which is two rows tall here */
+    }
   </style>
 </head>
 <body>
@@ -164,6 +194,8 @@
       transitioning: false,
       frontIndex: -1,
       frontEl: null,        // the .card3d currently wearing .front, so updates touch two cards, not N
+      drumMarkup: null,     // last markup written to #drum, so an unchanged rebuild can skip the DOM entirely
+      drumAnchor: null,     // item index the rendered window was cut around (null = nothing rendered)
       stepTarget: null,     // arrow-key destination the tick loop eases toward (null = no step pending)
       wheelAccum: 0,       // fan mode: wheel pixels banked toward the next selection step
       dragAccum: 0,        // fan mode: drag pixels banked toward the next selection step
@@ -185,7 +217,18 @@
     }
 
     function currentViewSnapshot(){
-      return { ...state.view, centeredId: centeredItem()?.id ?? null, rotation: state.rotation, itemIds: state.items.map(i => i.id) };
+      // With a live drum the DOM is the truth. Before one exists — a cold load,
+      // or a restore after the tab was reloaded out from under us — state.view
+      // still carries the centering and item list we are trying to reconcile
+      // back to, and reading them off the empty drum would erase exactly the
+      // thing being restored.
+      const live = state.items.length > 0;
+      return {
+        ...state.view,
+        centeredId: live ? (centeredItem()?.id ?? null) : (state.view.centeredId ?? null),
+        rotation: state.rotation,
+        itemIds: live ? state.items.map(i => i.id) : [...(state.view.itemIds || [])],
+      };
     }
     function centeredItem(){ return state.frontIndex >= 0 ? state.items[state.frontIndex] : null; }
 
@@ -214,6 +257,75 @@
         + `<div class="meta">${metaRow('Intensity', d.intensity ?? '—')}${metaRow('Visibility', d.visibility || 'private')}${metaRow('Created', fmt(d.created))}${metaRow('Tags', (d.tags || []).length)}</div>`
         + `<div class="chips">${(d.tags || []).slice(0, 4).map(t => `<span class="chip">${esc(t)}</span>`).join('')}</div>`
         + `<div class="actions"><button class="btn" data-edit="${esc(d.id)}">Edit</button></div>`;
+    }
+
+    // ---------- the rendered window ----------
+    // Every card used to go into the DOM. The real store has a 364-memory
+    // bucket, and at n=364 the cylinder's radius is ~32,400px with cards 0.99deg
+    // apart — so a card two steps from centre already sits ~1,100px off the side
+    // of a phone. Essentially none of those 364 cards could be seen, yet each was
+    // a composited 3D layer, ~9,100 DOM nodes in one innerHTML. Building and
+    // tearing that down on every dive is what made entering a district lag about
+    // half a second and then take the tab's renderer with it on iOS — reproduced
+    // on Safari, Edge and DuckDuckGo alike, which are all WebKit, and worst on
+    // the one with the least memory headroom.
+    //
+    // WINDOW is how many cards are kept each side of the anchor; SLACK is how far
+    // the selection may drift before the window is re-cut. So the rendered set
+    // always covers at least +/-(WINDOW-SLACK) = +/-6 cards around the true
+    // front, against a visible span of roughly +/-2 even on a wide desktop —
+    // while re-cutting at most once every SLACK cards, so a fast spin does not
+    // rebuild on every single card change.
+    const DRUM_WINDOW = 12;
+    const DRUM_SLACK = 6;
+
+    function windowIndices(n, front, mode){
+      if (n <= DRUM_WINDOW * 2 + 1) return Array.from({ length: n }, (_, i) => i);
+      const out = [];
+      for (let d = -DRUM_WINDOW; d <= DRUM_WINDOW; d++) {
+        // A cylinder wraps: at front=0 the cards immediately to the left are
+        // n-1, n-2, ... Clamping instead of wrapping would leave a hole exactly
+        // where the user is about to rotate. A fan has real ends, so it clamps.
+        const i = mode === 'fan' ? front + d : ((front + d) % n + n) % n;
+        if (i >= 0 && i < n) out.push(i);
+      }
+      return out;
+    }
+
+    // Wrap-aware, so drifting from card 0 to card n-1 counts as one step, not n-1.
+    function cardDistance(a, b, n, mode){
+      const raw = Math.abs(a - b);
+      return mode === 'fan' ? raw : Math.min(raw, n - raw);
+    }
+
+    // Re-cuts #drum's markup when the window has moved (or its content changed).
+    // Deliberately does NOT call updateFrontCard — updateFrontCard calls THIS,
+    // and the other direction would recurse.
+    function syncDrumWindow(force = false){
+      const n = state.items.length;
+      if (!n) return false;
+      if (!force && state.drumAnchor !== null
+          && cardDistance(state.frontIndex, state.drumAnchor, n, state.layout.mode) <= DRUM_SLACK) return false;
+      const markup = windowIndices(n, state.frontIndex, state.layout.mode).map((i) => {
+        const tf = `rotateY(${state.layout.angles[i]}deg) translateZ(${state.radius}px)`;
+        // data-idx stays the TRUE index into state.items, never the position
+        // within the window, so every consumer of it keeps working untouched.
+        return `<div class="card3d" data-idx="${i}" style="transform:${tf}">${cardFace(state.items[i])}</div>`;
+      }).join('');
+      state.drumAnchor = state.frontIndex;
+      // Only touch the DOM when the markup actually differs. buildDrum runs on
+      // every SSE memory-change AND every reconnect `hello`, and with 1595
+      // memories across many buckets almost none of those events change the
+      // bucket being viewed — yet each one used to destroy and recreate every
+      // card. Two things fall out of skipping it, both wanted: the reader keeps
+      // its scroll position across a reconnect instead of being wiped
+      // mid-sentence, and the front card's DOM node survives. Same idea as
+      // mapSignature further down.
+      if (markup === state.drumMarkup) return false;
+      els.drum.innerHTML = markup;
+      state.drumMarkup = markup;
+      state.frontEl = null; // every node was just replaced
+      return true;
     }
 
     function buildDrum(){
@@ -249,16 +361,21 @@
         // translateZ puts the placeholder on the camera plane, where real cards
         // sit; at z=0 it renders a drum-radius deep and reads as a recessed card.
         els.drum.innerHTML = `<div class="card3d front placeholder" style="transform:translateZ(${state.radius}px)"><span class="kicker">Empty</span><h2>${state.view.level === 'projects' ? 'No memories yet' : 'Nothing here'}</h2><p>Store a memory through MCP or the classic app and it will appear.</p></div>`;
+        // The placeholder is not card markup, so the cache must not claim to
+        // hold it: leaving a stale value here would let a later rebuild of that
+        // exact same drum be skipped while the placeholder is still on screen.
+        state.drumMarkup = null;
+        state.drumAnchor = null;
         state.rotation = 0; state.velocity = 0; state.frontIndex = -1; state.frontEl = null;
         applyDrumTransform(); updateChrome(); return;
       }
-      els.drum.innerHTML = state.items.map((item, i) => {
-        const tf = `rotateY(${state.layout.angles[i]}deg) translateZ(${state.radius}px)`;
-        return `<div class="card3d" data-idx="${i}" style="transform:${tf}">${cardFace(item)}</div>`;
-      }).join('');
+      // The window is cut around the selection, so the selection has to be known
+      // before any markup exists — hence this runs ahead of the render, not after
+      // it the way it did when every card went into the DOM regardless.
       const idx = Math.max(0, state.items.findIndex(i => i.id === state.view.centeredId));
       state.rotation = H.rotationForCard(idx, state.layout);
       state.frontIndex = idx;
+      syncDrumWindow(true);
       state.wheelAccum = 0;
       state.dragAccum = 0;
       state.velocity = 0;
@@ -292,16 +409,24 @@
       const idx = frontIndexNow();
       if (!force && idx === state.frontIndex) return;
       state.frontIndex = idx;
-      // Cards are appended in item order, so children[idx] is the card for item idx.
-      const next = idx >= 0 ? (els.drum.children[idx] ?? null) : null;
-      if (force) {
-        // buildDrum just rewrote the drum: every card needs its class settled.
-        els.drum.querySelectorAll('.card3d').forEach((el, i) => {
-          el.classList.toggle('front', i === idx);
-          // selectCard forces this path on a live drum (not just buildDrum's
-          // fresh markup), so a previously-selected memory card's full content
-          // must be cleared from its hidden .reader-scroll here too.
-          if (i !== idx) fillReader(el, '');
+      // Slide the rendered window if the selection has drifted out of its slack.
+      // Must happen before `next` is resolved: a re-cut replaces every node, so a
+      // handle taken beforehand would be detached.
+      const recut = syncDrumWindow();
+      // Only a WINDOW of cards is in the DOM now, so position no longer implies
+      // item index — data-idx does. This was `els.drum.children[idx]`, which
+      // silently pointed at the wrong card the moment the window stopped
+      // starting at item 0.
+      const next = idx >= 0 ? els.drum.querySelector(`.card3d[data-idx="${idx}"]`) : null;
+      if (force || recut) {
+        // Fresh markup: every card needs its class settled.
+        els.drum.querySelectorAll('.card3d').forEach((el) => {
+          const isFront = Number(el.dataset.idx) === idx;
+          el.classList.toggle('front', isFront);
+          // selectCard forces this path on a live drum (not just fresh markup),
+          // so a previously-selected memory card's full content must be cleared
+          // from its hidden .reader-scroll here too.
+          if (!isFront) fillReader(el, '');
         });
       } else if (state.frontEl !== next) {
         // Steady state touches two cards. Sweeping all N here ran once per front
@@ -391,6 +516,7 @@
         ? 'Scroll to spin · scroll inside the card to read · click to dive onward · right-click / Esc goes back'
         : 'Scroll to spin · click a card to dive · right-click / Esc to zoom out · Ctrl+scroll zooms';
       renderMinimap();
+      schedulePersist(); // coalesced; see persistNav
     }
 
     // Fan selection: mark the new front card immediately (a force update is cheap
@@ -637,14 +763,32 @@
     }
 
     // ---------- input: wheel ----------
-    function insideReader(target){
-      if (state.view.level !== 'memories' || !(target instanceof Element)) return false;
-      // A reader with nothing to scroll must not swallow the wheel: short
-      // memories would otherwise sit in a dead zone the size of the front card,
-      // where scrolling does nothing at all.
-      const el = target.closest('.reader-scroll');
-      return !!el && el.scrollHeight > el.clientHeight;
+    // Returns the scrollable reader under `target`, or null. A reader with
+    // nothing to scroll must not swallow the wheel or claim a drag: short
+    // memories would otherwise sit in a dead zone the size of the front card,
+    // where scrolling does nothing at all.
+    function readerAt(target, clientX, clientY){
+      if (state.view.level !== 'memories') return null;
+      const scrollable = el => (el && el.scrollHeight > el.clientHeight) ? el : null;
+      if (target instanceof Element) {
+        const hit = scrollable(target.closest('.reader-scroll'));
+        if (hit) return hit;
+      }
+      // DOM path first, then geometry — the same order, and for the same
+      // reason, as the click handler. Hit-testing inside the preserve-3d card
+      // stack is not dependable across engines, and a reader that silently
+      // fails to resolve does not degrade into "no scrolling", it degrades into
+      // "the drum spins instead", which is the whole defect being fixed here.
+      // The selected card is rotated flat to face the camera, so its reader's
+      // own rect is an exact test rather than an approximation.
+      if (Number.isFinite(clientX) && Number.isFinite(clientY) && state.frontEl) {
+        const el = scrollable(state.frontEl.querySelector('.reader-scroll'));
+        const r = el && el.getBoundingClientRect();
+        if (r && r.width && clientX >= r.left && clientX <= r.right && clientY >= r.top && clientY <= r.bottom) return el;
+      }
+      return null;
     }
+    function insideReader(target, clientX, clientY){ return !!readerAt(target, clientX, clientY); }
     els.stage.addEventListener('wheel', (e) => {
       // deltaMode 1 = lines, 2 = pages. Firefox reports line deltas for real
       // mouse wheels, which are ~50x smaller than the pixel deltas this spin
@@ -681,7 +825,7 @@
       }
       state.velocity = Math.max(-30, Math.min(30, state.velocity + dy * 0.02 * state.gestureGain));
     }, { passive: false });
-    function ctx(e){ return { level: state.view.level, insideReader: insideReader(e.target) }; }
+    function ctx(e){ return { level: state.view.level, insideReader: insideReader(e.target, e.clientX, e.clientY) }; }
     // The stage covers most of the window but not the chrome bar or the HUD, and
     // Ctrl+wheel there browser-zooms the whole app — which a fixed-position 3D
     // scene does not survive gracefully. Suppress it document-wide (the modal is
@@ -705,6 +849,7 @@
       if (pointers.size === 2) {
         const [a, b] = [...pointers.values()];
         pinchStart = Math.hypot(a.x - b.x, a.y - b.y);
+        endReaderDrag(); // a pinch outranks a reader scroll
       } else if (pointers.size === 1) {
         dragMoved = 0;
         state.dragAccum = 0; // a fresh press must not inherit a residue banked by the wheel
@@ -717,17 +862,85 @@
         // geometrically in cardIndexAtPoint instead.
         pressTarget = e.target instanceof Element ? e.target : null;
         // A horizontal drag spins at every level, reader included (spec: hdrag ->
-        // spin). Only a mouse is exempt inside the reader, where press-and-drag is
-        // how text gets selected; touch has no such conflict — it scrolls the
-        // reader vertically via touch-action:pan-y and spins horizontally here.
-        if (!insideReader(e.target) || e.pointerType !== 'mouse') { state.dragging = true; state.velocity = 0; state.stepTarget = null; }
+        // spin). Only a mouse is exempt inside the reader, where press-and-drag
+        // is how text gets selected.
+        //
+        // A non-mouse press inside a scrollable reader commits to NOTHING yet.
+        // This used to arm the spin immediately, on the assumption that touch
+        // "scrolls the reader vertically via touch-action:pan-y and spins
+        // horizontally here" — true in Blink, false on iOS/WebKit inside the
+        // preserve-3d card stack, where the native pan never happens and the
+        // vertical read-swipe therefore spun the drum instead (device-tested,
+        // iPhone 15 / iOS 26.5.2). Now the axis decides, and a vertical swipe
+        // scrolls the reader by hand. See beginReaderDrag.
+        const reader = readerAt(e.target, e.clientX, e.clientY);
+        if (reader && e.pointerType !== 'mouse') beginReaderDrag(reader, e);
+        else if (!reader || e.pointerType !== 'mouse') { state.dragging = true; state.velocity = 0; state.stepTarget = null; }
       }
     });
+    // ---------- input: reader drag (the touch half of `scrollContent`) ----------
+    // routeGesture has always mapped vswipe-inside-the-reader to 'scrollContent',
+    // but nothing ever dispatched a vswipe from a pointer event: scrolling was
+    // left entirely to the browser's own panning of the .reader-scroll box.
+    // Blink honours that; WebKit does not honour it inside the rotated
+    // preserve-3d card, so the swipe fell through to the drum. Rather than chase
+    // which WebKit rule is responsible, drive scrollTop here — that is correct in
+    // every engine — and stand down the moment the browser proves it is doing the
+    // scrolling itself, so Blink's native path is left exactly as it was.
+    let readerDrag = null;
+    function beginReaderDrag(el, e){
+      // A press arrests the drum whatever it goes on to mean, exactly as a
+      // press outside the reader always has.
+      state.velocity = 0;
+      state.stepTarget = null;
+      readerDrag = { el, lastY: e.clientY, axis: 'undecided', native: false };
+      readerDrag.onScroll = () => { if (readerDrag) readerDrag.native = true; };
+      el.addEventListener('scroll', readerDrag.onScroll, { passive: true });
+    }
+    function endReaderDrag(){
+      if (!readerDrag) return;
+      readerDrag.el.removeEventListener('scroll', readerDrag.onScroll);
+      readerDrag = null;
+    }
+    // Hands the gesture to the drum, exactly as a press outside the reader would.
+    function readerDragToSpin(){
+      endReaderDrag();
+      state.dragging = true;
+      state.velocity = 0;
+      state.stepTarget = null;
+    }
     els.stage.addEventListener('pointermove', (e) => {
       const prev = pointers.get(e.pointerId);
       if (!prev) return;
       const dx = e.clientX - prev.x, dy = e.clientY - prev.y;
       pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (readerDrag && pointers.size === 1) {
+        // Net displacement from the press origin, same rule as the spin path.
+        // This MUST keep running even while the reader scrolls: the click
+        // handler gates on dragMoved > 8, so a scroll that left it at 0 would
+        // release into a dive and throw the reader away mid-sentence.
+        const ndx = e.clientX - dragOrigin.x, ndy = e.clientY - dragOrigin.y;
+        dragMoved = Math.max(dragMoved, Math.abs(ndx) + Math.abs(ndy));
+        if (readerDrag.axis === 'undecided') {
+          const axis = H.classifyDragAxis(ndx, ndy);
+          if (axis !== 'undecided') {
+            readerDrag.axis = axis;
+            if (H.routeDragAxis(axis, { level: state.view.level, insideReader: true }) !== 'scrollContent') {
+              readerDragToSpin();
+              return; // the deciding move only decides; the next one spins
+            }
+          }
+          if (readerDrag) readerDrag.lastY = e.clientY;
+          return; // likewise: never scroll on the move that picked the axis, or
+                  // Blink would apply this delta AND then pan natively on top
+        }
+        // `native` flips as soon as the browser emits a scroll of its own for
+        // this gesture. Blink cancels the pointer stream and takes over after
+        // one move, so in practice this branch never runs there.
+        if (!readerDrag.native) readerDrag.el.scrollTop -= e.clientY - readerDrag.lastY;
+        readerDrag.lastY = e.clientY;
+        return;
+      }
       if (pointers.size === 2 && pinchStart > 0) {
         const [a, b] = [...pointers.values()];
         const ratio = Math.hypot(a.x - b.x, a.y - b.y) / pinchStart;
@@ -772,7 +985,7 @@
     function releasePointer(e){
       pointers.delete(e.pointerId);
       if (pointers.size < 2) pinchStart = 0;
-      if (!pointers.size) state.dragging = false;
+      if (!pointers.size) { state.dragging = false; endReaderDrag(); }
     }
     // Bound to window, not the stage: a release outside the stage must still
     // clear state.dragging, or tick() short-circuits forever and the drum
@@ -810,7 +1023,11 @@
         return { sx: originX + x * s, s, z };
       };
       let best = -1, bestZ = -Infinity;
-      for (let i = 0; i < n; i++) {
+      // Only cards actually in the DOM are candidates: resolving a click to a
+      // windowed-out card would select something that is not on screen. Anchored
+      // on drumAnchor, not frontIndex, because that is what the window was cut
+      // around and the two differ by up to DRUM_SLACK between re-cuts.
+      for (const i of windowIndices(n, state.drumAnchor ?? state.frontIndex, state.layout.mode)) {
         const a = (state.rotation + angles[i]) * Math.PI / 180;
         if (Math.cos(a) <= 0.05) continue; // facing away or edge-on: not clickable
         const L = project(-cardW / 2, a), R = project(cardW / 2, a);
@@ -1167,16 +1384,76 @@
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       state.snapshot = await res.json();
     }
+    // ---------- nav persistence ----------
+    // The navigation tree was deliberately in-memory: on a desktop the page
+    // never goes away on its own, so there was nothing to survive. On iOS the
+    // tab's renderer can be jettisoned under memory pressure and silently
+    // reloaded, and every one of those took the whole exploration with it —
+    // reported repeatedly from a real iPhone, never once from a desktop.
+    // Preventing the reload is a separate fight (heartbeat, rebuild
+    // suppression, and windowing still to come); this makes losing it survivable,
+    // which is the part that can be guaranteed.
+    // sessionStorage is the right scope: it survives a reload, INCLUDING a
+    // crash-reload, but not a deliberately opened new tab — so "a fresh tab
+    // starts at the root" stays true, and only an unasked-for reload resumes.
+    const NAV_KEY = 'nd-mem-rolodex-nav';
+    const NAV_VERSION = 1;
+    let persistTimer = null;
+    let navRestored = false;
+    function persistNav(){
+      if (persistTimer !== null) { clearTimeout(persistTimer); persistTimer = null; }
+      try {
+        // The tree references nodes by id (parentId/childIds), never by object
+        // reference, so it is plain acyclic JSON.
+        sessionStorage.setItem(NAV_KEY, JSON.stringify({ v: NAV_VERSION, tree: state.tree, view: currentViewSnapshot() }));
+      } catch { /* private mode or over quota: navigation still works, it just will not survive a reload */ }
+    }
+    function schedulePersist(){
+      // updateChrome runs on every front-card change — many times a second
+      // while a drum spins — so coalesce instead of writing on each one.
+      if (persistTimer === null) persistTimer = setTimeout(persistNav, 500);
+    }
+    // A jettison is preceded by backgrounding far more often than not, and
+    // pagehide is the last event Safari reliably delivers. Flush synchronously
+    // rather than trusting the 500ms timer to have fired.
+    addEventListener('pagehide', persistNav);
+    addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') persistNav(); });
+    function restoreNav(){
+      let saved = null;
+      try { saved = JSON.parse(sessionStorage.getItem(NAV_KEY) || 'null'); } catch { return false; }
+      if (!saved || saved.v !== NAV_VERSION || !saved.view) return false;
+      const t = saved.tree;
+      // Validate rather than trust: a half-written or older-shaped entry must
+      // degrade to a normal cold start, never throw the page into a broken tree.
+      if (!t || !Array.isArray(t.nodes) || !t.nodes.length || typeof t.cursor !== 'number') return false;
+      if (!t.nodes.every(n => n && typeof n.id === 'number' && Array.isArray(n.childIds) && n.view)) return false;
+      if (!t.nodes.some(n => n.id === t.cursor)) return false; // the cursor has to resolve
+      state.tree = t;
+      state.view = saved.view;
+      // Rotation is deliberately NOT restored: buildDrum recomputes it from
+      // centeredId, and that precondition is the page's oldest invariant.
+      return true;
+    }
+
     async function init(){
       try {
         const health = await (await fetch(`${BRIDGE}/health`)).json();
         await loadSnapshot();
         els.connState.textContent = `Bridge :${health.port}`;
         els.overlay.classList.remove('open');
+        // Only on the FIRST init. Retry re-runs this after the bridge came back,
+        // and by then the live tree is newer than anything on disk.
+        let resumed = false;
+        if (!navRestored) { navRestored = true; resumed = restoreNav(); }
         // Retry runs init() again after the bridge came back, possibly against a
         // store that moved on. Reconciling (rather than rebuilding blind) keeps
-        // the level, history and centered card the user left behind.
+        // the level, history and centered card the user left behind — and does
+        // the same job for a restored session, whose memories may well have
+        // changed while the tab was gone.
         refreshAndReconcile();
+        // Only say so when there was real depth to lose. Resuming at the root is
+        // indistinguishable from a cold start, so announcing it is just noise.
+        if (resumed && depthNow() > 0) showToast('Picked up where you left off.');
       } catch {
         els.connState.textContent = 'Offline';
         els.overlay.classList.add('open');
