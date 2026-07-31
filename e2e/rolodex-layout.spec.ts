@@ -172,3 +172,49 @@ test('the branch map labels its nodes as text, not only as tooltips', async ({ p
   expect(labels.every((l) => l.trim().length > 0)).toBe(true);
   expect(labels.every((l) => l.length <= 10), `labels over 10 chars: ${labels}`).toBe(true);
 });
+
+// Outer cards carry no interactive signal at all. The fix is a chevron that is
+// a SIGN, not a control: Chromium cannot hit-test 3D-rotated cards, so a real
+// element here would swallow the click that dives.
+test('outer cards show a chevron that never steals the click', async ({ page }) => {
+  const marker = await page.evaluate(() => {
+    const card = document.querySelector('#drum .card3d:not(.front)');
+    if (!card) return null;
+    const after = getComputedStyle(card, '::after');
+    return { content: after.content, pointerEvents: after.pointerEvents };
+  });
+  expect(marker, 'a non-front card should exist to carry the affordance').not.toBeNull();
+  expect(marker!.content).not.toBe('none');
+  expect(marker!.pointerEvents, 'the chevron must never be a hit target').toBe('none');
+
+  // The front card must NOT carry it — it has real buttons instead.
+  const frontContent = await page.evaluate(() =>
+    getComputedStyle(document.querySelector('#drum .card3d.front')!, '::after').content);
+  expect(frontContent).toBe('none');
+});
+
+// The existing diveToMemories helper clicks the centre card, which never
+// exercises an outer one. Click directly over where the chevron is drawn to
+// prove the pseudo-element is not swallowing the tap meant for the card.
+test('clicking an outer card on its chevron still centres and dives', async ({ page }) => {
+  const before = await page.evaluate(() => (document.querySelector('#stage') as HTMLElement).dataset.level);
+  const box = await page.evaluate(() => {
+    const card = document.querySelector('#drum .card3d:not(.front)');
+    if (!card) return null;
+    const r = card.getBoundingClientRect();
+    // Bottom-right corner, where the ::after is drawn.
+    return { x: r.right - 20, y: r.bottom - 16, w: r.width };
+  });
+  // A card fanned at a steep angle can have most of its box off-canvas even
+  // though its DOM width is comfortably wide (measured: 323px wide, corner at
+  // x=670 against a 393px-wide iPhone 15 viewport). A point outside the
+  // viewport is exactly as unclickable to a real thumb as it is to
+  // page.mouse.click, so the guard must check on-screen-ness, not just width.
+  const vp = page.viewportSize();
+  const onScreen = !!box && !!vp && box.x >= 0 && box.x <= vp.width && box.y >= 0 && box.y <= vp.height;
+  test.skip(!box || box.w < 20 || !onScreen, 'no outer card presents an on-screen, flat-enough corner to click at this viewport');
+  await page.mouse.click(box!.x, box!.y);
+  await page.waitForTimeout(1700);
+  const after = await page.evaluate(() => (document.querySelector('#stage') as HTMLElement).dataset.level);
+  expect(after, 'the chevron swallowed the click instead of the card taking it').not.toBe(before);
+});
