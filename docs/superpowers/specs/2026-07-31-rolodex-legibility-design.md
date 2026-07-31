@@ -158,14 +158,21 @@ so the deferred floor chevrons drop in without relayout.
 Truncated `<text>` beside every node, with the untruncated value retained in
 the existing `<title>`.
 
-- **Labels truncate to 12 characters** (middle-elided, so
-  `twg-progressiongraph` → `twg-…ngraph` and `logical_analysis` →
-  `logic…lysis` — the tail disambiguates district names, which share long
-  prefixes far less than they share suffixes, while the head keeps project
-  ids recognisable). At `.62rem` monospace that is ~52px, so column pitch
-  goes 26px → 68px and `#mapBody` max-width goes 180px → 260px. The existing
+- **Labels truncate to 10 characters**, middle-elided, so
+  `twg-progressiongraph` → `twg-…graph` and `logical_analysis` →
+  `logi…ysis`. Middle rather than tail because district names share long
+  prefixes (`practical_execution` / `logical_analysis` diverge early, but
+  `vigilant_monitoring` truncated to a head alone loses the word that
+  distinguishes it), while the head keeps project ids recognisable.
+- At `.6rem` monospace a 10-char label is ~58px. Measured from a node
+  centre: `r=5` + a 4px gap + 58px = ~67px, so **`MINIMAP_COL` goes 46px →
+  76px** and `#mapBody` max-width goes 180px → 260px. The existing
   `overflow:auto` and frontier auto-scroll (`scrollLeft = scrollWidth`)
   already handle the wider tree.
+
+  > `MINIMAP_COL` is **46**, not the 26 named in the comment above it —
+  > 26 is a superseded value the comment preserves as rationale. Anything
+  > deriving from the pitch must read the constant, not the comment.
 - **Every node is labelled, including abandoned branches.** Labelling only the
   active path would leave the map unable to answer what a branch you left
   actually was — which is the map's entire reason to exist.
