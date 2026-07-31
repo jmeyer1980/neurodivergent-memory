@@ -20,13 +20,27 @@ const USER_HOME = os.homedir();
 const DEFAULT_MEMORY_PATH = path.join(USER_HOME, '.neurodivergent-memory', 'memories.json');
 const MEMORY_PATH = process.env.ND_MEM_FILE || DEFAULT_MEMORY_PATH;
 const POLL_MS = Number(process.env.ND_MEM_POLL_MS || 1500);
+// An SSE stream that says nothing between memory writes is an idle TCP
+// connection, and phones reap those: wifi power-save and carrier NAT drop them
+// after tens of seconds, where a desktop holds them for many minutes. Measured
+// on this server: 57.5 seconds of complete silence in a 60-second idle window.
+// Every reap costs the page a reconnect, and a reconnect costs it a full
+// snapshot refetch plus a whole drum rebuild — which is why the rolodex
+// "randomly reloaded" on an iPhone and never once on the desktop. A comment
+// frame is ignored by EventSource and keeps the connection warm.
+const HEARTBEAT_MS = Number(process.env.ND_MEM_BRIDGE_HEARTBEAT_MS || 20000);
 
 app.use(cors());
 app.use(express.json({ limit: '2mb' }));
 
 let clients = new Set();
-let lastFingerprint = null;
-let lastMtimeMs = 0;
+// Seeded from the file as it stands at startup, NOT null/0. Seeded empty, the
+// first poll tick 1.5s later always found "a change" and broadcast a
+// memory-change nothing had caused (measured: identical mtime and size either
+// side of it). Every connected page then refetched the whole snapshot and
+// rebuilt its drum for nothing.
+let lastFingerprint = statFingerprint();
+let lastMtimeMs = currentMtimeMs();
 
 function readSnapshot() {
   if (!fs.existsSync(MEMORY_PATH)) return { nextMemoryId: 1, memories: {}, missing: true, path: MEMORY_PATH };
@@ -44,6 +58,10 @@ function statFingerprint() {
   }
 }
 
+function currentMtimeMs() {
+  try { return fs.statSync(MEMORY_PATH).mtimeMs; } catch { return 0; }
+}
+
 function broadcast(event, data) {
   const payload = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
   for (const client of clients) client.write(payload);
@@ -53,8 +71,7 @@ function pollForChanges() {
   const fingerprint = statFingerprint();
   if (fingerprint === lastFingerprint) return;
   lastFingerprint = fingerprint;
-  let mtimeMs = 0;
-  try { mtimeMs = fs.statSync(MEMORY_PATH).mtimeMs; } catch {}
+  const mtimeMs = currentMtimeMs();
   if (mtimeMs === lastMtimeMs && fingerprint !== 'missing') return;
   lastMtimeMs = mtimeMs;
   broadcast('memory-change', { path: MEMORY_PATH, fingerprint, changedAt: new Date().toISOString() });
@@ -72,7 +89,14 @@ app.get('/events', (req, res) => {
   });
   res.write(`event: hello\ndata: ${JSON.stringify({ path: MEMORY_PATH, pollMs: POLL_MS })}\n\n`);
   clients.add(res);
-  req.on('close', () => clients.delete(res));
+  // See HEARTBEAT_MS. A `:` frame is an SSE comment: it reaches no listener and
+  // costs 15 bytes, but it keeps the socket from going idle long enough to be
+  // reaped on a phone. unref() so a live stream cannot hold the process open.
+  const heartbeat = setInterval(() => {
+    try { res.write(': keepalive\n\n'); } catch { /* the close handler cleans up */ }
+  }, HEARTBEAT_MS);
+  heartbeat.unref?.();
+  req.on('close', () => { clearInterval(heartbeat); clients.delete(res); });
 });
 
 // Single-writer architecture: the bridge owns NO memory process. Every write
