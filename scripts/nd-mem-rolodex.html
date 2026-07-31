@@ -110,7 +110,14 @@
     .span2{grid-column:span 2}
     .foot{display:flex;justify-content:flex-end;gap:10px;margin-top:16px}
     .hint{color:var(--muted);font-size:.82rem;line-height:1.5;margin-top:10px}
-    #hud{position:fixed;inset:auto 0 0 0;z-index:10;display:flex;justify-content:center;padding:16px;pointer-events:none}
+    #hud{position:fixed;inset:auto 0 0 0;z-index:10;display:flex;justify-content:center;padding:16px;pointer-events:none;gap:10px;flex-wrap:wrap}
+    /* Shown only at the wall: at depth the card needs the room more than a
+       first-timer needs the premise restated. */
+    #wallCopy{max-width:min(560px,92vw);text-align:center;line-height:1.5}
+    /* Document order after Task 5 is #stage, #spin, #hud -- ~ (general
+       sibling) is required here; + (adjacent sibling) would silently never
+       match, since #spin sits between #stage and #hud. */
+    #stage:not([data-level="projects"]) ~ #hud #wallCopy{display:none}
     /* A 3x3 grid where only the middle row's outer cells are filled. The middle
        COLUMN's outer rows are deliberately left empty: that is the reserved
        slot for the deferred floor chevrons, so adding them is an insertion
@@ -177,9 +184,9 @@
     }
     /* A phone held sideways: plenty of width, almost no height. Nothing here is
        about width — it is about buying the card back the vertical space the
-       chrome and the hint bar were taking. The hint goes entirely: it is four
-       clauses of desktop instructions ("right-click", "Ctrl+scroll") that mean
-       nothing to a thumb, and at 393px tall it was sitting on the card. */
+       chrome and the hint bar were taking. The hint goes entirely: at 393px
+       tall it was sitting on the card, and landscape has no room to spare for
+       it — the ? panel is where a landscape user gets the full story. */
     @media (max-height: 500px){
       #chrome{padding:8px 12px;row-gap:6px}
       #chrome .pill{padding:6px 10px;font-size:.74rem}
@@ -205,6 +212,7 @@
     </div>
     <div class="cluster">
       <span class="pill" id="connState">Connecting…</span>
+      <button class="pill" id="helpBtn" title="What is this?" aria-label="What is this?">?</button>
       <button class="pill" id="themeBtn" title="Toggle theme">◐</button>
       <a class="pill" href="/">Classic view</a>
     </div>
@@ -215,7 +223,7 @@
     <button class="pill spinBtn" id="spinPrev" aria-label="Previous card">◀</button>
     <button class="pill spinBtn" id="spinNext" aria-label="Next card">▶</button>
   </div>
-  <div id="hud"><span class="pill" id="hudHint"></span></div>
+  <div id="hud"><span class="pill" id="wallCopy">Your memory, as a card drum. Spin to browse projects, open one to go deeper: projects → districts → memories.</span><span class="pill" id="hudHint"></span></div>
   <div id="minimap"><div id="mapBody"></div><button class="pill" id="mapToggle" title="Toggle the exploration map">Map 0^0</button></div>
   <div id="overlay"><div class="box"><h2>Bridge offline</h2><p id="overlayMsg">Could not reach the bridge. Start it with <code>node scripts/nd-mem-bridge-server.mjs</code> and retry.</p><button class="btn primary" id="retryBtn">Retry</button></div></div>
   <div class="modalbg" id="editModalBg">
@@ -243,6 +251,16 @@
       <div class="foot"><button class="btn" id="renameCancelBtn">Cancel</button><button class="btn primary" id="renameGoBtn">Rename</button></div>
     </div>
   </div>
+  <div class="modalbg" id="helpModalBg">
+    <div class="modal">
+      <h2>What this is</h2>
+      <p class="hint">Every memory you have stored, arranged as a drum of cards. You move through it in three levels — <strong>projects → districts → memories</strong> — and diving past the last one wraps you back to the first.</p>
+      <p class="hint"><strong>The location band</strong> at the top is where you are. <code>0^2</code> is your depth: how many times you have dived from the start. Each segment after it is a step you can click to jump straight back to.</p>
+      <p class="hint"><strong>The branch map</strong> on the left records every dive this session, including the ones you backed out of. Any node jumps you there, so an abandoned path is never lost.</p>
+      <p class="hint" id="helpGestures"></p>
+      <div class="foot"><button class="btn primary" id="helpCloseBtn">Got it</button></div>
+    </div>
+  </div>
   <div id="toast"></div>
 
   <script type="module">
@@ -259,7 +277,7 @@
     const NODE_LABEL_PX = 58; // 10 monospace chars at .6rem; see truncateNodeLabel
 
     const $ = s => document.querySelector(s);
-    const els = { stage: $('#stage'), scene: $('#scene'), drum: $('#drum'), crumb: $('#crumb'), position: $('#position'), connState: $('#connState'), backBtn: $('#backBtn'), overlay: $('#overlay'), overlayMsg: $('#overlayMsg'), retryBtn: $('#retryBtn'), toast: $('#toast'), hudHint: $('#hudHint'), minimap: $('#minimap'), mapBody: $('#mapBody'), mapToggle: $('#mapToggle'), spin: $('#spin'), spinPrev: $('#spinPrev'), spinNext: $('#spinNext') };
+    const els = { stage: $('#stage'), scene: $('#scene'), drum: $('#drum'), crumb: $('#crumb'), position: $('#position'), connState: $('#connState'), backBtn: $('#backBtn'), overlay: $('#overlay'), overlayMsg: $('#overlayMsg'), retryBtn: $('#retryBtn'), toast: $('#toast'), hudHint: $('#hudHint'), minimap: $('#minimap'), mapBody: $('#mapBody'), mapToggle: $('#mapToggle'), spin: $('#spin'), spinPrev: $('#spinPrev'), spinNext: $('#spinNext'), helpBtn: $('#helpBtn'), helpModalBg: $('#helpModalBg') };
 
     // Three hand-tuned offsets (64/108/56) each encoded a guess at how tall
     // #chrome renders at that breakpoint. The band would have needed a fourth.
@@ -1537,6 +1555,17 @@
       if (e.key !== 'Escape') return;
       e.stopPropagation();
       $('#editModalBg').classList.remove('open');
+    });
+
+    // The gesture line is generated, not written twice: it must agree with the
+    // hint bar, and the hint bar is already the single source for that wording.
+    els.helpBtn.addEventListener('click', () => {
+      $('#helpGestures').textContent = H.hintFor(state.view.level, POINTER_KIND);
+      els.helpModalBg.classList.add('open');
+    });
+    $('#helpCloseBtn').addEventListener('click', () => els.helpModalBg.classList.remove('open'));
+    els.helpModalBg.addEventListener('click', (e) => {
+      if (e.target === els.helpModalBg) els.helpModalBg.classList.remove('open');
     });
 
     // ---------- data ----------

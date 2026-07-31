@@ -373,3 +373,25 @@ test('the spin controls stay on screen and clear of the cards', async ({ page })
     expect(geom.clearOfCard, `spin controls overlapped the card at ${vp.width}x${vp.height}`).toBe(true);
   }
 });
+
+// "Need a little more context as to what we are trying to achieve here as a
+// user." Nothing on the page answered that.
+test('the wall states what this is, and only at the wall', async ({ page }) => {
+  const atWall = await page.locator('#wallCopy').isVisible();
+  expect(atWall, 'the root view should carry orienting copy').toBe(true);
+  await expect(page.locator('#wallCopy')).toContainText(/spin/i);
+
+  test.slow();
+  expect(await diveToMemories(page)).toBe('memories');
+  expect(await page.locator('#wallCopy').isVisible(),
+    'orienting copy must not compete for space at depth').toBe(false);
+});
+
+test('the help panel opens, explains the coordinate, and closes on Escape', async ({ page }) => {
+  await page.locator('#helpBtn').click();
+  await expect(page.locator('#helpModalBg')).toHaveClass(/open/);
+  // The band deliberately does not explain 0^N inline; this is where it lives.
+  await expect(page.locator('#helpModalBg')).toContainText('0^');
+  await page.keyboard.press('Escape');
+  await expect(page.locator('#helpModalBg')).not.toHaveClass(/open/);
+});
