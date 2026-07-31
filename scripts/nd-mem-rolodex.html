@@ -39,7 +39,10 @@
     #locus{flex:1 1 100%;display:flex;align-items:baseline;gap:10px;min-width:0;pointer-events:auto;
       padding:8px 14px;border-radius:16px;border:1px solid var(--surfaceBorder);
       background:var(--surface);backdrop-filter:blur(10px)}
-    #crumb{flex:1 1 auto;min-width:0;display:flex;flex-wrap:wrap;align-items:baseline;gap:0 2px;
+    /* row-gap is nonzero, not 0: wrapping is the everyday case now (Finding 1,
+       task-4 review round 2), not a rare fallback, so two wrapped lines need
+       real leading or they read as one squashed block. */
+    #crumb{flex:1 1 auto;min-width:0;display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 2px;
       font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:.95rem;
       letter-spacing:.02em;color:var(--text)}
     #crumb .seg{background:none;border:0;padding:0 2px;font:inherit;color:var(--muted);cursor:pointer;
@@ -165,10 +168,16 @@
       #chrome .pill{padding:6px 10px;font-size:.74rem}
       #hudHint{display:none}
       #minimap{bottom:48px}
-      /* Landscape has width to spare and no height at all: the band goes back
-         inline rather than claiming a second row. */
+      /* Landscape has width to spare but not much height, so the band trims
+         its own padding rather than claiming extra vertical space. It still
+         WRAPS, never truncates: nowrap+overflow:hidden here used to ellipsise
+         the coordinate routinely (not just pathologically) once a real
+         project/district name ran past the narrowed width -- exactly the
+         "0^2 > proj_a >…" defect this task exists to fix. A wrapped second
+         line costs ~16px of a ~393px-tall viewport, which is worth it; the
+         hint bar above already gave back its own row. */
       #locus{flex:1 1 auto;padding:5px 10px}
-      #crumb{font-size:.82rem;flex-wrap:nowrap;overflow:hidden}
+      #crumb{font-size:.82rem}
     }
   </style>
 </head>

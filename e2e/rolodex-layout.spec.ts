@@ -258,15 +258,56 @@ test('one band owns the location, and says the depth once', async ({ page }) => 
   expect((band.text.match(/0\^\d+/g) ?? []).length).toBe(1);
 });
 
+// Review round 2, Finding 2: the original version of this test only checked that
+// #locus's own box stayed inside the viewport at the (unnavigated) root level.
+// #locus is pinned to its row's width by flex-basis:100%+min-width:0 regardless
+// of its children's content, and the root coordinate is the SHORTEST one the app
+// ever shows -- so that version could not fail from a wrapping regression; the
+// sibling "chrome bar ... small phone" test already covers the same two facts at
+// the same viewport. This version instead measures the thing the spec actually
+// mandates ("wrap, never ellipsise") on the coordinate's full, real length.
+//
+// "More than one line" is checked via each segment's own getBoundingClientRect().top
+// rather than #crumb.getClientRects().length or #crumb.scrollHeight vs an assumed
+// line-height: #crumb is a flex container, and CSS flex-wrap fragments a container
+// into multiple FLEX LINES without fragmenting the container's own box the way
+// wrapped inline text fragments a <span> -- getClientRects() on a block-level flex
+// container reports one rect regardless of how many flex lines it holds, and
+// #crumb has no authored line-height to compare scrollHeight against (its height
+// is driven by flex content, not text leading). Comparing children's own top
+// offsets is a direct, engine-agnostic read of whether a second flex line
+// actually rendered.
+//
+// The second viewport is 500x393, not the suite's usual 737x393 "phone
+// landscape, safe-area inset": measured directly, #locus does not share its
+// row with the two .cluster pills at 737px -- it wraps to a row of its own and
+// flex-grows to ~713px wide, so this store's real coordinate (project + district
+// name, ~40-60 chars combined) fits on one line there with or without the
+// Finding-1 fix, and 737px cannot exercise the regression at all with real
+// data. 500px sits inside both the max-width:560px and max-height:500px
+// breakpoints together (a landscape-shaped viewport narrow enough to matter --
+// e.g. a compact device or a split-screen pane), and was confirmed by direct
+// measurement (both projects) to force a genuine second line with zero
+// ellipsis under the fix. See the fix report for the reintroduced-nowrap
+// failure demonstration.
 test('the location band wraps instead of escaping a narrow viewport', async ({ page }) => {
-  await page.setViewportSize({ width: 320, height: 568 });
-  await page.evaluate(() => {
-    document.querySelector('#position')!.textContent = 'card 124 of 124';
-  });
-  const fits = await page.evaluate(() => {
-    const r = document.querySelector('#locus')!.getBoundingClientRect();
-    return { right: r.right, left: r.left, w: window.innerWidth };
-  });
-  expect(fits.right).toBeLessThanOrEqual(fits.w + 0.5);
-  expect(fits.left).toBeGreaterThanOrEqual(-0.5);
+  test.slow();
+  expect(await diveToMemories(page)).toBe('memories');
+  for (const vp of [
+    { name: 'small phone portrait', width: 320, height: 568 },
+    { name: 'narrow landscape (max-height:500px breakpoint)', width: 500, height: 393 },
+  ]) {
+    await page.setViewportSize({ width: vp.width, height: vp.height });
+    const wrap = await page.evaluate(() => {
+      const segs = [...document.querySelectorAll('#crumb .seg')] as HTMLElement[];
+      const lines = new Set(segs.map((s) => Math.round(s.getBoundingClientRect().top)));
+      const ellipsised = segs
+        .filter((s) => s.scrollWidth > s.clientWidth + 0.5)
+        .map((s) => s.textContent);
+      return { segCount: segs.length, lineCount: lines.size, ellipsised };
+    });
+    expect(wrap.segCount, `expected the full coordinate (>1 segment) at ${vp.name}`).toBeGreaterThan(1);
+    expect(wrap.lineCount, `the coordinate should wrap onto more than one line at ${vp.name}`).toBeGreaterThan(1);
+    expect(wrap.ellipsised, `no segment should be truncated with an ellipsis at ${vp.name}`).toEqual([]);
+  }
 });
