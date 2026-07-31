@@ -244,6 +244,15 @@
     function esc(v){ return String(v ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
     function showToast(msg){ els.toast.textContent = msg; els.toast.classList.add('show'); clearTimeout(showToast.t); showToast.t = setTimeout(() => els.toast.classList.remove('show'), 3200); }
     function fmt(v){ try { return new Date(v).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }); } catch { return '—'; } }
+    // Intensity is a 0-1 float and was rendered raw, so any value that is not
+    // exactly representable arrived on the card as "0.8999999999999999".
+    // Two decimals is more precision than the field carries; trailing zeros go
+    // so 0.9 does not become "0.90".
+    function fmtNum(v){
+      if (v === null || v === undefined || v === '') return '—';
+      const n = Number(v);
+      return Number.isFinite(n) ? n.toFixed(2).replace(/\.?0+$/, '') || '0' : String(v);
+    }
 
     function itemsForView(view){
       if (view.level === 'projects') return H.deriveProjects(state.snapshot).map(p => ({ id: p.id, kind: 'project', data: p }));
@@ -289,7 +298,7 @@
         + `<h2>${esc(d.name || '(untitled)')}</h2>`
         + `<p class="preview">${esc(String(d.content ?? '').slice(0, 300))}</p>`
         + `<div class="reader-scroll"></div>`
-        + `<div class="meta">${metaRow('Intensity', d.intensity ?? '—')}${metaRow('Visibility', d.visibility || 'private')}${metaRow('Created', fmt(d.created))}${metaRow('Tags', (d.tags || []).length)}</div>`
+        + `<div class="meta">${metaRow('Intensity', fmtNum(d.intensity))}${metaRow('Visibility', d.visibility || 'private')}${metaRow('Created', fmt(d.created))}${metaRow('Tags', (d.tags || []).length)}</div>`
         + `<div class="chips">${(d.tags || []).slice(0, 4).map(t => `<span class="chip">${esc(t)}</span>`).join('')}</div>`
         + `<div class="actions"><button class="btn" data-edit="${esc(d.id)}">Edit</button></div>`;
     }
