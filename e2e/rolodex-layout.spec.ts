@@ -1,0 +1,145 @@
+import { test, expect, type Page } from '@playwright/test';
+
+/**
+ * Guards the invariants that only a real browser can see. Each one here failed
+ * in production at least once and was found by clicking, not by node:test.
+ */
+
+/** Every pill in the chrome bar, with whether it escaped the viewport. */
+async function chromeBar(page: Page) {
+  return page.evaluate(() => {
+    const chrome = document.querySelector('#chrome')!;
+    const shown = (el: Element) => getComputedStyle(el).display !== 'none';
+    const pills = [...chrome.querySelectorAll('.pill')].filter(shown).map((el) => {
+      const r = el.getBoundingClientRect();
+      return {
+        id: (el as HTMLElement).id || (el.textContent ?? '').trim().slice(0, 12),
+        left: r.left, right: r.right, top: r.top, bottom: r.bottom,
+        offscreen: r.right > window.innerWidth + 0.5 || r.left < -0.5,
+      };
+    });
+    const overlaps: string[] = [];
+    for (let i = 0; i < pills.length; i++) {
+      for (let j = i + 1; j < pills.length; j++) {
+        const a = pills[i], b = pills[j];
+        if (a.right > b.left + 0.5 && b.right > a.left + 0.5 && a.bottom > b.top + 0.5 && b.bottom > a.top + 0.5) {
+          overlaps.push(`${a.id} over ${b.id}`);
+        }
+      }
+    }
+    return { offscreen: pills.filter((p) => p.offscreen).map((p) => p.id), overlaps, ids: pills.map((p) => p.id) };
+  });
+}
+
+/** Clicks the centre card until the memories level is reached. */
+async function diveToMemories(page: Page) {
+  const level = () => page.evaluate(() => (document.querySelector('#stage') as HTMLElement).dataset.level);
+  const box = page.viewportSize()!;
+  for (let i = 0; i < 6 && (await level()) !== 'memories'; i++) {
+    await page.mouse.click(box.width / 2, box.height / 2);
+    await page.waitForTimeout(1700); // two ~700ms zoom halves, plus slack
+  }
+  return level();
+}
+
+test.beforeEach(async ({ page }) => {
+  await page.goto('/rolodex', { waitUntil: 'networkidle' });
+  await page.waitForFunction(() => document.querySelectorAll('#drum .card3d').length > 0, null, { timeout: 15_000 });
+});
+
+// The chrome bar wanted 575px of controls against a 393px phone, leaving three
+// controls past the right edge and untappable. Landscape then reproduced it at
+// ~737-852px, because "narrow" had been treated as the only way to overflow.
+for (const vp of [
+  { name: 'phone portrait', width: 393, height: 852 },
+  { name: 'phone landscape', width: 852, height: 393 },
+  { name: 'phone landscape, safe-area inset', width: 737, height: 393 },
+  { name: 'small phone', width: 320, height: 568 },
+  { name: 'desktop', width: 1440, height: 900 },
+]) {
+  test(`chrome bar keeps every control on screen: ${vp.name}`, async ({ page }) => {
+    await page.setViewportSize({ width: vp.width, height: vp.height });
+    // Worst realistic content, not whatever the root view happens to show.
+    await page.evaluate(() => {
+      document.querySelector('#position')!.textContent = 'card 124 / 124';
+      document.querySelector('#connState')!.textContent = 'Bridge :3799';
+    });
+    const bar = await chromeBar(page);
+    expect(bar.offscreen, `pills off screen at ${vp.width}x${vp.height}`).toEqual([]);
+    expect(bar.overlaps, `pills overlapping at ${vp.width}x${vp.height}`).toEqual([]);
+    // The coordinate is the primary navigation aid and must never be the thing dropped.
+    expect(bar.ids).toContain('crumb');
+  });
+}
+
+// buildDrum used to render every item. The real store has a 364-memory bucket,
+// which meant ~9,100 DOM nodes and as many composited 3D layers in one
+// innerHTML -- half a second of lag, then the tab's renderer was jettisoned.
+test('the drum renders a bounded window regardless of bucket size', async ({ page }) => {
+  test.slow();
+  expect(await diveToMemories(page)).toBe('memories');
+  const stats = await page.evaluate(() => ({
+    rendered: document.querySelectorAll('#drum .card3d').length,
+    total: Number((document.querySelector('#position')!.textContent!.match(/\/\s*(\d+)/) ?? [])[1] ?? 0),
+    domNodes: document.querySelectorAll('*').length,
+    fronts: document.querySelectorAll('#drum .card3d.front').length,
+  }));
+  expect(stats.rendered).toBeLessThanOrEqual(25);
+  expect(stats.rendered).toBeLessThanOrEqual(stats.total);
+  expect(stats.domNodes).toBeLessThan(1000);
+  expect(stats.fronts).toBe(1);
+});
+
+// Windowing broke the old "DOM child i == item i" assumption in three places.
+// Stepping has to keep the selection correct as the window slides, including
+// backwards across the wrap from card 0 to card n-1.
+test('the selected card stays correct as the window slides, including across the wrap', async ({ page }) => {
+  test.slow();
+  expect(await diveToMemories(page)).toBe('memories');
+  const probe = () => page.evaluate(() => {
+    const front = document.querySelector('#drum .card3d.front') as HTMLElement | null;
+    const idxs = [...document.querySelectorAll('#drum .card3d')].map((c) => Number((c as HTMLElement).dataset.idx));
+    return {
+      frontIdx: front ? Number(front.dataset.idx) : -1,
+      expected: Number((document.querySelector('#position')!.textContent!.match(/card\s+(\d+)/) ?? [])[1] ?? 0) - 1,
+      fronts: document.querySelectorAll('#drum .card3d.front').length,
+      rendered: idxs.length,
+      frontIsRendered: front ? idxs.includes(Number(front.dataset.idx)) : false,
+    };
+  });
+  for (const [key, steps] of [['ArrowRight', 20], ['ArrowLeft', 40]] as const) {
+    for (let i = 0; i < steps; i++) {
+      await page.keyboard.press(key);
+      await page.waitForTimeout(80);
+    }
+    const s = await probe();
+    expect(s.fronts, `exactly one front card after ${key}`).toBe(1);
+    expect(s.frontIdx, `front card matches the position readout after ${key}`).toBe(s.expected);
+    expect(s.frontIsRendered, `the front card is inside the rendered window after ${key}`).toBe(true);
+    expect(s.rendered).toBeLessThanOrEqual(25);
+  }
+});
+
+// The nav tree used to live only in memory, so any reload -- including the ones
+// iOS performs on its own after jettisoning the renderer -- lost the whole
+// exploration. It survives now, while a deliberately fresh tab still starts at
+// the root.
+test('an unexpected reload keeps your place', async ({ page }) => {
+  test.slow();
+  expect(await diveToMemories(page)).toBe('memories');
+  for (let i = 0; i < 4; i++) { await page.keyboard.press('ArrowRight'); await page.waitForTimeout(100); }
+  await page.waitForTimeout(800); // the persist write is coalesced at 500ms
+
+  const where = () => page.evaluate(() => ({
+    level: (document.querySelector('#stage') as HTMLElement).dataset.level,
+    crumb: document.querySelector('#crumb')!.textContent!.trim(),
+    map: document.querySelector('#mapToggle')!.textContent!.trim(),
+    position: document.querySelector('#position')!.textContent!.trim(),
+  }));
+  const before = await where();
+  expect(before.map, 'precondition: navigated somewhere with real depth').not.toBe('Map 0^0');
+
+  await page.reload({ waitUntil: 'networkidle' });
+  await page.waitForTimeout(2000);
+  expect(await where()).toEqual(before);
+});

@@ -81,7 +81,8 @@
     "benchmark": "npm run build && node benchmarks/memory-benchmark.mjs",
     "prepare": "npm run build",
     "watch": "tsc --watch",
-    "inspector": "npx @modelcontextprotocol/inspector -e NEURODIVERGENT_MEMORY_MODE=standalone build/index.js"
+    "inspector": "npx @modelcontextprotocol/inspector -e NEURODIVERGENT_MEMORY_MODE=standalone build/index.js",
+    "test:browser": "playwright test"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.29.0",
@@ -90,6 +91,7 @@
     "pino": "^10.3.1"
   },
   "devDependencies": {
+    "@playwright/test": "^1.62.1",
     "@types/node": "^25.5.2",
     "@types/vscode": "1.95.0",
     "typescript": "^6.0.2"
