@@ -9,7 +9,7 @@ import {
   rotationForCard, indexAtRotation, snapRotation, clampRotation,
   LEVELS, nextLevel, createHistory, pushView, popView, atWall,
   itemIdsForView, reconcileView, reconcilePop,
-  routeGesture,
+  routeGesture, DRAG_AXIS_THRESHOLD_PX, classifyDragAxis, routeDragAxis,
 } from '../scripts/nd-mem-rolodex-helpers.mjs';
 
 // Fixture: alpha has 3 memories in 2 districts, beta has 2 (one custom district),
@@ -337,6 +337,48 @@ test('routeGesture implements the spec input map', () => {
   assert.equal(routeGesture('arrowLeft', at('districts')), 'stepPrev');
   assert.equal(routeGesture('arrowRight', at('districts')), 'stepNext');
   assert.equal(routeGesture('bogus', at('projects')), 'none');
+});
+
+test('classifyDragAxis waits for the threshold, then picks the dominant axis', () => {
+  // Below the threshold a gesture has no axis yet. Committing early is how a
+  // vertical read-swipe used to get claimed as a spin on its first jittery pixel.
+  assert.equal(classifyDragAxis(0, 0), 'undecided');
+  assert.equal(classifyDragAxis(4, -6), 'undecided');
+  assert.equal(classifyDragAxis(DRAG_AXIS_THRESHOLD_PX - 1, 0), 'undecided');
+  // At or past it, the larger component wins, in either direction.
+  assert.equal(classifyDragAxis(0, -DRAG_AXIS_THRESHOLD_PX), 'vertical');
+  assert.equal(classifyDragAxis(0, DRAG_AXIS_THRESHOLD_PX), 'vertical');
+  assert.equal(classifyDragAxis(DRAG_AXIS_THRESHOLD_PX, 0), 'horizontal');
+  assert.equal(classifyDragAxis(-DRAG_AXIS_THRESHOLD_PX, 0), 'horizontal');
+  // A thumb sliding up the reader drifts sideways a little; that must stay vertical.
+  assert.equal(classifyDragAxis(3, -40), 'vertical');
+  // A spin drifts vertically a little; that must stay horizontal.
+  assert.equal(classifyDragAxis(-40, 5), 'horizontal');
+  // An exact diagonal is not vertical: spin is the drum's primary gesture and
+  // wins ties, so an ambiguous drag can never silently stop spinning.
+  assert.equal(classifyDragAxis(30, 30), 'horizontal');
+  assert.equal(classifyDragAxis(30, -30), 'horizontal');
+});
+
+test('routeDragAxis feeds the pointer path through the shipped gesture table', () => {
+  // The reason this exists: 'vswipe' -> 'scrollContent' was in routeGesture and
+  // unit-tested from the day it shipped, but NOTHING ever dispatched a vswipe
+  // from a pointer event — touch scrolling was delegated wholesale to the
+  // browser, which does not honour it inside the preserve-3d card stack on
+  // WebKit. This is the missing wire, so the table is finally load-bearing.
+  const at = (level, insideReader = false) => ({ level, insideReader });
+  assert.equal(routeDragAxis('undecided', at('memories', true)), 'wait');
+  assert.equal(routeDragAxis('undecided', at('projects')), 'wait');
+  // The one case the whole fix exists for.
+  assert.equal(routeDragAxis('vertical', at('memories', true)), 'scrollContent');
+  // A reader with nothing to overflow is not a reader: insideReader is false
+  // there, so a vertical drag still spins rather than dying in a dead zone.
+  assert.equal(routeDragAxis('vertical', at('memories', false)), 'spin');
+  assert.equal(routeDragAxis('vertical', at('projects')), 'spin');
+  assert.equal(routeDragAxis('vertical', at('districts')), 'spin');
+  // Horizontal spins everywhere, reader included — unchanged from the spec.
+  assert.equal(routeDragAxis('horizontal', at('memories', true)), 'spin');
+  assert.equal(routeDragAxis('horizontal', at('projects')), 'spin');
 });
 
 import {

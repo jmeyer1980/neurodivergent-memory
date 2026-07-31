@@ -333,6 +333,34 @@ export function routeGesture(kind, ctx) {
   }
 }
 
+// How far a pointer must travel from its press origin before the gesture is
+// committed to an axis. Large enough to survive the sub-pixel wobble that
+// pointer capture delivers on every human press, small enough that the reader
+// starts moving well inside the first thumb-flick.
+export const DRAG_AXIS_THRESHOLD_PX = 10;
+
+// dx/dy are NET displacement from the press origin, never accumulated path
+// length — the same rule the click/drag discrimination uses, and for the same
+// reason (see the note on dragMoved in the page).
+// Ties go to 'horizontal': spin is the drum's primary gesture, so an ambiguous
+// diagonal must never silently stop spinning.
+export function classifyDragAxis(dx, dy, threshold = DRAG_AXIS_THRESHOLD_PX) {
+  const ax = Math.abs(dx), ay = Math.abs(dy);
+  if (Math.max(ax, ay) < threshold) return 'undecided';
+  return ay > ax ? 'vertical' : 'horizontal';
+}
+
+// The pointer path's entry into the gesture table above. 'vswipe' and 'hdrag'
+// were specified and unit-tested from day one, but nothing ever dispatched
+// either of them from a pointer event: touch scrolling was delegated wholesale
+// to the browser's native panning of the reader. That works in Blink and does
+// not on WebKit inside the preserve-3d card stack, where the vertical swipe
+// fell through to the drum and spun it instead. This is the missing wire.
+export function routeDragAxis(axis, ctx) {
+  if (axis === 'undecided') return 'wait';
+  return routeGesture(axis === 'vertical' ? 'vswipe' : 'hdrag', ctx);
+}
+
 // ---------- navigation tree ----------
 // Supersedes the history stack. The cursor's ancestor chain plays exactly the
 // role the stack played (wall, zoom-out, reconciliation), while abandoned
