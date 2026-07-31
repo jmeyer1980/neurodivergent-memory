@@ -33,7 +33,7 @@ a real defect:
 | Breadcrumbs not apparent | Location is split across **three** identical `.pill`s (`#crumb`, `#levelName`, `#position`), none dominant, and `0^N` is printed twice |
 | Cards don't look interactive | Non-front cards are `opacity:.55` with `.actions{display:none}` — an outer card carries **zero** interactive signal |
 | Branch map lacks reference | Nodes are unlabelled 5px circles; the label exists only in an SVG `<title>`, so on touch the map has **no text at all** |
-| No sense of purpose | Nothing states the premise, and `#hudHint` is `display:none` below 560px, so phones get no hints either |
+| No sense of purpose | Nothing states the premise, and the hint bar is wrong or absent on every phone — see §4 |
 
 ## Non-goals
 
@@ -142,9 +142,18 @@ so the deferred floor chevrons drop in without relayout.
 - **No auto-popup.** Nothing interrupts a first visit, and the panel is
   equally available on the fiftieth visit — which a dismissed-once overlay is
   not. No persisted first-run state to get wrong.
-- **`#hudHint` stops hiding below 560px.** Its wording comes from a new pure
-  `hintFor(level, pointerKind)` helper keyed off `(pointer: coarse)`, so
-  phones stop being instructed to right-click and Ctrl+scroll. This closes the
+- **The hint bar gets touch wording.** Precisely what is wrong today:
+  `#hudHint{display:none}` occurs exactly once, in `@media (max-height:500px)`
+  — so **landscape** phones get no hint at all, while **portrait** phones get
+  the bar carrying desktop-only prose ("right-click", "Ctrl+scroll") that
+  means nothing to a thumb. It is not, as first written here, hidden below
+  560px.
+
+  Wording moves to a pure `hintFor(level, pointerKind)` helper keyed off
+  `(pointer: coarse)`. **The landscape hide stays.** It was a deliberate
+  reclamation of vertical space on a viewport where the bar sat on the card
+  at 393px tall, and shorter copy does not make that space free; the `?`
+  panel is where a landscape user gets the full story. This closes the
   standing backlog defect "`#hud` still shows desktop-only hints to touch
   users". Four strings, one per (level × pointerKind) pair:
 
