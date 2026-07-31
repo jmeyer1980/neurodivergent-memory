@@ -514,6 +514,15 @@ export function navNodeLabel(node) {
   return 'wrap';
 }
 
+// Declared here, above truncateNodeLabel, and not down with MINIMAP_COL where
+// the other minimap-geometry constants live: the function's `max =
+// NODE_LABEL_MAX` default parameter evaluates at CALL time, not definition
+// time, so it works today only because nothing calls truncateNodeLabel during
+// this module's own top-to-bottom evaluation. A future top-level call (a
+// module-init self-test, say) made before the old lower declaration ran would
+// have hit a TDZ ReferenceError on a `const` that looked already in scope.
+export const NODE_LABEL_MAX = 10;
+
 // The map's only label used to be an SVG <title>, which requires a hover — so
 // on touch the tree was a field of identical dots. Labels now render as text,
 // which means they have to fit: elide the MIDDLE, because project ids share
@@ -539,7 +548,10 @@ export function truncateNodeLabel(label, max = NODE_LABEL_MAX) {
 // comment above is an even older value this constant already superseded —
 // derive from the constant, never from the prose.)
 export const MINIMAP_COL = 76;   // px between sibling columns
-export const NODE_LABEL_MAX = 10;
+// NODE_LABEL_MAX lives above truncateNodeLabel now, not here — see that
+// declaration for why. MINIMAP_COL itself has no such trap: layoutNavTree,
+// its only reader, is declared below this line, so it is never in scope
+// before MINIMAP_COL is.
 const MINIMAP_ROW = 28;   // px between depth rows
 const MINIMAP_PAD = 14;
 

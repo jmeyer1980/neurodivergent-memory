@@ -169,7 +169,7 @@ the existing `<title>`.
 
 - **Labels truncate to 10 characters**, middle-elided, so
   `twg-progressiongraph` → `twg-…graph` and `logical_analysis` →
-  `logi…ysis`. Middle rather than tail because district names share long
+  `logi…lysis`. Middle rather than tail because district names share long
   prefixes (`practical_execution` / `logical_analysis` diverge early, but
   `vigilant_monitoring` truncated to a head alone loses the word that
   distinguishes it), while the head keeps project ids recognisable.
