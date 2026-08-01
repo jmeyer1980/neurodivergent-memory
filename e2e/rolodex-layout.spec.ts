@@ -279,9 +279,14 @@ test('one band owns the location, and says the depth once', async ({ page }) => 
 test('clicking an earlier band segment jumps back to that view', async ({ page }) => {
   test.slow();
   expect(await diveToMemories(page)).toBe('memories');
+  // Read the FULL value, not the rendered one: below 560px the context segments
+  // are middle-elided for width and carry the untruncated id in `title`.
+  // Comparing rendered text would make this test viewport-dependent and would
+  // fail on the mobile project for a reason that has nothing to do with jumping.
   const read = () => page.evaluate(() => ({
     level: (document.querySelector('#stage') as HTMLElement).dataset.level,
-    segs: [...document.querySelectorAll('#crumb .seg')].map((s) => s.textContent!.trim()),
+    segs: [...document.querySelectorAll('#crumb .seg')]
+      .map((s) => (s.getAttribute('title') ?? s.textContent ?? '').trim()),
   }));
   const before = await read();
   expect(before.segs.length, 'precondition: depth + project + district segments are all present').toBeGreaterThanOrEqual(3);
@@ -334,14 +339,25 @@ test('clicking an earlier band segment jumps back to that view', async ({ page }
 // assertion, by temporarily reintroducing the old nowrap+overflow:hidden rule
 // on #crumb: this test failed on the reintroduced ellipsis at both viewports,
 // then passed again once the rule was removed.
+// AMENDED once the <=560px middle-elide landed: below that breakpoint the
+// context segments are shortened in JS, so the full coordinate no longer NEEDS
+// a second line there and asserting one would be asserting the opposite of the
+// shipped behaviour. The wrap guard therefore runs just ABOVE the breakpoint,
+// where segments are rendered in full and the space is still tight enough to
+// force a wrap -- which is exactly where an ellipsis regression would hide.
+// The no-ellipsis half still runs at the phone widths too, because that is
+// where CSS truncation would be most tempting and most damaging.
 test('the location band wraps instead of escaping a narrow viewport', async ({ page }) => {
   test.slow();
   expect(await diveToMemories(page)).toBe('memories');
   for (const vp of [
-    { name: 'small phone portrait', width: 320, height: 568 },
-    { name: 'narrow landscape (max-height:500px breakpoint)', width: 500, height: 393 },
+    { name: 'just above the elide breakpoint', width: 600, height: 800, wraps: true },
+    { name: 'narrow desktop', width: 640, height: 700, wraps: true },
+    { name: 'small phone portrait', width: 320, height: 568, wraps: false },
+    { name: 'narrow landscape (max-height:500px breakpoint)', width: 500, height: 393, wraps: false },
   ]) {
     await page.setViewportSize({ width: vp.width, height: vp.height });
+    await page.waitForTimeout(400); // buildDrum's resize rebuild is debounced at 200ms
     const wrap = await page.evaluate(() => {
       const segs = [...document.querySelectorAll('#crumb .seg')] as HTMLElement[];
       const lines = new Set(segs.map((s) => Math.round(s.getBoundingClientRect().top)));
@@ -351,7 +367,9 @@ test('the location band wraps instead of escaping a narrow viewport', async ({ p
       return { segCount: segs.length, lineCount: lines.size, ellipsised };
     });
     expect(wrap.segCount, `expected the full coordinate (>1 segment) at ${vp.name}`).toBeGreaterThan(1);
-    expect(wrap.lineCount, `the coordinate should wrap onto more than one line at ${vp.name}`).toBeGreaterThan(1);
+    if (vp.wraps) {
+      expect(wrap.lineCount, `the coordinate should wrap onto more than one line at ${vp.name}`).toBeGreaterThan(1);
+    }
     expect(wrap.ellipsised, `no segment should be truncated with an ellipsis at ${vp.name}`).toEqual([]);
   }
 });
@@ -446,6 +464,38 @@ test('the chrome bar and hud stay clear of the card at the viewports that broke 
     });
     expect(geom.chromeClear, `#chrome overlapped the card at ${vp.width}x${vp.height}`).toBe(true);
     expect(geom.hudClear, `#hud overlapped the card at ${vp.width}x${vp.height}`).toBe(true);
+  }
+});
+
+// The guard above only ever ran at the WALL -- the most forgiving state there
+// is: a 230px card and a coordinate short enough to stay on one line. At depth
+// the coordinate is its full `0^N > project > district > leaf`, and on a
+// 393px-wide phone that wrapped to FOUR lines, roughly doubling #chrome's
+// height. #chrome is fixed and used to sit OVER #stage, so on a real iPhone in
+// portrait the band covered most of a memory card and could not be dismissed.
+// Reported from the device; the whole-branch review had predicted precisely
+// this and it was triaged as out of scope. It was not.
+test('the chrome bar stays clear of the card at DEPTH, where the coordinate is longest', async ({ page }) => {
+  test.slow();
+  expect(await diveToMemories(page)).toBe('memories');
+  for (const vp of [{ width: 393, height: 852 }, { width: 320, height: 568 }]) {
+    await page.setViewportSize(vp);
+    await page.waitForTimeout(400); // buildDrum's resize rebuild is debounced at 200ms
+    const geom = await page.evaluate(() => {
+      const b = (s: string) => document.querySelector(s)!.getBoundingClientRect();
+      const chrome = b('#chrome'), front = b('#drum .card3d.front');
+      return {
+        overlap: Math.max(0, Math.min(chrome.bottom, front.bottom) - Math.max(chrome.top, front.top)),
+        segs: [...document.querySelectorAll('#crumb .seg')].map((s) => s.textContent!.trim()),
+        cardTop: front.top, chromeBottom: chrome.bottom,
+      };
+    });
+    expect(geom.segs.length, 'precondition: at depth the coordinate has every segment').toBeGreaterThan(2);
+    expect(
+      geom.overlap,
+      `#chrome covered ${geom.overlap}px of the card at ${vp.width}x${vp.height} `
+      + `(chrome ends ${geom.chromeBottom}, card starts ${geom.cardTop}) — segments: ${geom.segs.join(' ')}`,
+    ).toBe(0);
   }
 });
 

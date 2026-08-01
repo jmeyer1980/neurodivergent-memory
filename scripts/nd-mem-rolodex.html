@@ -66,7 +66,15 @@
     #crumb .seg:disabled:hover{background:none}
     #crumb .sep{color:var(--faint);padding:0 1px}
     #position{flex:0 0 auto;font-size:.78rem;color:var(--muted);white-space:nowrap}
-    #stage{position:fixed;inset:0;perspective:1400px;overflow:hidden;touch-action:none}
+    /* Inset below the chrome rather than sitting under it. #chrome is fixed, so
+       for as long as #stage started at the viewport top the bar simply COVERED
+       the card — harmless while the coordinate was one ellipsised pill, and not
+       at all harmless once the location band could wrap to four lines on a
+       portrait phone and hide most of a memory. Driving the inset from the
+       measured --chromeH closes the whole class: any future chrome growth
+       displaces the card instead of obscuring it. The geometric hit-test reads
+       els.stage.getBoundingClientRect(), so it follows this automatically. */
+    #stage{position:fixed;inset:var(--chromeH,64px) 0 var(--hudH,64px) 0;perspective:1400px;overflow:hidden;touch-action:none}
     #stage.bounce::after{content:'';position:absolute;inset:0;pointer-events:none;box-shadow:inset 0 0 120px rgba(var(--tint),.35);animation:edgeflash .45s ease}
     @keyframes edgeflash{from{opacity:1}to{opacity:0}}
     #scene{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;transform-style:preserve-3d;transition:transform .7s cubic-bezier(.4,0,.2,1),opacity .55s ease}
@@ -79,7 +87,13 @@
        ~393px tall there, so memory cards were clipped top and bottom. Tie it to
        the viewport: 78vh only bites below ~640px of height, so portrait and
        desktop keep the 500px they always had. */
-    #stage[data-level="memories"]{--cardH:min(500px, 78vh)}
+    /* 88% of the STAGE, not 78vh. Sizing a memory card against the viewport was
+       fine while #stage WAS the viewport; now that it is inset between the two
+       fixed bars, a viewport-relative card can be taller than the box holding
+       it and overflow back under the very bars the inset exists to clear.
+       #scene is inset:0 in #stage, so the percentage resolves against the space
+       actually available. */
+    #stage[data-level="memories"]{--cardH:min(500px, 88%)}
     .card3d{position:absolute;inset:0;display:flex;flex-direction:column;gap:10px;padding:18px;border-radius:24px;border:1px solid var(--surfaceBorder);background:var(--cardWash),radial-gradient(circle at top right,rgba(var(--tint),.16),transparent 38%),var(--cardBase);box-shadow:0 18px 40px rgba(0,0,0,.35);backface-visibility:hidden;transition:opacity .3s,box-shadow .3s,border-color .3s,transform .25s ease;opacity:.55}
     .card3d.front{opacity:1;border-color:rgba(var(--tint),.4);box-shadow:0 24px 60px rgba(0,0,0,.5),0 0 30px rgba(var(--tint),.12)}
     /* A sign, not a control. Chromium cannot hit-test a 3D-rotated card —
@@ -149,7 +163,10 @@
        COLUMN's outer rows are deliberately left empty: that is the reserved
        slot for the deferred floor chevrons, so adding them is an insertion
        rather than a relayout. */
-    #spin{position:fixed;inset:0;z-index:8;display:grid;grid-template-columns:auto 1fr auto;
+    /* Same inset as #stage, so the buttons stay vertically centred ON THE CARD
+       rather than on the viewport — otherwise they drift above it by half the
+       chrome's height. The <=560px rule below re-anchors them to the bottom. */
+    #spin{position:fixed;inset:var(--chromeH,64px) 0 var(--hudH,64px) 0;z-index:8;display:grid;grid-template-columns:auto 1fr auto;
       grid-template-rows:1fr auto 1fr;align-items:center;padding:0 10px;pointer-events:none}
     #spin>*{pointer-events:auto}
     #spinPrev{grid-column:1;grid-row:2}
@@ -344,10 +361,19 @@
     // Three hand-tuned offsets (64/108/56) each encoded a guess at how tall
     // #chrome renders at that breakpoint. The band would have needed a fourth.
     // Measure it once and let CSS read the answer.
-    const syncChromeHeight = () => document.documentElement.style
-      .setProperty('--chromeH', `${Math.ceil($('#chrome').getBoundingClientRect().height)}px`);
-    new ResizeObserver(syncChromeHeight).observe($('#chrome'));
-    syncChromeHeight();
+    // Both fixed bars are measured, and #stage is inset between them, so the
+    // card occupies the space that is actually free rather than the whole
+    // viewport with two bars floating on top of it. Measuring BOTH matters:
+    // insetting only the top pushed the card down into #hud instead.
+    const syncBarHeight = (sel, prop) => {
+      const el = $(sel);
+      const sync = () => document.documentElement.style
+        .setProperty(prop, `${Math.ceil(el.getBoundingClientRect().height)}px`);
+      new ResizeObserver(sync).observe(el);
+      sync();
+    };
+    syncBarHeight('#chrome', '--chromeH');
+    syncBarHeight('#hud', '--hudH');
 
     const state = {
       snapshot: { memories: {} },
@@ -676,6 +702,10 @@
       // `0^N > project > district > card`: N answers "how deep", the path
       // answers "where", and each segment is a way back to that view.
       const segs = H.coordinateOf(state.view, depthNow(), centeredItem()?.id ?? null);
+      // Matches the 560px breakpoint the rest of the phone layout uses. Read at
+      // render time rather than cached: buildDrum() runs on resize and cascades
+      // to updateChrome, so a rotation re-evaluates this for free.
+      const narrowBand = window.innerWidth <= 560;
       els.crumb.innerHTML = segs.map((s, i) => {
         const sep = i ? '<span class="sep">&gt;</span>' : '';
         // A segment whose target is the view we're already standing in (the
@@ -695,8 +725,18 @@
         const jumpable = !atCurrent && !atWallBadge && (s.kind === 'depth' || s.target != null);
         // The ⌂ is added here, not in coordinateOf: the helper stays pure text
         // so its unit tests and any non-visual caller are unaffected.
-        const label = s.kind === 'depth' ? `⌂ ${s.text}` : s.text;
-        return sep + `<button class="seg ${s.kind}" data-seg="${i}"${jumpable ? '' : ' disabled'}>${esc(label)}</button>`;
+        //
+        // On a phone the full coordinate wrapped to four lines. Middle-elide the
+        // CONTEXT segments — the same treatment, and the same helper, the branch
+        // map gives its nodes — but never the leaf: the standing ruling is that
+        // truncation eats leftmost first because the leaf is the one segment you
+        // always need. The untruncated value stays in the title, and every
+        // segment remains a jump; only its rendered width changes.
+        const label = s.kind === 'depth' ? `⌂ ${s.text}`
+          : (narrowBand && (s.kind === 'project' || s.kind === 'district')) ? H.truncateNodeLabel(s.text, 10)
+          : s.text;
+        const tip = label === s.text ? '' : ` title="${esc(s.text)}"`;
+        return sep + `<button class="seg ${s.kind}" data-seg="${i}"${jumpable ? '' : ' disabled'}${tip}>${esc(label)}</button>`;
       }).join('');
       // An empty store has no centered card, so the coordinate collapses to a
       // lone depth badge and the band would read "⌂ 0^0" and nothing else.
