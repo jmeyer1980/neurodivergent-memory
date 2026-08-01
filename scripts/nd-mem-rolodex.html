@@ -240,10 +240,18 @@
     #mapBody svg{display:block}
     #mapBody .edge{fill:none;stroke:var(--faint);stroke-width:1.5;opacity:.45}
     #mapBody .edge.on{stroke:var(--primary);opacity:.9}
-    #mapBody .node{fill:var(--surface);stroke:var(--faint);stroke-width:1.5;cursor:pointer}
+    /* The dot and its label are one target. .nodeHit is the transparent rect
+       spanning both; `fill:transparent` (not fill:none) is what makes it
+       hittable, since the default pointer-events only counts painted area. */
+    #mapBody .nodeG{cursor:pointer}
+    #mapBody .nodeHit{fill:transparent}
+    #mapBody .node{fill:var(--surface);stroke:var(--faint);stroke-width:1.5}
     #mapBody .node.on{stroke:var(--primary)}
     #mapBody .node.cursor{fill:var(--primary);stroke:var(--primary)}
-    #mapBody .node:hover{stroke:var(--text)}
+    /* Hover is driven from the group, so pointing anywhere in the hitbox --
+       including at the label -- lights the same node the click will take. */
+    #mapBody .nodeG:hover .node{stroke:var(--text)}
+    #mapBody .nodeG:hover .nodeLabel{fill:var(--text)}
     #mapBody .nodeLabel{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:.6rem;fill:var(--faint);pointer-events:none;user-select:none}
     #mapBody .nodeLabel.on{fill:var(--muted)}
     @media (prefers-reduced-motion: no-preference){#mapBody .node.cursor{animation:pulse 1.8s ease-in-out infinite}}
@@ -753,9 +761,22 @@
         // The label is a sibling <text>, not a child of <circle>: SVG will not
         // render text inside a shape, and the circle stays the only click
         // target so the existing [data-node] delegation is untouched.
+        // A 10px dot was the entire target; the label beside it read as part of
+        // the node but did nothing. Each node is now a <g> carrying data-node,
+        // fronted by a transparent rect spanning the dot AND its label, so the
+        // whole pair is one hitbox. Order matters: the rect goes FIRST so the
+        // circle keeps its own paint and hover on top of it, and the label
+        // stays pointer-events:none so clicks on a glyph fall through to the
+        // rect rather than depending on where the letter strokes happen to be.
+        // The rect's width is bounded by the column pitch, so neighbours cannot
+        // steal each other's clicks.
+        const hitW = 8 + 9 + NODE_LABEL_PX;
         const nodes = laid.nodes.map(n =>
-          `<circle class="node${n.onPath ? ' on' : ''}${n.isCursor ? ' cursor' : ''}" data-node="${n.id}" cx="${n.x}" cy="${n.y}" r="5"><title>${esc(n.label)} (0^${n.depth})</title></circle>`
-          + `<text class="nodeLabel${n.onPath ? ' on' : ''}" x="${n.x + 9}" y="${n.y + 3.5}">${esc(H.truncateNodeLabel(n.label))}</text>`).join('');
+          `<g class="nodeG" data-node="${n.id}">`
+          + `<rect class="nodeHit" x="${n.x - 8}" y="${n.y - 9}" width="${hitW}" height="18" />`
+          + `<circle class="node${n.onPath ? ' on' : ''}${n.isCursor ? ' cursor' : ''}" cx="${n.x}" cy="${n.y}" r="5"><title>${esc(n.label)} (0^${n.depth})</title></circle>`
+          + `<text class="nodeLabel${n.onPath ? ' on' : ''}" x="${n.x + 9}" y="${n.y + 3.5}">${esc(H.truncateNodeLabel(n.label))}</text>`
+          + `</g>`).join('');
         // laid.width measures dot positions only; the rightmost label overhangs it.
         const labelOverhang = 9 + NODE_LABEL_PX;
         const w = laid.width + labelOverhang;
@@ -974,9 +995,11 @@
     });
 
     els.mapBody.addEventListener('click', (e) => {
-      const circle = e.target instanceof Element ? e.target.closest('[data-node]') : null;
-      if (!circle) return;
-      const id = Number(circle.dataset.node);
+      // data-node lives on the wrapping <g>, so this resolves from the dot, the
+      // label, or the transparent hit rect between them — whichever was struck.
+      const node = e.target instanceof Element ? e.target.closest('[data-node]') : null;
+      if (!node) return;
+      const id = Number(node.dataset.node);
       if (id === state.tree.cursor) return;
       jumpToNode(id);
     });

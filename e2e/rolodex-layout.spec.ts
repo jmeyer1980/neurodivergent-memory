@@ -517,6 +517,50 @@ test('the chrome bar stays clear of the card at DEPTH, where the coordinate is l
   }
 });
 
+// The node was a 10px dot; its label sat beside it looking like part of the
+// same thing and did nothing. Clicking the LABEL must jump too -- so this test
+// deliberately clicks the text, well clear of the circle, and would pass
+// vacuously if it clicked the dot.
+test('a branch-map label is part of the node it labels, not decoration', async ({ page }) => {
+  test.slow();
+  expect(await diveToMemories(page)).toBe('memories');
+  await page.evaluate(() => {
+    const map = document.querySelector('#minimap')!;
+    if (map.classList.contains('collapsed')) (document.querySelector('#mapToggle') as HTMLElement).click();
+  });
+  await page.waitForTimeout(300);
+
+  const target = await page.evaluate(() => {
+    // Any node that is not the cursor -- clicking the cursor is a no-op by design.
+    const cursorId = (document.querySelector('#mapBody .node.cursor')?.closest('[data-node]') as HTMLElement | null)?.dataset.node;
+    const g = [...document.querySelectorAll('#mapBody .nodeG')]
+      .find((el) => (el as HTMLElement).dataset.node !== cursorId) as SVGGElement | undefined;
+    if (!g) return null;
+    const label = g.querySelector('text')!.getBoundingClientRect();
+    const dot = g.querySelector('circle')!.getBoundingClientRect();
+    return {
+      id: (g as unknown as HTMLElement).dataset.node,
+      // Centre of the label's own box, and proof it is clear of the dot.
+      x: label.x + label.width / 2, y: label.y + label.height / 2,
+      clearOfDot: label.x > dot.right,
+      labelWidth: label.width,
+    };
+  });
+  expect(target, 'precondition: the map has a non-cursor node with a label').not.toBeNull();
+  expect(target!.labelWidth, 'the label should have real width to aim at').toBeGreaterThan(10);
+  expect(target!.clearOfDot, 'the click point must be on the label, not the dot').toBe(true);
+
+  const before = await page.locator('#mapToggle').textContent();
+  await page.mouse.click(target!.x, target!.y);
+  await page.waitForTimeout(1700);
+  const after = await page.evaluate(() => ({
+    toggle: document.querySelector('#mapToggle')!.textContent,
+    cursorId: (document.querySelector('#mapBody .node.cursor')?.closest('[data-node]') as HTMLElement | null)?.dataset.node,
+  }));
+  expect(after.cursorId, 'clicking the label should move the map cursor to that node').toBe(target!.id);
+  expect(after.toggle, 'and the depth readout should follow the jump').not.toBe(before);
+});
+
 // The hint bar has always promised "scroll inside the card to read", and on
 // desktop that silently did nothing. The page used to hand the wheel back to
 // the browser for native scrolling, which never worked here: #drum sits at
