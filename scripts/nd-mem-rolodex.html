@@ -129,12 +129,54 @@
     .card3d.front .reader-scroll{display:block}
     .card3d.front .preview{display:none}
     .card3d .meta{display:none;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:8px}
-    .card3d.front .meta{display:grid}
+    /* Meta only shows on the front card's BACK face now -- see the flip block
+       below, which is the only place this rule's condition is widened. */
+    .card3d.front.flipped .meta{display:grid}
     .mini{padding:8px 10px;border-radius:12px;background:var(--wash);border:1px solid var(--surfaceBorder)}
     .mini label{display:block;font-size:.66rem;color:var(--faint);text-transform:uppercase;letter-spacing:.08em;margin-bottom:3px}
     .mini span{font-size:.8rem}
     .card3d .actions{display:none;justify-content:flex-end}
     .card3d.front .actions{display:flex}
+    /* ---------- card flip (memory cards only) ----------
+       The metadata grid and its chips used to render unconditionally on the
+       front card and ate most of the room the memory text needed ("those meta
+       containers are huge... they really don't need to take up so much space").
+       Flip swaps which pane is shown IN PLACE -- never a 3D rotateY of the
+       visible face. Chromium cannot hit-test a 3D-rotated card (pointer events
+       and elementFromPoint both resolve to #scene for any non-flat card, see
+       cardIndexAtPoint below), which is exactly why every real control already
+       lives on .card3d.front only; a true 3D flip would put the Back button on
+       a rotated face and reintroduce that defect for the one card meant to be
+       fully interactive. A plain class toggle plus a fade sidesteps it entirely.
+       Only .card3d.front ever carries .flipped (updateFrontCard clears it the
+       moment a card stops being front), so these rules are inert for every
+       other rendered card and never touch the project/district branches, which
+       have no .meta and keep their own always-on .chips untouched -- that is
+       why the memory card's own tag list below carries the extra .card-chips
+       class instead of relying on the bare .chips selector. */
+    .card3d.front.flipped .kicker,
+    .card3d.front.flipped h2,
+    .card3d.front.flipped .preview,
+    .card3d.front.flipped .reader-scroll,
+    .card3d.front.flipped .front-actions{display:none}
+    .card3d .card-chips{display:none}
+    .card3d.front.flipped .card-chips{display:flex}
+    /* Specificity note: .back-actions also carries .actions, and the base
+       ".card3d.front .actions{display:flex}" rule above is three classes --
+       a plain ".card3d .back-actions{display:none}" (two classes) would lose
+       that cascade fight on the front-not-flipped card and show the Back
+       button early. ":not(.flipped)" keeps this rule at four classes so it
+       wins there; once .flipped is added this selector stops matching and
+       the base .actions{display:flex} rule shows it instead. */
+    .card3d.front:not(.flipped) .back-actions{display:none}
+    /* Fade-in is scoped to the .flipped class actually changing (a Details
+       click), not to .front changing (an ordinary spin step) -- .meta/
+       .card-chips/.back-actions only ever go display:none -> shown when
+       .flipped is added, so this never fires while spinning past cards. */
+    @media (prefers-reduced-motion: no-preference){
+      @keyframes cardFaceIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
+      .card3d.front.flipped .meta,.card3d.front.flipped .card-chips,.card3d.front.flipped .back-actions{animation:cardFaceIn .18s ease}
+    }
     .modalbg{position:fixed;inset:0;z-index:40;background:rgba(7,10,12,.66);backdrop-filter:blur(10px);display:none;align-items:center;justify-content:center;padding:16px}
     .modalbg.open{display:flex}
     .modal{width:min(680px,100%);max-height:88vh;overflow:auto;border-radius:26px;background:var(--cardWash),var(--overlayBg);border:1px solid var(--surfaceBorder);padding:22px;user-select:text}
@@ -455,13 +497,27 @@
       // innerHTML per rebuild. The preview is clipped by overflow:hidden anyway
       // so 300 chars is more than the card can show, and the reader is filled by
       // updateFrontCard for the one card that is actually facing the camera.
+      // Flip, not a bigger card: the meta grid + chips used to render right on
+      // the front face and ate the room the memory text needed. They still
+      // exist in the same markup position (order matters for .card3d's own
+      // flex gap, so they are NOT moved into a wrapper) -- the flip CSS block
+      // above is what hides them until Details is clicked, and clears itself
+      // the moment this card stops being .front (see updateFrontCard). Details
+      // and Back are TEXT buttons, not an icon: a bare glyph shipped once
+      // already on this same card (the outer-card "Open" affordance) and had
+      // to be replaced because nobody could tell what it meant -- see that
+      // rule's own comment above. .front-actions/.back-actions are extra
+      // classes on top of the shared .actions/.chips classes, not a
+      // replacement for them, so project/district cards (whose own actions
+      // and always-on chips reuse those same base classes) are untouched.
       return `<span class="kicker">${esc(d.id)} · ${esc(d.district || 'uncategorized')}</span>`
         + `<h2>${esc(d.name || '(untitled)')}</h2>`
         + `<p class="preview">${esc(String(d.content ?? '').slice(0, 300))}</p>`
         + `<div class="reader-scroll"></div>`
+        + `<div class="actions front-actions"><button class="btn" data-edit="${esc(d.id)}">Edit</button><button class="btn" data-flip="open">Details</button></div>`
         + `<div class="meta">${metaRow('Intensity', fmtNum(d.intensity))}${metaRow('Visibility', d.visibility || 'private')}${metaRow('Created', fmt(d.created))}${metaRow('Tags', (d.tags || []).length)}</div>`
-        + `<div class="chips">${(d.tags || []).slice(0, 4).map(t => `<span class="chip">${esc(t)}</span>`).join('')}</div>`
-        + `<div class="actions"><button class="btn" data-edit="${esc(d.id)}">Edit</button></div>`;
+        + `<div class="chips card-chips">${(d.tags || []).slice(0, 4).map(t => `<span class="chip">${esc(t)}</span>`).join('')}</div>`
+        + `<div class="actions back-actions"><button class="btn" data-flip="close">Back</button></div>`;
     }
 
     // ---------- the rendered window ----------
@@ -632,11 +688,26 @@
           // so a previously-selected memory card's full content must be cleared
           // from its hidden .reader-scroll here too.
           if (!isFront) fillReader(el, '');
+          // Unconditional, not just on the cards losing front: a genuine
+          // markup rebuild never has .flipped to begin with (cardFace never
+          // emits it), but selectCard's fan-mode force update reuses the SAME
+          // persisted nodes without rebuilding markup -- so without this, a
+          // card flipped earlier and later re-selected via a fan gesture
+          // would silently come back showing its meta/chips pane instead of
+          // its text. "Flip THIS card over" must not survive ANY front
+          // change, cylinder-eased or fan-forced alike.
+          el.classList.remove('flipped');
         });
       } else if (state.frontEl !== next) {
         // Steady state touches two cards. Sweeping all N here ran once per front
         // change, i.e. many times a second during a spin, on every card.
-        if (state.frontEl) { state.frontEl.classList.remove('front'); fillReader(state.frontEl, ''); }
+        // 'flipped' rides alongside 'front' here for the same reason: the same
+        // DOM node can become front again later without an intervening rebuild
+        // (spin away and back within one drum window), and "flip THIS card
+        // over" must not survive that round trip -- spinning to another card
+        // resets to the front, unconditionally, not just on a fresh render.
+        if (state.frontEl) { state.frontEl.classList.remove('front', 'flipped'); fillReader(state.frontEl, ''); }
+        if (next) next.classList.remove('flipped');
         if (next) next.classList.add('front');
       }
       state.frontEl = next;
@@ -1653,6 +1724,32 @@
       if (!btn) return;
       const m = H.deriveMemories(state.snapshot, state.view.projectId, state.view.districtId).find(x => x.id === btn.dataset.edit);
       if (m) openEditModal(m);
+    });
+
+    // ---------- card flip (Details / Back) ----------
+    // Same delegation pattern as rename/edit above, including the pressTarget
+    // dance: the dive handler's overFrontButton branch already resolves ANY
+    // button under the front card generically and re-dispatches a synthetic
+    // click at (0,0), so this only needs to recognise [data-flip] on the
+    // resolved hit, not reimplement the retargeting. Explicit open/close
+    // (not classList.toggle) so a stray double-fire of the synthetic click
+    // can never leave the card in the wrong face.
+    els.stage.addEventListener('click', (e) => {
+      if (dragMoved > 8 || state.transitioning) return;
+      let hit = (pressTarget && pressTarget.isConnected) ? pressTarget
+        : (e.target instanceof Element ? e.target : null);
+      if (!hit || !hit.closest('[data-flip]')) {
+        const under = document.elementFromPoint(e.clientX, e.clientY);
+        if (under instanceof Element) hit = under;
+      }
+      const btn = hit ? hit.closest('[data-flip]') : null;
+      if (!btn) return;
+      // Scoped to .front defensively -- only .card3d.front ever renders a
+      // clickable [data-flip] button in the first place (see the .actions
+      // rules above), but this keeps the handler correct even if that ever
+      // changes rather than relying on CSS alone.
+      const card = btn.closest('.card3d.front');
+      if (card) card.classList.toggle('flipped', btn.dataset.flip === 'open');
     });
     $('#editCancelBtn').addEventListener('click', () => $('#editModalBg').classList.remove('open'));
     $('#editSaveBtn').addEventListener('click', submitEdit);

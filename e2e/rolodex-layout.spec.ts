@@ -520,3 +520,113 @@ test('the help panel opens, explains the coordinate, and closes on Escape', asyn
   await page.keyboard.press('Escape');
   await expect(page.locator('#helpModalBg')).not.toHaveClass(/open/);
 });
+
+// "Meta-data continues to be too large for mobile and swallows the real-estate
+// available on the cards" / "those meta containers are huge. They really
+// don't need to take up so much space in any layout." The fix flips the
+// memory card: the front face is the kicker/title/text, the back face is the
+// .meta grid + chips, and a TEXT button ("Details" / "Back") swaps between
+// them IN PLACE. Deliberately not a 3D rotateY of the visible face -- Chromium
+// cannot hit-test a rotated card (pointer events and elementFromPoint both
+// resolve to #scene; see cardIndexAtPoint and the "Open" tests above), which
+// is exactly why every real control on this page already lives on
+// .card3d.front only. A 3D flip would put the Back button on a rotated face.
+function frontFaceState(page: Page) {
+  return page.evaluate(() => {
+    const front = document.querySelector('#drum .card3d.front') as HTMLElement | null;
+    if (!front) return null;
+    // Rendered size, not the element's OWN computed `display`: Details/Back
+    // are hidden via their PARENT (.front-actions/.back-actions) going
+    // display:none, and getComputedStyle on a child never reflects an
+    // ancestor's display:none -- only actual layout (a zero-size box) does.
+    const shown = (sel: string) => {
+      const el = front.querySelector(sel);
+      if (!el) return false;
+      const r = el.getBoundingClientRect();
+      return r.width > 0 && r.height > 0;
+    };
+    return {
+      flipped: front.classList.contains('flipped'),
+      readerShown: shown('.reader-scroll'),
+      metaShown: shown('.meta'),
+      chipsShown: shown('.card-chips'),
+      detailsShown: shown('[data-flip="open"]'),
+      backShown: shown('[data-flip="close"]'),
+    };
+  });
+}
+
+test('the metadata is not on the front face by default', async ({ page }) => {
+  test.slow();
+  expect(await diveToMemories(page)).toBe('memories');
+  const s = await frontFaceState(page);
+  expect(s, 'a front memory card should exist').not.toBeNull();
+  expect(s!.flipped, 'a freshly-dived-to card should start unflipped').toBe(false);
+  expect(s!.readerShown, 'the memory text should be visible by default').toBe(true);
+  expect(s!.metaShown, 'the meta grid should stay hidden until Details is clicked').toBe(false);
+  expect(s!.chipsShown, 'the tag chips should stay hidden until Details is clicked').toBe(false);
+  expect(s!.detailsShown, 'the Details button should be on the front face').toBe(true);
+  expect(s!.backShown, 'the Back button should not be visible on the front face').toBe(false);
+});
+
+test('clicking Details reveals the meta grid and chips, and Back restores the text', async ({ page }) => {
+  test.slow();
+  expect(await diveToMemories(page)).toBe('memories');
+
+  await page.locator('.card3d.front [data-flip="open"]').click();
+  const flipped = await frontFaceState(page);
+  expect(flipped, 'the front card should still exist after flipping').not.toBeNull();
+  expect(flipped!.flipped, 'the card should record itself as flipped').toBe(true);
+  expect(flipped!.metaShown, 'the meta grid should be visible after Details').toBe(true);
+  expect(flipped!.chipsShown, 'the tag chips should be visible after Details').toBe(true);
+  expect(flipped!.readerShown, 'the memory text should be hidden on the back').toBe(false);
+  expect(flipped!.backShown, 'the Back button should be visible on the back').toBe(true);
+  expect(flipped!.detailsShown, 'Details should not still be showing on the back').toBe(false);
+
+  await page.locator('.card3d.front [data-flip="close"]').click();
+  const restored = await frontFaceState(page);
+  expect(restored, 'the front card should still exist after flipping back').not.toBeNull();
+  expect(restored!.flipped, 'Back should clear the flipped state').toBe(false);
+  expect(restored!.readerShown, 'the memory text should return after Back').toBe(true);
+  expect(restored!.metaShown, 'the meta grid should hide again after Back').toBe(false);
+  expect(restored!.chipsShown, 'the tag chips should hide again after Back').toBe(false);
+});
+
+test('spinning to another card resets the flip to the front', async ({ page }) => {
+  test.slow();
+  expect(await diveToMemories(page)).toBe('memories');
+  // A skip-by-omission here would be silent: without at least two cards there
+  // is nothing to spin to, and the whole point of this test never runs. Fail
+  // loudly on a degenerate store instead, matching the standing rule used by
+  // the edge-chevron test above.
+  const total = await page.evaluate(() =>
+    Number((document.querySelector('#position')!.textContent!.match(/of\s+(\d+)/) ?? [])[1] ?? 0));
+  expect(total, 'needs at least two cards to spin between').toBeGreaterThan(1);
+
+  await page.locator('.card3d.front [data-flip="open"]').click();
+  expect((await frontFaceState(page))!.flipped, 'precondition: the card is flipped before spinning').toBe(true);
+
+  await page.locator('#spinNext').click();
+  await page.waitForTimeout(1700);
+  const next = await frontFaceState(page);
+  expect(next, 'a front card should exist after spinning').not.toBeNull();
+  expect(next!.flipped, 'a spin to a new card must not carry the flip over').toBe(false);
+  expect(next!.readerShown, 'the new front card should show its text, not stale meta').toBe(true);
+  expect(next!.metaShown, "the new front card should not inherit the previous card's open meta pane").toBe(false);
+
+  // The one-step step-forward above alone cannot tell "the new card was
+  // never flipped to begin with" apart from "leaving front actually clears
+  // .flipped" -- a fresh card that was never opened would pass that check
+  // either way. Stepping back onto the SAME card that was flipped is the
+  // part that actually exercises the reset: DRUM_SLACK (6) keeps a one-step
+  // round trip inside the same rendered window, so this is the persisted DOM
+  // node the flip was set on, not a freshly rebuilt one that never had a
+  // chance to carry the class forward.
+  await page.locator('#spinPrev').click();
+  await page.waitForTimeout(1700);
+  const back = await frontFaceState(page);
+  expect(back, 'a front card should exist after stepping back').not.toBeNull();
+  expect(back!.flipped, 'the originally-flipped card must not still be flipped once it lost, then regained, front').toBe(false);
+  expect(back!.readerShown, 'the re-selected card should show its text again').toBe(true);
+  expect(back!.metaShown, "the re-selected card should not still show its earlier-opened meta pane").toBe(false);
+});
