@@ -75,13 +75,23 @@
        every real button lives on .card3d.front only. A pseudo-element adds no
        node to hit, and pointer-events:none makes that belt-and-braces. The
        whole card is already clickable (routeGesture clickOther =>
-       centerThenDive); this just admits it. The `/ ''` alt text is load-
-       bearing, not decorative: without it, a screen reader has no way to know
-       this glyph is purely decorative and may announce "single right-pointing
-       angle quotation mark" on every one of the ~24 non-front cards in the
-       rendered window. */
-    .card3d:not(.front)::after{content:'›' / '';position:absolute;right:16px;bottom:12px;
-      font-size:1.5rem;line-height:1;color:var(--faint);pointer-events:none}
+       centerThenDive); this just admits it.
+       A bare `›` shipped first and read as unexplained noise ("confusing as
+       to what that means or what it is for") -- text reads as a control, a
+       lone glyph does not. "Open ›" is deliberately uniform, not mirrored per
+       side: the trailing `›` is a disclosure idiom read after the word, not a
+       direction, and updateFrontCard (below) already relies on never having
+       to sweep a class over all N cards on every front-card change, which a
+       per-side variant would require. Styled to echo .chip -- the same quiet
+       pill language already used elsewhere on this card -- so it reads as
+       tappable without competing with the title. The `/ ''` alt text is load-
+       bearing, not decorative: without it, a screen reader would announce
+       "Open" a second time on every one of the ~24 non-front cards in the
+       rendered window, on top of the name and kind it already reads. */
+    .card3d:not(.front)::after{content:'Open ›' / '';position:absolute;right:16px;bottom:12px;
+      padding:5px 12px;border-radius:999px;border:1px solid var(--surfaceBorder);
+      background:var(--wash);font-size:.72rem;line-height:1.3;letter-spacing:.02em;
+      color:var(--muted);pointer-events:none}
     .card3d{cursor:pointer}
     @media (hover:hover){.card3d:not(.front):hover{opacity:.75}}
     .card3d .kicker{font-size:.7rem;text-transform:uppercase;letter-spacing:.1em;color:var(--faint)}

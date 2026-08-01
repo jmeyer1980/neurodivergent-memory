@@ -179,10 +179,12 @@ test('the branch map labels its nodes as text, not only as tooltips', async ({ p
   expect(labels.every((l) => l.length <= 10), `labels over 10 chars: ${labels}`).toBe(true);
 });
 
-// Outer cards carry no interactive signal at all. The fix is a chevron that is
-// a SIGN, not a control: Chromium cannot hit-test 3D-rotated cards, so a real
-// element here would swallow the click that dives.
-test('outer cards show a chevron that never steals the click', async ({ page }) => {
+// Outer cards carry no interactive signal at all. The fix is an "Open ›"
+// label that is a SIGN, not a control: Chromium cannot hit-test 3D-rotated
+// cards, so a real element here would swallow the click that dives. (A bare
+// `›` shipped first and read as unexplained noise to a first-time viewer --
+// the text replaced it, but the hit-test constraint is unchanged.)
+test('outer cards show an "Open" label that never steals the click', async ({ page }) => {
   const marker = await page.evaluate(() => {
     const card = document.querySelector('#drum .card3d:not(.front)');
     if (!card) return null;
@@ -191,7 +193,8 @@ test('outer cards show a chevron that never steals the click', async ({ page }) 
   });
   expect(marker, 'a non-front card should exist to carry the affordance').not.toBeNull();
   expect(marker!.content).not.toBe('none');
-  expect(marker!.pointerEvents, 'the chevron must never be a hit target').toBe('none');
+  expect(marker!.content, 'the affordance should read as "Open", not a bare glyph').toContain('Open');
+  expect(marker!.pointerEvents, 'the label must never be a hit target').toBe('none');
 
   // The front card must NOT carry it — it has real buttons instead.
   const frontContent = await page.evaluate(() =>
@@ -200,25 +203,30 @@ test('outer cards show a chevron that never steals the click', async ({ page }) 
 });
 
 // The existing diveToMemories helper clicks the centre card, which never
-// exercises an outer one. Click directly over where the chevron is drawn to
+// exercises an outer one. Click directly over where the label is drawn to
 // prove the pseudo-element is not swallowing the tap meant for the card.
 //
 // The DOM's first non-front card (ascending neighbour, index 1) is not the
 // only outer card rendered: at the root level (20 items -- above
 // isFanCount's FAN_MAX_CARDS=4 -- the drum runs in cylinder mode, not a
 // fan), the wrap-side neighbour (index 19, front's OTHER neighbour) sits
-// only ~18deg off-axis and lands its chevron corner on-screen even when the
+// only ~18deg off-axis and lands its label's corner on-screen even when the
 // ascending neighbour's does not. Scan every rendered outer card for the
-// first one whose chevron corner is actually on-screen, rather than
+// first one whose label corner is actually on-screen, rather than
 // hardcoding "the first DOM match" and treating an off-canvas corner as a
 // reason to skip: a genuinely clickable candidate is present every run.
-test('clicking an outer card on its chevron still centres and dives', async ({ page }) => {
+test('clicking an outer card on its "Open" label still centres and dives', async ({ page }) => {
   const before = await page.evaluate(() => (document.querySelector('#stage') as HTMLElement).dataset.level);
   const corners = await page.evaluate(() => {
     const cards = [...document.querySelectorAll('#drum .card3d:not(.front)')] as HTMLElement[];
     return cards.map((card) => {
       const r = card.getBoundingClientRect();
-      // Bottom-right corner, where the ::after is drawn.
+      // Bottom-right corner, where the ::after pill is drawn (right:16px,
+      // bottom:12px in the stylesheet). -20/-16 lands inside the pill's
+      // padding box for both the old bare glyph and the wider "Open ›" pill:
+      // the pill only grew leftward and (slightly) taller when the text
+      // replaced the glyph, so a point already inset from the corner stays
+      // inside it.
       return { x: r.right - 20, y: r.bottom - 16, w: r.width };
     });
   });
@@ -233,7 +241,7 @@ test('clicking an outer card on its chevron still centres and dives', async ({ p
   await page.mouse.click(candidate!.x, candidate!.y);
   await page.waitForTimeout(1700);
   const after = await page.evaluate(() => (document.querySelector('#stage') as HTMLElement).dataset.level);
-  expect(after, 'the chevron swallowed the click instead of the card taking it').not.toBe(before);
+  expect(after, 'the label swallowed the click instead of the card taking it').not.toBe(before);
 });
 
 // Location was split across #crumb, #levelName and #position -- three identical
