@@ -517,6 +517,49 @@ test('the chrome bar stays clear of the card at DEPTH, where the coordinate is l
   }
 });
 
+// The hint bar has always promised "scroll inside the card to read", and on
+// desktop that silently did nothing. The page used to hand the wheel back to
+// the browser for native scrolling, which never worked here: #drum sits at
+// translateZ(-radius) and the front card at +radius (~11,139px at 125 cards),
+// so the scroller ends up at an extreme Z inside a preserve-3d subtree and the
+// compositor's wheel hit-test -- a different path from elementFromPoint, which
+// resolves the reader correctly -- reaches nothing. Nobody noticed while the
+// metadata grid left the reader ~20px tall; the card flip made it visible.
+//
+// DESKTOP ONLY, and this is the one deliberate skip in this suite. Playwright
+// refuses mouse.wheel on the mobile-safari project ("Mouse wheel is not
+// supported in mobile WebKit") because an iPhone has no wheel -- the capability
+// genuinely does not exist there, so this is a platform exclusion rather than a
+// guard quietly declining to run on a platform it covers. The touch half of the
+// same behaviour is driven by the page's own pointer path and, per this
+// project's standing limitation, cannot be reproduced by Playwright's WebKit at
+// all (tap-only, no CDP); it stays device-verified.
+test('the wheel scrolls the memory text instead of doing nothing', async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name === 'mobile-safari', 'no wheel input exists on a touch device');
+  test.slow();
+  expect(await diveToMemories(page)).toBe('memories');
+  const target = await page.evaluate(() => {
+    const rs = document.querySelector('#drum .card3d.front .reader-scroll') as HTMLElement | null;
+    if (!rs || rs.scrollHeight <= rs.clientHeight) return null;
+    const b = rs.getBoundingClientRect();
+    return { x: b.x + b.width / 2, y: b.y + b.height / 2 };
+  });
+  expect(target, 'precondition: the front memory has more text than fits, so there is something to scroll')
+    .not.toBeNull();
+
+  const posBefore = await page.locator('#position').textContent();
+  await page.mouse.move(target!.x, target!.y);
+  await page.mouse.wheel(0, 300);
+  await page.waitForTimeout(300);
+
+  const after = await page.evaluate(() => ({
+    top: (document.querySelector('#drum .card3d.front .reader-scroll') as HTMLElement).scrollTop,
+    pos: document.querySelector('#position')!.textContent,
+  }));
+  expect(after.top, 'the wheel over the reader should scroll the text').toBeGreaterThan(0);
+  expect(after.pos, 'the wheel over the reader must NOT spin the drum instead').toBe(posBefore);
+});
+
 // "Need a little more context as to what we are trying to achieve here as a
 // user." Nothing on the page answered that.
 test('the wall states what this is, and only at the wall', async ({ page }) => {

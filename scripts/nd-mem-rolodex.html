@@ -1102,7 +1102,25 @@
         return;
       }
       const action = H.routeGesture('wheel', ctx(e));
-      if (action === 'scrollContent') return; // native scroll of the reader div
+      if (action === 'scrollContent') {
+        // Drive it, do not delegate. This used to `return` and let the browser
+        // scroll the reader natively, which silently does nothing in Chromium:
+        // the drum sits at translateZ(-radius) and the front card at +radius,
+        // and at 125 cards that radius is ~11,139px. The two cancel visually,
+        // but the scroller ends up at an extreme Z inside a preserve-3d subtree,
+        // and WHEEL scrolling is routed by the compositor's hit-test rather than
+        // the one elementFromPoint uses — elementFromPoint resolves the reader
+        // correctly here while the wheel still reaches nothing.
+        // Same shape as the touch path: the page owns this scroller on every
+        // engine rather than negotiating with the browser for it. Nothing else
+        // writes scrollTop, so there is no second writer to race.
+        const el = readerAt(e.target, e.clientX, e.clientY);
+        if (el) {
+          e.preventDefault(); // we are handling it; do not also scroll the page
+          el.scrollTop += dy; // clamps at both ends, matching overscroll-behavior:contain
+        }
+        return;
+      }
       e.preventDefault();
       // preventDefault stays above this guard so the page never scrolls or
       // zooms mid-transition. Banking velocity here would not: tick() is gated
