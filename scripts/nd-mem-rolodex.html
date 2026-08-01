@@ -1072,8 +1072,19 @@
       // press outside the reader always has.
       state.velocity = 0;
       state.stepTarget = null;
-      readerDrag = { el, lastY: e.clientY, axis: 'undecided', native: false };
-      readerDrag.onScroll = () => { if (readerDrag) readerDrag.native = true; };
+      readerDrag = { el, lastY: e.clientY, axis: 'undecided', native: false, expected: el.scrollTop };
+      // `native` must latch only when the browser scrolls this element ITSELF.
+      // A programmatic scrollTop write fires `scroll` exactly like a user pan
+      // does, and isTrusted cannot tell them apart — so the first version of
+      // this listener was tripped by the manual driver's own write below, which
+      // switched the driver off after a single delta. Invisible on Blink, which
+      // cancels the pointer stream and pans natively anyway; on WebKit, where
+      // the manual path is the ONLY path inside a rotated preserve-3d card,
+      // it meant a drag moved the text a few pixels and then died.
+      // So: latch only when the element ends up somewhere we did not put it.
+      readerDrag.onScroll = () => {
+        if (readerDrag && Math.abs(readerDrag.el.scrollTop - readerDrag.expected) > 1) readerDrag.native = true;
+      };
       el.addEventListener('scroll', readerDrag.onScroll, { passive: true });
     }
     function endReaderDrag(){
@@ -1116,7 +1127,14 @@
         // `native` flips as soon as the browser emits a scroll of its own for
         // this gesture. Blink cancels the pointer stream and takes over after
         // one move, so in practice this branch never runs there.
-        if (!readerDrag.native) readerDrag.el.scrollTop -= e.clientY - readerDrag.lastY;
+        if (!readerDrag.native) {
+          readerDrag.el.scrollTop -= e.clientY - readerDrag.lastY;
+          // Read back rather than storing what we asked for: the browser clamps
+          // at both ends, so at the top or bottom the asked-for value and the
+          // real one differ and the listener above would read that as the
+          // browser taking over.
+          readerDrag.expected = readerDrag.el.scrollTop;
+        }
         readerDrag.lastY = e.clientY;
         return;
       }
