@@ -31,6 +31,24 @@ async function chromeBar(page: Page) {
   });
 }
 
+/**
+ * Waits until the layout has actually settled after a viewport change, instead
+ * of guessing with a fixed timeout. #stage is inset by --chromeH/--hudH, which
+ * are written by ResizeObservers, and buildDrum's resize rebuild is debounced
+ * 200ms on top of that -- so a flat wait races both. Measuring one occlusion
+ * test mid-settle is exactly how a green suite went red on a rerun.
+ */
+async function settleLayout(page: Page) {
+  await page.waitForFunction(() => {
+    const r = (s: string) => document.querySelector(s)!.getBoundingClientRect();
+    // #chrome is top-anchored and #hud bottom-anchored, so once the custom
+    // properties have landed the stage sits exactly between them.
+    return Math.abs(r('#stage').top - r('#chrome').bottom) <= 1.5
+      && Math.abs(r('#stage').bottom - r('#hud').top) <= 1.5;
+  }, null, { timeout: 5_000 });
+  await page.waitForTimeout(250); // then let the debounced buildDrum rebuild land
+}
+
 /** Clicks the centre card until the memories level is reached. */
 async function diveToMemories(page: Page) {
   const level = () => page.evaluate(() => (document.querySelector('#stage') as HTMLElement).dataset.level);
@@ -357,7 +375,7 @@ test('the location band wraps instead of escaping a narrow viewport', async ({ p
     { name: 'narrow landscape (max-height:500px breakpoint)', width: 500, height: 393, wraps: false },
   ]) {
     await page.setViewportSize({ width: vp.width, height: vp.height });
-    await page.waitForTimeout(400); // buildDrum's resize rebuild is debounced at 200ms
+    await settleLayout(page);
     const wrap = await page.evaluate(() => {
       const segs = [...document.querySelectorAll('#crumb .seg')] as HTMLElement[];
       const lines = new Set(segs.map((s) => Math.round(s.getBoundingClientRect().top)));
@@ -424,7 +442,7 @@ test('an edge chevron advances the selection by exactly one', async ({ page }) =
 test('the spin controls stay on screen and clear of the cards', async ({ page }) => {
   for (const vp of [{ width: 393, height: 852 }, { width: 852, height: 393 }, { width: 1440, height: 900 }]) {
     await page.setViewportSize(vp);
-    await page.waitForTimeout(200);
+    await settleLayout(page);
     const geom = await page.evaluate(() => {
       const b = (s: string) => document.querySelector(s)!.getBoundingClientRect();
       const prev = b('#spinPrev'), next = b('#spinNext'), front = b('#drum .card3d.front');
@@ -454,7 +472,7 @@ test('the spin controls stay on screen and clear of the cards', async ({ page })
 test('the chrome bar and hud stay clear of the card at the viewports that broke it', async ({ page }) => {
   for (const vp of [{ width: 320, height: 568 }, { width: 500, height: 393 }]) {
     await page.setViewportSize(vp);
-    await page.waitForTimeout(200);
+    await settleLayout(page);
     const geom = await page.evaluate(() => {
       const b = (s: string) => document.querySelector(s)!.getBoundingClientRect();
       const chrome = b('#chrome'), hud = b('#hud'), front = b('#drum .card3d.front');
@@ -480,7 +498,7 @@ test('the chrome bar stays clear of the card at DEPTH, where the coordinate is l
   expect(await diveToMemories(page)).toBe('memories');
   for (const vp of [{ width: 393, height: 852 }, { width: 320, height: 568 }]) {
     await page.setViewportSize(vp);
-    await page.waitForTimeout(400); // buildDrum's resize rebuild is debounced at 200ms
+    await settleLayout(page);
     const geom = await page.evaluate(() => {
       const b = (s: string) => document.querySelector(s)!.getBoundingClientRect();
       const chrome = b('#chrome'), front = b('#drum .card3d.front');
