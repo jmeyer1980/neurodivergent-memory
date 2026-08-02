@@ -677,6 +677,13 @@
     function updateFrontCard(force = false){
       const idx = frontIndexNow();
       if (!force && idx === state.frontIndex) return;
+      // Which memory was front on the way in. Captured before anything mutates,
+      // and deliberately by ID rather than by element or index: buildDrum nulls
+      // state.frontEl and reassigns state.frontIndex before it calls us, so both
+      // of those are already gone by the time the sweep below runs. centeredId
+      // is the only identity that survives, and it is the right one anyway --
+      // the flip belongs to a MEMORY, not to a DOM node or a slot number.
+      const prevCenteredId = state.view.centeredId;
       state.frontIndex = idx;
       // Slide the rendered window if the selection has drifted out of its slack.
       // Must happen before `next` is resolved: a re-cut replaces every node, so a
@@ -696,15 +703,21 @@
           // so a previously-selected memory card's full content must be cleared
           // from its hidden .reader-scroll here too.
           if (!isFront) fillReader(el, '');
-          // Unconditional, not just on the cards losing front: a genuine
-          // markup rebuild never has .flipped to begin with (cardFace never
-          // emits it), but selectCard's fan-mode force update reuses the SAME
-          // persisted nodes without rebuilding markup -- so without this, a
-          // card flipped earlier and later re-selected via a fan gesture
-          // would silently come back showing its meta/chips pane instead of
-          // its text. "Flip THIS card over" must not survive ANY front
-          // change, cylinder-eased or fan-forced alike.
-          el.classList.remove('flipped');
+          // "Flip THIS card over" must not survive a front CHANGE -- selectCard's
+          // fan-mode force update reuses the same persisted nodes without
+          // rebuilding markup, so a card flipped earlier and re-selected via a
+          // fan gesture would otherwise come back showing its meta pane.
+          //
+          // But it must survive a rebuild that does not change the front card.
+          // buildDrum calls updateFrontCard(true) from refreshAndReconcile on
+          // EVERY SSE memory-change and reconnect hello, and from the debounced
+          // resize -- so clearing unconditionally slammed the Details pane shut
+          // mid-read whenever an agent wrote any memory anywhere in the store,
+          // even though nothing about this card changed.
+          const sameMemoryStillFront = isFront
+            && prevCenteredId != null
+            && state.items[idx]?.id === prevCenteredId;
+          if (!sameMemoryStillFront) el.classList.remove('flipped');
         });
       } else if (state.frontEl !== next) {
         // Steady state touches two cards. Sweeping all N here ran once per front
@@ -1267,13 +1280,21 @@
       if (!prev) return;
       const dx = e.clientX - prev.x, dy = e.clientY - prev.y;
       pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      // Net displacement from the press origin, tracked for ANY single captured
+      // pointer before the branches below claim the gesture. The click handler
+      // gates on dragMoved > 8, so every drag has to feed it -- including the
+      // one gesture that owns neither branch: a MOUSE drag inside the reader.
+      // pointerdown deliberately arms neither readerDrag (non-mouse only) nor
+      // state.dragging (non-reader or non-mouse) there, so native text
+      // selection works -- but that left dragMoved at 0, so selecting a phrase
+      // and releasing passed the click guard and DIVED, wiping the selection
+      // and wrapping the memories view back to projects. Measured, not
+      // theorised: level went memories -> projects on every trial.
+      if (pointers.size === 1) {
+        dragMoved = Math.max(dragMoved, Math.abs(e.clientX - dragOrigin.x) + Math.abs(e.clientY - dragOrigin.y));
+      }
       if (readerDrag && pointers.size === 1) {
-        // Net displacement from the press origin, same rule as the spin path.
-        // This MUST keep running even while the reader scrolls: the click
-        // handler gates on dragMoved > 8, so a scroll that left it at 0 would
-        // release into a dive and throw the reader away mid-sentence.
         const ndx = e.clientX - dragOrigin.x, ndy = e.clientY - dragOrigin.y;
-        dragMoved = Math.max(dragMoved, Math.abs(ndx) + Math.abs(ndy));
         if (readerDrag.axis === 'undecided') {
           const axis = H.classifyDragAxis(ndx, ndy);
           if (axis !== 'undecided') {
@@ -1306,8 +1327,10 @@
         // threshold on jitter alone, silently eating clicks "at random". The
         // max is sticky, and tracked above the guard below, so a drag that
         // swings out and back (or was refused mid-transition) still
-        // suppresses the click it ends with.
-        dragMoved = Math.max(dragMoved, Math.abs(e.clientX - dragOrigin.x) + Math.abs(e.clientY - dragOrigin.y));
+        // suppresses the click it ends with. (Now computed once above, for every
+        // single-pointer gesture rather than only the two that used to claim
+        // one; this comment stays because the NET-not-accumulated rule is the
+        // part that is easy to get wrong again.)
         // Mirror the wheel's transition guard: a drag mid-zoom rotates the drum
         // the swap is about to replace, and banks a velocity that releases into
         // the new view as a lurch. The placeholder has no drum to spin at all.
@@ -1430,14 +1453,35 @@
       }
       return best;
     }
+    /**
+     * The element a click should be attributed to.
+     *
+     * pressTarget is pointerdown's target, kept because pointer capture
+     * retargets the click and because Chromium cannot hit-test 3D-rotated
+     * cards. But it is ONLY meaningful for a click a pointer actually
+     * produced. A keyboard activation (Enter/Space on a focused button)
+     * dispatches a click with detail 0 and coordinates 0,0 and never runs
+     * pointerdown, so preferring pressTarget there attributed the press to
+     * whatever the LAST mouse click hit: after clicking Details, Enter on the
+     * focused Back button re-resolved to Details and re-asserted the flip, so
+     * Back was dead; keyboard Edit and Rename resolved elementFromPoint(0,0)
+     * and silently no-opped. Measured on both counts.
+     *
+     * e.detail counts the click sequence, so it is > 0 for real pointer
+     * clicks and 0 for keyboard-synthesised ones — the discriminator the
+     * synthetic front-button click below also relies on.
+     */
+    function clickHit(e) {
+      const fromPointer = e.detail > 0;
+      if (fromPointer && pressTarget && pressTarget.isConnected) return pressTarget;
+      return e.target instanceof Element ? e.target : null;
+    }
     els.stage.addEventListener('click', (e) => {
       if (dragMoved > 8 || state.transitioning) return; // a drag, not a click
       // DOM resolution first — it works for the flat front card and carries
       // the button guard — then the geometric fallback for the side
-      // cards Chromium cannot hit-test. pressTarget survives the capture
-      // retargeting; isConnected covers a drum rebuilt (SSE) mid-press.
-      let hit = (pressTarget && pressTarget.isConnected) ? pressTarget
-        : (e.target instanceof Element ? e.target : null);
+      // cards Chromium cannot hit-test.
+      let hit = clickHit(e);
       if (!hit || !hit.closest('.card3d[data-idx]')) {
         const under = document.elementFromPoint(e.clientX, e.clientY);
         if (under instanceof Element && under.closest('.card3d[data-idx]')) hit = under;
@@ -1741,7 +1785,7 @@
     });
     els.stage.addEventListener('click', (e) => {
       if (dragMoved > 8 || state.transitioning) return;
-      let hit = (pressTarget && pressTarget.isConnected) ? pressTarget : (e.target instanceof Element ? e.target : null);
+      let hit = clickHit(e);
       if (!hit || !hit.closest('[data-rename]')) {
         const under = document.elementFromPoint(e.clientX, e.clientY);
         if (under instanceof Element) hit = under;
@@ -1755,8 +1799,7 @@
       // Same retargeting caveat as the card handler above: the pointerdown's
       // target is the real hit; elementFromPoint only as a last resort (the
       // Edit button lives on the flat front card, where it does still work).
-      let hit = (pressTarget && pressTarget.isConnected) ? pressTarget
-        : (e.target instanceof Element ? e.target : null);
+      let hit = clickHit(e);
       if (!hit || !hit.closest('[data-edit]')) {
         const under = document.elementFromPoint(e.clientX, e.clientY);
         if (under instanceof Element) hit = under;
@@ -1777,8 +1820,7 @@
     // can never leave the card in the wrong face.
     els.stage.addEventListener('click', (e) => {
       if (dragMoved > 8 || state.transitioning) return;
-      let hit = (pressTarget && pressTarget.isConnected) ? pressTarget
-        : (e.target instanceof Element ? e.target : null);
+      let hit = clickHit(e);
       if (!hit || !hit.closest('[data-flip]')) {
         const under = document.elementFromPoint(e.clientX, e.clientY);
         if (under instanceof Element) hit = under;
