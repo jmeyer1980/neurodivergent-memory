@@ -6,6 +6,7 @@ import path from "node:path";
 import net from "node:net";
 import readline from "node:readline";
 import { spawn } from "node:child_process";
+import { stopDaemonOnPort } from "../test-support/daemon.mjs";
 
 function getFreePort() {
   return new Promise((resolve, reject) => {
@@ -83,6 +84,9 @@ test("stdio-proxy forwards initialize to the daemon and reuses the returned sess
     assert.match(text, /Agent: proxy-test-agent/, "identity should flow from clientInfo through the proxy to the daemon");
   } finally {
     proxy.kill();
+    // Reap AFTER the child dies: a live proxy/bridge respawns a daemon the
+    // instant the one it was using disappears.
+    await stopDaemonOnPort(daemonPort);
     fs.rmSync(tempDir, { recursive: true, force: true });
   }
 });
@@ -168,6 +172,7 @@ test("stdio-proxy recovers from an expired session: retries once with no session
     assert.match(text, /Agent: unassigned/, "retry must fall through to the stateless path, not somehow reuse the dead session's identity");
   } finally {
     if (proxy) proxy.kill();
+    await stopDaemonOnPort(daemonPort);
     daemon.kill();
     fs.rmSync(tempDir, { recursive: true, force: true });
   }

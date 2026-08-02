@@ -6,6 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import net from "node:net";
 import { spawn } from "node:child_process";
+import { stopDaemonOnPort } from "../test-support/daemon.mjs";
 
 function getFreePort() {
   return new Promise((resolve, reject) => {
@@ -83,7 +84,12 @@ test("three proxies racing from cold start produce exactly one daemon and lose n
       assert.ok(snapshot.includes(`race memory from proxy ${i}`), `write from proxy ${i} survived`);
     }
   } finally {
+    // Proxies first: a live proxy respawns a daemon the instant the one it was
+    // using disappears. Then ask the port who is actually there now, rather
+    // than killing the pid captured mid-test -- that one can be stale, and the
+    // survivor is what leaks.
     for (const p of proxies) p.kill();
-    if (daemonPid) { try { process.kill(daemonPid); } catch { /* gone */ } }
+    await stopDaemonOnPort(port);
+    if (daemonPid) { try { process.kill(daemonPid); } catch { /* already gone */ } }
   }
 });

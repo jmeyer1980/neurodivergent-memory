@@ -75,7 +75,10 @@
         <div class="field"><label>District</label><select id="districtInput"><option>logical_analysis</option><option>emotional_processing</option><option>practical_execution</option><option>creative_synthesis</option><option>vigilant_monitoring</option></select></div>
         <div class="field"><label>Project</label><select id="carouselInput"></select></div>
         <div class="field"><label>Visibility</label><select id="visibilityInput"><option>private</option><option>shared</option><option>global</option></select></div>
-        <div class="field"><label>Intensity</label><input id="intensityInput" type="number" min="0" max="10" value="5" /></div>
+        <!-- 0-1, matching the store's contract and this page's own edit modal.
+             This said min=0 max=10 value=5 and posted it raw, so every default
+             save stored an intensity of 5 into a 0-1 field. -->
+        <div class="field"><label>Intensity (0–1)</label><input id="intensityInput" type="number" min="0" max="1" step="0.1" value="0.5" /></div>
         <div class="field span2"><label>Content</label><textarea id="contentInput"></textarea></div>
         <div class="field span2"><label>Tags</label><input id="tagsInput" placeholder="topic:..., scope:concept, kind:insight, layer:research, persistence:durable" /></div>
       </div>
@@ -153,7 +156,7 @@
     function renderCarousels(){ els.carouselList.innerHTML = carousels().map(c=>`<button class="carousel ${c.id===state.activeCarousel?'active':''}" data-carousel="${esc(c.id)}"><h3>${esc(c.name)}</h3><p>${esc(c.description)}</p><div class="chips"><span class="chip">${esc(c.scope)}</span><span class="chip">${c.items.length} cards</span><span class="chip">${c.decks.filter(d=>d.items.length).length} districts</span></div></button>`).join(''); document.querySelectorAll('[data-carousel]').forEach(el=>el.onclick=()=>{ state.activeCarousel=el.dataset.carousel; state.deckFilter='all'; render(); }); }
     function renderDeckFilter(){ const c=activeCarousel(); const names = c ? c.decks.map(d=>d.name) : []; els.deckFilter.innerHTML = ['all', ...names].map(v=>`<option value="${esc(v)}">${v==='all'?'All districts':esc(v)}</option>`).join(''); els.deckFilter.value = state.deckFilter; }
     function renderRibbon(){ const decks=filteredDecks(); if(!decks.length){ els.ribbon.innerHTML = `<div class="deck"><div class="deckhead"><div><h3>No matching cards</h3><p>Change search, scope, or district filters.</p></div></div></div>`; return; } const cname = activeCarousel() ? activeCarousel().name : ''; els.ribbon.innerHTML = decks.map(deck=>`<section class="deck"><div class="deckhead"><div><h3>${esc(deck.name)}</h3><p>${deck.items.length} cards in ${esc(cname)}</p></div><div class="chips">${deck.items.slice(0,4).map((_,i)=>`<span class="chip">${i===0?'active':'card'}</span>`).join('')}</div></div><div class="track">${deck.items.map(m=>`<button class="card" data-memory="${esc(m.id)}"><div class="id">${esc(m.id)}</div><h4>${esc(m.name)}</h4><p>${esc(m.content)}</p><div class="meta"><div class="mini"><label>District</label><span>${esc(m.district)}</span></div><div class="mini"><label>Archetype</label><span>${esc(m.archetype||'—')}</span></div><div class="mini"><label>Intensity</label><span>${esc(m.intensity??'—')}</span></div><div class="mini"><label>Connections</label><span>${(m.connections||[]).length}</span></div></div><div class="tags">${(m.tags||[]).slice(0,4).map(tag=>`<span class="chip">${esc(tag)}</span>`).join('')}</div></button>`).join('')}</div></section>`).join(''); document.querySelectorAll('[data-memory]').forEach(el=>el.onclick=()=>{ state.activeMemoryId=el.dataset.memory; renderDetail(); }); }
-    function renderDetail(){ const m = memories().find(x=>x.id===state.activeMemoryId) || memories()[0]; if(!m){ els.detailBody.innerHTML=''; return; } state.activeMemoryId=m.id; const related=(m.connections||[]).map(id=>state.snapshot.memories[id]).filter(Boolean); els.detailBody.innerHTML = `<div class="detailsec"><h3>${esc(m.name)}</h3><p>${esc(m.content)}</p><div class="tags">${[m.scope,m.carouselId,m.deck].map(v=>`<span class="chip">${esc(v)}</span>`).join('')}</div></div><div class="detailsec"><h3>Metadata</h3><ul><li>ID: ${esc(m.id)}</li><li>Project: ${esc(m.carouselId)}</li><li>District: ${esc(m.district)}</li><li>Archetype: ${esc(m.archetype||'—')}</li><li>Created: ${fmt(m.created)}</li><li>Last accessed: ${fmt(m.last_accessed || m.lastaccessed || m.created)}</li><li>Access count: ${m.access_count ?? m.accesscount ?? 0}</li></ul></div><div class="detailsec"><h3>Tags</h3><div class="tags">${(m.tags||[]).map(t=>`<span class="chip">${esc(t)}</span>`).join('')}</div></div><div class="detailsec"><h3>Connections</h3><ul>${related.length?related.map(r=>`<li>${esc(r.id)} — ${esc(r.name)}</li>`).join(''):'<li>No linked memories yet.</li>'}</ul></div><div class="detailsec"><h3>MCP write path</h3><ul><li>Browser app fetches snapshot from the local bridge.</li><li>The bridge polls ${esc(state.memoryPath) || 'your user memories.json'}.</li><li>New cards POST to /save and route to stdio MCP.</li><li>When memories.json changes, SSE triggers a UI refresh.</li></ul></div>`; }
+    function renderDetail(){ const m = memories().find(x=>x.id===state.activeMemoryId) || memories()[0]; if(!m){ els.detailBody.innerHTML=''; return; } state.activeMemoryId=m.id; const related=(m.connections||[]).map(id=>state.snapshot.memories[id]).filter(Boolean); els.detailBody.innerHTML = `<div class="detailsec"><h3>${esc(m.name)}</h3><p>${esc(m.content)}</p><div class="tags">${[m.scope,m.carouselId,m.deck].map(v=>`<span class="chip">${esc(v)}</span>`).join('')}</div></div><div class="detailsec"><h3>Metadata</h3><ul><li>ID: ${esc(m.id)}</li><li>Project: ${esc(m.carouselId)}</li><li>District: ${esc(m.district)}</li><li>Archetype: ${esc(m.archetype||'—')}</li><li>Created: ${fmt(m.created)}</li><li>Last accessed: ${fmt(m.last_accessed || m.lastaccessed || m.created)}</li><li>Access count: ${esc(m.access_count ?? m.accesscount ?? 0)}</li></ul></div><div class="detailsec"><h3>Tags</h3><div class="tags">${(m.tags||[]).map(t=>`<span class="chip">${esc(t)}</span>`).join('')}</div></div><div class="detailsec"><h3>Connections</h3><ul>${related.length?related.map(r=>`<li>${esc(r.id)} — ${esc(r.name)}</li>`).join(''):'<li>No linked memories yet.</li>'}</ul></div><div class="detailsec"><h3>MCP write path</h3><ul><li>Browser app fetches snapshot from the local bridge.</li><li>The bridge polls ${esc(state.memoryPath) || 'your user memories.json'}.</li><li>New cards POST to /save and route to stdio MCP.</li><li>When memories.json changes, SSE triggers a UI refresh.</li></ul></div>`; }
     function populateModalSelects(){ const projects = carousels().filter(c=>c.id!==UNASSIGNED).map(c=>c.id); els.carouselInput.innerHTML = projects.map(id=>`<option value="${esc(id)}">${esc(id)}</option>`).join(''); if(state.activeCarousel && state.activeCarousel!==UNASSIGNED) els.carouselInput.value = state.activeCarousel; }
     function render(){ renderCarousels(); renderDeckFilter(); renderStats(); renderRibbon(); renderDetail(); populateModalSelects(); els.memoryPathText.textContent = state.memoryPath || 'loading…'; els.bridgeState.textContent = state.bridgeState; els.pollState.textContent = state.pollMs ? `Polling ${state.pollMs}ms` : 'Bridge offline';
       const ac = activeCarousel(); els.renameProjectBtn.style.display = (ac && ac.id!==UNASSIGNED) ? '' : 'none'; }
@@ -211,12 +214,22 @@
         content: title + '. ' + content,
         district: $('#districtInput').value,
         visibility,
-        intensity: Number($('#intensityInput').value || 5),
+        // `value || 5` also meant a deliberate 0 became 5, since '0' is falsy.
+        // Read it, then fall back only when the field is genuinely empty.
+        intensity: intensityFrom('#intensityInput', 0.5),
         projectId,
         tags
       };
-      const res = await fetch(`${BRIDGE}/save`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
-      const data = await res.json();
+      let res, data;
+      try {
+        res = await fetch(`${BRIDGE}/save`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
+        data = await res.json();
+      } catch (err) {
+        // Without this the rejection escaped an async onclick: no toast, modal
+        // still open, and the user believing the card was saved.
+        showToast('Could not reach the MCP bridge — the card was not saved.');
+        return;
+      }
       if(!res.ok || !data.ok){ showToast('Save failed through MCP bridge.'); return; }
       state.bridgeState = 'Save routed to MCP. Waiting for file change refresh…';
       render();
@@ -224,11 +237,25 @@
       showToast('Save sent to MCP bridge.');
     }
 
+    /** A number field's value, or the fallback when it is genuinely empty. Never coerces '' to 0. */
+    function intensityFrom(selector, fallback){
+      const raw = $(selector).value.trim();
+      if (raw === '') return fallback;
+      const n = Number(raw);
+      return Number.isFinite(n) ? n : fallback;
+    }
+
     function openEditModal(m){
       if(!m){ showToast('Select a card first.'); return; }
       state.editingId = m.id;
       $('#editContent').value = m.content || '';
       $('#editDistrict').value = m.district || 'practical_execution';
+      // Remember what the select was SEEDED with, not m.district. A memory with
+      // no district is displayed as practical_execution, and posting that value
+      // back unchanged silently refiled it -- so any edit to a district-less
+      // memory (fixing a typo in the content) permanently recategorised it.
+      // Only a real change differs from this.
+      state.editingDistrict = $('#editDistrict').value;
       $('#editProject').value = (m.project_id ?? '');
       $('#editVisibility').value = m.visibility || 'private';
       $('#editIntensity').value = (m.intensity ?? 0.5);
@@ -245,18 +272,30 @@
       if(!content){ showToast('Content cannot be empty.'); return; }
       const project = $('#editProject').value.trim();
       const epistemic = $('#editEpistemic').value;
+      const district = $('#editDistrict').value;
+      const rawIntensity = $('#editIntensity').value.trim();
       const body = {
         memoryId,
         content,
-        district: $('#editDistrict').value,
         visibility: $('#editVisibility').value,
-        intensity: Number($('#editIntensity').value),
         projectId: project === '' ? null : project,
         tags: $('#editTags').value.split(',').map(s=>s.trim()).filter(Boolean)
       };
+      // Send district only if the user actually changed it — see openEditModal.
+      if (district !== state.editingDistrict) body.district = district;
+      // Send intensity only if the field is non-empty: Number('') is 0, so
+      // clearing the field to mean "leave it alone" used to overwrite the
+      // stored value with 0.
+      if (rawIntensity !== '') body.intensity = Number(rawIntensity);
       if(epistemic) body.epistemicStatus = epistemic;
-      const res = await fetch(`${BRIDGE}/update`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
-      const data = await res.json();
+      let res, data;
+      try {
+        res = await fetch(`${BRIDGE}/update`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
+        data = await res.json();
+      } catch (err) {
+        showToast('Could not reach the MCP bridge — nothing was updated.');
+        return;
+      }
       if(!res.ok || !data.ok){ showToast('Update failed through MCP bridge.'); return; }
       state.bridgeState = 'Update routed to MCP. Waiting for file change refresh…';
       render();

@@ -75,7 +75,7 @@
     "lint": "npm run lint:code && npm run lint:md",
     "lint:code": "tsc --noEmit",
     "lint:md": "npx --yes markdownlint-cli --config .markdownlint.json README.md CHANGELOG.md CONTRIBUTING.md CODE_OF_CONDUCT.md SECURITY.md SUPPORT.md TEST_SUMMARY.md SMOKE_TEST_REPORT.md",
-    "test": "npm run build && node --test",
+    "test": "npm run build && node test-support/run-tests.mjs",
     "smoke:project-id": "npm run build && node test/live-project-id-smoke.mjs",
     "smoke:project-id:target": "node test/live-project-id-smoke.mjs",
     "benchmark": "npm run build && node benchmarks/memory-benchmark.mjs",
