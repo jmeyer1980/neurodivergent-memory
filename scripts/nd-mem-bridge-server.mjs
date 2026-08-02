@@ -40,7 +40,6 @@ let clients = new Set();
 // side of it). Every connected page then refetched the whole snapshot and
 // rebuilt its drum for nothing.
 let lastFingerprint = statFingerprint();
-let lastMtimeMs = currentMtimeMs();
 
 function readSnapshot() {
   if (!fs.existsSync(MEMORY_PATH)) return { nextMemoryId: 1, memories: {}, missing: true, path: MEMORY_PATH };
@@ -58,10 +57,6 @@ function statFingerprint() {
   }
 }
 
-function currentMtimeMs() {
-  try { return fs.statSync(MEMORY_PATH).mtimeMs; } catch { return 0; }
-}
-
 function broadcast(event, data) {
   const payload = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
   for (const client of clients) client.write(payload);
@@ -71,9 +66,14 @@ function pollForChanges() {
   const fingerprint = statFingerprint();
   if (fingerprint === lastFingerprint) return;
   lastFingerprint = fingerprint;
-  const mtimeMs = currentMtimeMs();
-  if (mtimeMs === lastMtimeMs && fingerprint !== 'missing') return;
-  lastMtimeMs = mtimeMs;
+  // There was a second guard here comparing mtime alone, and it could only ever
+  // LOSE changes. mtime is already the first component of the fingerprint, so
+  // the guard was redundant on its face — but it ran AFTER lastFingerprint had
+  // been advanced, so a write landing inside the same mtime tick (size-only
+  // delta) was swallowed and then invisible forever: every later poll compared
+  // against the already-updated fingerprint and saw no difference. Most
+  // reachable through bulkReassign, which POSTs its updates in a tight
+  // sequential loop that easily lands two writes in one millisecond.
   broadcast('memory-change', { path: MEMORY_PATH, fingerprint, changedAt: new Date().toISOString() });
 }
 setInterval(pollForChanges, POLL_MS);
