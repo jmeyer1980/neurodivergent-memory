@@ -70,8 +70,9 @@ carousel — and answering it twice would produce two answers.
 `tags`, `min_score` passed straight through (the tool already accepts all of them).
 
 It calls `search_memories` via the existing `runMcpTool`, then **parses only the
-`[score]` and `memory_id` pairs** out of the response and hydrates full records from
-the snapshot it already reads for `/memories`. Response:
+`[score]` and `memory_id` pairs** out of the response. The route returns those two
+fields and nothing else; the **page** hydrates full records from the snapshot it
+already holds. Response:
 
 ```json
 { "hits": [ { "id": "memory_123", "score": 0.873 } ], "total": 12, "query": "deploy" }
@@ -79,6 +80,21 @@ the snapshot it already reads for `/memories`. Response:
 
 **Rulings:**
 
+- **`search_memories` returns the WHOLE store, and the bridge must drop the
+  zeroes.** Its `min_score` defaults to `0`; BM25 scores a document containing
+  none of the query terms exactly `0`, and the Robertson IDF variant it uses is
+  always positive, so a score is never negative. `0 >= 0` passes the threshold,
+  and there is no result cap in the tool — so an unfiltered response ranks the
+  real matches first and then lists **every other memory in the store at
+  `0.000`**. Against a design that dims rather than filters, that means every
+  card is lit and the query discriminates nothing. `/search` therefore keeps only
+  `score > 0`. Filtered at the bridge rather than by passing a small epsilon as
+  `min_score`, because the tool's schema documents `minimum: 0` and this is the
+  only place the reason can be written down. Cost: scores arrive through prose at
+  three decimals, so a genuine match normalising below `0.0005` of the top hit
+  reads as `0.000` and is dropped with the misses — it takes a single very common
+  query term plus an extreme document-length spread, and a card missing from the
+  lit set is a far smaller failure than every card being in it.
 - **Parse minimally.** Recovering two tokens per line is a much narrower contract
   than parsing titles, archetypes and truncated previews — and everything else is
   already available locally, at full fidelity, in the snapshot.
@@ -199,16 +215,24 @@ is for". Nobody long-presses a card to discover what happens.
 
 **Contract** (`test/bridge-search-contract.test.mjs`): a real `search_memories`
 call against a seeded temp store, asserting the parser recovers the expected ids.
-Guards the one fragile seam in the design.
+Guards the one fragile seam in the design. Seeds **two** memories, one of which
+shares no token with the query, and asserts that one is **absent** from the hits —
+with a single seed, "returned the match" and "returned the entire store" are the
+same response, and the entire store is what the tool actually returns (see §2).
 
 **Browser** (`e2e/rolodex-layout.spec.ts`):
 - searching dims non-matches and leaves every card's position unchanged
-  (positions captured before and after and asserted identical)
+  (positions captured before and after and asserted identical), asserting the lit
+  and dimmed counts **separately** — summing them passes when nothing dims
 - a project card lights when a memory inside it matches
 - the query survives a dive: search at the wall, dive into a lit project, and the
   matching districts are lit without re-typing
-- stepping skips to the next lit card while a search is active
-- clearing restores opacity and the coordinate
+- stepping skips to the next lit card while a search is active, and takes the
+  short way round the drum to reach it
+- clearing restores opacity (the coordinate's reappearance is CSS-only —
+  `#locus.searching` is toggled by the same input handler that clears the query —
+  and is left to the "search must not move a card" guard rather than asserted
+  separately)
 - `+` opens with the correct pre-fill at each level
 - long-press on a district card pre-fills project and district
 - the chrome bar keeps every control on screen at all five viewports **with the

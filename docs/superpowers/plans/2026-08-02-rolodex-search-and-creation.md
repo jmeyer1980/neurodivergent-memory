@@ -616,7 +616,7 @@ git commit -m "feat(rolodex): parse search hits out of the daemon's prose"
 - Create: `test/bridge-search-contract.test.mjs`
 
 **Interfaces:**
-- Consumes: `parseSearchResults` from Task 4; the existing `runMcpTool(toolName, args)` and `readSnapshot()`.
+- Consumes: `parseSearchResults` from Task 4; the existing `runMcpTool(toolName, args)`. (NOT `readSnapshot()` — the route returns `{id, score}` only and hydrates nothing; the page does that from the snapshot it already holds.)
 - Produces: `GET /search?q=…` returning `{ ok: true, query, total, hits: [{ id, score }] }`.
 
 - [ ] **Step 1: Write the failing contract test**
