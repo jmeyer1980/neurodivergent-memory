@@ -75,6 +75,48 @@ export class FileSystemCoordinationLock {
     }
   }
 
+  /**
+   * Blocking sibling of acquire(), for the one writer that cannot await:
+   * saveToDiskSync, the startup WAL-compaction path.
+   *
+   * That path took no lock at all, so with filesystem-lock mode enabled a
+   * second process starting up with pending WAL entries wrote the snapshot
+   * while a running writer held the lock inside saveToDiskAsync — the exact
+   * concurrent write the lock exists to prevent, in the one scenario
+   * (simultaneous startup) it most needs to.
+   *
+   * Spins on the same O_EXCL primitive rather than sleeping, because there is
+   * no way to yield from a synchronous call. The wait is bounded by the same
+   * timeout and only runs when coordination mode is explicitly enabled, so the
+   * default path never reaches it.
+   */
+  acquireSync(): void {
+    const deadline = Date.now() + this.acquireTimeoutMs;
+    const payload = JSON.stringify({ pid: process.pid, timestamp: new Date().toISOString() });
+
+    while (true) {
+      if (this.tryAcquireSync(payload)) return;
+
+      if (Date.now() >= deadline) {
+        const holder = this.readLockHolder();
+        const holderMsg = holder
+          ? ` Currently held by pid=${holder.pid} since ${holder.timestamp}.`
+          : "";
+        throw createNMError(
+          NM_ERRORS.COORDINATION_LOCK_TIMEOUT,
+          `Could not acquire filesystem coordination lock after ${this.acquireTimeoutMs}ms.${holderMsg}`,
+          `Another neurodivergent-memory server process is writing to the same storage path. ` +
+            `Wait for it to finish, stop the other process, or remove the stale lock file: ${this.lockFile}`,
+        );
+      }
+
+      // Busy-wait deliberately: Atomics.wait needs a SharedArrayBuffer and this
+      // contends only against other startups, which are short.
+      const spinUntil = Date.now() + RETRY_INTERVAL_MS;
+      while (Date.now() < spinUntil) { /* spin */ }
+    }
+  }
+
   release(): void {
     try {
       fs.unlinkSync(this.lockFile);
