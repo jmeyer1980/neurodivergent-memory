@@ -323,7 +323,21 @@
           moved++;
         }
         state.activeCarousel = target;
-        try { await loadSnapshot(); } catch { /* SSE will refresh; success toast still shows */ }
+        // Reloading immediately raced the daemon's flush: the writes are
+        // acknowledged over HTTP before memories.json is rewritten, so a
+        // snapshot fetched right away could still describe the OLD project and
+        // the view would sit on stale grouping until the bridge's next 1.5s
+        // poll happened to notice. Re-read until the rename is actually
+        // visible, bounded so a genuinely failed flush still falls through to
+        // the SSE refresh rather than hanging the modal.
+        const deadline = Date.now() + 3000;
+        while (Date.now() < deadline) {
+          try { await loadSnapshot(); } catch { break; /* SSE will refresh */ }
+          const landed = Object.values(state.snapshot?.memories || {})
+            .some(m => projectOf(m) === target);
+          if (landed) break;
+          await new Promise(r => setTimeout(r, 150));
+        }
         showToast(`Moved ${moved} card${moved===1?'':'s'} from ${source} to ${target}.`);
       } finally {
         setWriteButtonsDisabled(false);
