@@ -653,8 +653,14 @@
       updateFrontCard(true);
     }
 
+    // The rotation the DOM currently shows. null forces the first frame through.
+    let lastAppliedRotation = null;
     function applyDrumTransform(){
       els.drum.style.transform = `translateZ(${-state.radius}px) rotateY(${state.rotation}deg)`;
+      // Records what the DOM now shows, so tick() can skip a frame that would
+      // rewrite the identical transform. Kept here rather than at tick's call
+      // site so every caller keeps it accurate.
+      lastAppliedRotation = state.rotation;
     }
 
     // The reader's text lives on exactly one card at a time. Keeping it in the
@@ -1094,8 +1100,23 @@
           if (Math.abs(d) > 0.05) state.rotation += REDUCED ? d : d * 0.14;
           else state.rotation = target;
         }
-        applyDrumTransform();
-        updateFrontCard();
+        // Only touch the DOM when the rotation actually moved. At rest the
+        // branches above converge on `state.rotation === target` and then keep
+        // re-deriving the same number forever, so this used to rewrite the
+        // drum's transform and re-run updateFrontCard 60 times a second on a
+        // drum nobody was touching — pure battery cost on exactly the phones
+        // this UI is read on. The settling frame still runs (the rotation
+        // differs on it), so the selection is applied once and then left alone.
+        //
+        // The cache is maintained INSIDE applyDrumTransform, not here, so the
+        // other callers — buildDrum, the reduced-motion jumps, the drag and
+        // click paths — keep it coherent for free. Tracking it only here would
+        // have stranded the two reduced-motion paths that apply a transform
+        // without an updateFrontCard beside it.
+        if (state.rotation !== lastAppliedRotation) {
+          applyDrumTransform();
+          updateFrontCard();
+        }
       }
       requestAnimationFrame(tick);
     }
