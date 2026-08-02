@@ -66,6 +66,22 @@
     #crumb .seg:disabled:hover{background:none}
     #crumb .sep{color:var(--faint);padding:0 1px}
     #position{flex:0 0 auto;font-size:.78rem;color:var(--muted);white-space:nowrap}
+    /* Shares the band's row. While a query is active the coordinate hides: the
+       coordinate answers "where am I", the query answers "what am I looking
+       for", and both are rarely needed at once. The row already wraps at every
+       width and is already guarded at five viewports. */
+    #searchInput{flex:1 1 12rem;min-width:0;padding:4px 10px;border-radius:999px;
+      border:1px solid var(--surfaceBorder);background:var(--wash);color:var(--text);
+      font:inherit;font-size:.82rem}
+    #searchInput::placeholder{color:var(--faint)}
+    /* visibility, not display:none: #crumb wraps to two lines at real
+       coordinate depths on a narrow viewport (see the #chrome comment above),
+       so REMOVING it from flow shrinks #locus, which shrinks the measured
+       --chromeH #stage insets by, which moves every card up the moment a
+       query starts -- caught by the "search must not move a single card"
+       test on mobile-safari at the memories depth. Keeping its box (just
+       painted transparent) holds #chrome's height steady either way. */
+    #locus.searching #crumb{visibility:hidden}
     /* Inset below the chrome rather than sitting under it. #chrome is fixed, so
        for as long as #stage started at the viewport top the bar simply COVERED
        the card — harmless while the coordinate was one ellipsised pill, and not
@@ -105,6 +121,15 @@
     #stage[data-level="memories"]{--cardH:min(500px, 88%)}
     .card3d{position:absolute;inset:0;display:flex;flex-direction:column;gap:10px;padding:18px;border-radius:24px;border:1px solid var(--surfaceBorder);background:var(--cardWash),radial-gradient(circle at top right,rgba(var(--tint),.16),transparent 38%),var(--cardBase);box-shadow:0 18px 40px rgba(0,0,0,.35);backface-visibility:hidden;transition:opacity .3s,box-shadow .3s,border-color .3s,transform .25s ease;opacity:.55}
     .card3d.front{opacity:1;border-color:rgba(var(--tint),.4);box-shadow:0 24px 60px rgba(0,0,0,.5),0 0 30px rgba(var(--tint),.12)}
+    /* Dim the misses; light the hits. Composes with the existing card states
+       rather than replacing them -- .flipped and the ::after affordance below
+       are untouched. Declared AFTER .card3d.front on purpose: equal
+       specificity (two classes each) means source order decides, and the
+       front card's own opacity/border-color rule above would otherwise always
+       win, silently hiding the classification on exactly the one card being
+       looked at. */
+    .card3d.search-dim{opacity:.25}
+    .card3d.search-hit{border-color:var(--primary)}
     /* A sign, not a control. Chromium cannot hit-test a 3D-rotated card —
        pointer events AND elementFromPoint both return #scene — which is why
        every real button lives on .card3d.front only. A pseudo-element adds no
@@ -360,7 +385,7 @@
       <button class="pill" id="themeBtn" title="Toggle theme">◐</button>
       <a class="pill" href="/">Classic view</a>
     </div>
-    <div id="locus"><span id="crumb"></span><span id="position">—</span></div>
+    <div id="locus"><input id="searchInput" type="search" placeholder="Search memories…" autocomplete="off" spellcheck="false" /><span id="crumb"></span><span id="position">—</span></div>
   </div>
   <div id="stage" data-level="projects"><div id="scene"><div id="drum"></div></div></div>
   <div id="spin">
@@ -421,7 +446,7 @@
     const NODE_LABEL_PX = 58; // 10 monospace chars at .6rem; see truncateNodeLabel
 
     const $ = s => document.querySelector(s);
-    const els = { stage: $('#stage'), scene: $('#scene'), drum: $('#drum'), crumb: $('#crumb'), position: $('#position'), connState: $('#connState'), backBtn: $('#backBtn'), overlay: $('#overlay'), overlayMsg: $('#overlayMsg'), retryBtn: $('#retryBtn'), toast: $('#toast'), hudHint: $('#hudHint'), minimap: $('#minimap'), mapBody: $('#mapBody'), mapToggle: $('#mapToggle'), spin: $('#spin'), spinPrev: $('#spinPrev'), spinNext: $('#spinNext'), helpBtn: $('#helpBtn'), helpModalBg: $('#helpModalBg'), createBtn: $('#createBtn') };
+    const els = { stage: $('#stage'), scene: $('#scene'), drum: $('#drum'), crumb: $('#crumb'), position: $('#position'), connState: $('#connState'), backBtn: $('#backBtn'), overlay: $('#overlay'), overlayMsg: $('#overlayMsg'), retryBtn: $('#retryBtn'), toast: $('#toast'), hudHint: $('#hudHint'), minimap: $('#minimap'), mapBody: $('#mapBody'), mapToggle: $('#mapToggle'), spin: $('#spin'), spinPrev: $('#spinPrev'), spinNext: $('#spinNext'), helpBtn: $('#helpBtn'), helpModalBg: $('#helpModalBg'), createBtn: $('#createBtn'), searchInput: $('#searchInput'), locus: $('#locus') };
 
     // Three hand-tuned offsets (64/108/56) each encoded a guess at how tall
     // #chrome renders at that breakpoint. The band would have needed a fourth.
@@ -466,6 +491,7 @@
       editingDistrict: null, // district the edit modal was seeded with, to detect a real change
       modalMode: null,       // 'edit' or 'create' -- which mode the edit modal is currently wearing
       renamingProject: null,
+      search: { query: '', hits: new Map() },
     };
 
     function esc(v){ return String(v ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
@@ -757,6 +783,7 @@
       fillReader(next, state.items[idx]?.data?.content ?? '');
       state.view.centeredId = centeredItem()?.id ?? null;
       updateChrome();
+      renderSearchState();
     }
 
     function depthNow(){ return H.navDepth(state.tree); }
@@ -901,6 +928,23 @@
       // A fan has ends: stepping past one is a no-op rather than a wrap
       // (selectCard's own clamp), and selectCard drives the rotation there.
       if (state.layout.mode === 'fan') { selectCard(state.frontIndex + n); return; }
+      // While a search is active, step hit-to-hit: a 364-memory bucket is not
+      // worth spinning through one dark card at a time.
+      if (state.search.hits.size) {
+        const target = H.nextLitIndex(state.items, state.search.hits, state.snapshot, state.view, state.frontIndex, n > 0 ? 1 : -1);
+        if (target === state.frontIndex) return;
+        // Relative to the CURRENT rotation, not the target's raw angle: this
+        // drum accumulates real turns as it spins (see the identical
+        // `state.rotation + H.shortestDelta(...)` a few lines below), so handing
+        // rotationForCard's absolute small-range angle straight to stepTarget
+        // would send a heavily-spun drum the long way around -- laps of empty
+        // rotation to reach a card it could have turned to directly.
+        const goal = state.rotation + H.shortestDelta(state.rotation, H.rotationForCard(target, state.layout));
+        state.velocity = 0;
+        if (REDUCED) { state.stepTarget = null; state.rotation = goal; applyDrumTransform(); }
+        else state.stepTarget = goal;
+        return;
+      }
       const raw = state.frontIndex + n;
       const idx = ((raw % count) + count) % count;
       if (idx === state.frontIndex) return;
@@ -1696,6 +1740,58 @@
     }
     els.spinPrev.addEventListener('click', () => spinFromButton('arrowLeft'));
     els.spinNext.addEventListener('click', () => spinFromButton('arrowRight'));
+
+    // ---------- search ----------
+    // Applied to the rendered window only, and re-applied after any rebuild.
+    function renderSearchState(){
+      const { hits } = state.search;
+      els.drum.querySelectorAll('.card3d[data-idx]').forEach((el) => {
+        const item = state.items[Number(el.dataset.idx)];
+        if (!item || !hits.size) { el.classList.remove('search-dim', 'search-hit'); return; }
+        const lit = H.isLit(item, hits, state.snapshot, state.view);
+        el.classList.toggle('search-hit', lit);
+        el.classList.toggle('search-dim', !lit);
+      });
+    }
+    // 250ms debounce, and a later query always wins: /search is a daemon round
+    // trip, so a call per keystroke would both lag and land out of order.
+    let searchTimer = null;
+    let searchSeq = 0;
+    async function runSearch(query){
+      const seq = ++searchSeq;
+      if (!query) { state.search = { query: '', hits: new Map() }; renderSearchState(); return; }
+      try {
+        const res = await fetch(`${BRIDGE}/search?q=${encodeURIComponent(query)}`);
+        const data = await res.json();
+        if (seq !== searchSeq) return; // superseded
+        state.search = { query, hits: new Map((data.hits || []).map(h => [h.id, h.score])) };
+      } catch {
+        if (seq !== searchSeq) return;
+        state.search = { query, hits: new Map() };
+        showToast('Search could not reach the bridge.');
+      }
+      renderSearchState();
+    }
+    els.searchInput.addEventListener('input', () => {
+      const q = els.searchInput.value.trim();
+      els.locus.classList.toggle('searching', q !== '');
+      clearTimeout(searchTimer);
+      searchTimer = setTimeout(() => runSearch(q), 250);
+    });
+    els.searchInput.addEventListener('keydown', (e) => {
+      // Escape clears the query, never a modal or a zoom-out. Verified against
+      // the real listeners, not assumed: opening any modal moves focus off this
+      // input (confirmed by driving it), so this handler only ever runs while
+      // #searchInput itself has focus. Nothing behaves differently just because
+      // a modal happens to be open elsewhere in the DOM -- the window-level
+      // handler's own `t.closest('input, textarea, select')` bail-out is what
+      // already keeps THIS Escape from reaching its zoomOut/modal-close logic,
+      // the same guard that protects every other text field on the page.
+      // stopPropagation is defensive, matching the modal-scoped Escape
+      // handlers' own convention, though the bail-out above means it is not
+      // load-bearing here the way it is for them.
+      if (e.key === 'Escape') { e.stopPropagation(); els.searchInput.value = ''; els.locus.classList.remove('searching'); clearTimeout(searchTimer); runSearch(''); }
+    });
 
     // ---------- edit modal ----------
     const CANONICAL = H.CANONICAL_DISTRICTS;

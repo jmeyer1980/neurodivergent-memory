@@ -819,3 +819,54 @@ test("long-pressing a project card's Rename control opens rename, not create", a
   await expect(page.locator('#renameModalBg')).toHaveClass(/open/);
   await expect(page.locator('#editModalBg')).not.toHaveClass(/open/);
 });
+
+// Search DIMS rather than filtering or reordering: a 3D ring's one advantage
+// over a list is that "my card was over there" stays true.
+test('search dims non-matches without moving a single card', async ({ page }) => {
+  test.slow();
+  expect(await diveToMemories(page)).toBe('memories');
+
+  const before = await page.evaluate(() => [...document.querySelectorAll('#drum .card3d')]
+    .map(c => { const r = c.getBoundingClientRect(); return { idx: (c as HTMLElement).dataset.idx, x: Math.round(r.x), y: Math.round(r.y) }; }));
+
+  // Query a word certain to appear in this store's own memories.
+  await page.locator('#searchInput').fill('memory');
+  await page.waitForTimeout(1200); // 250ms debounce + daemon round trip
+
+  const after = await page.evaluate(() => [...document.querySelectorAll('#drum .card3d')]
+    .map(c => { const r = c.getBoundingClientRect(); return { idx: (c as HTMLElement).dataset.idx, x: Math.round(r.x), y: Math.round(r.y) }; }));
+  expect(after, 'search must not move any card').toEqual(before);
+
+  const dimmed = await page.evaluate(() =>
+    document.querySelectorAll('#drum .card3d.search-dim').length);
+  const lit = await page.evaluate(() =>
+    document.querySelectorAll('#drum .card3d.search-hit').length);
+  expect(lit + dimmed, 'every rendered card should be classified once a search is active')
+    .toBe(after.length);
+  expect(lit, 'the query should match at least one memory in this store').toBeGreaterThan(0);
+
+  // Clearing restores everything.
+  await page.locator('#searchInput').fill('');
+  await page.waitForTimeout(600);
+  expect(await page.evaluate(() => document.querySelectorAll('#drum .card3d.search-dim').length)).toBe(0);
+});
+
+// The same query means something at every depth: one call, held once,
+// re-interpreted one level deeper each time you dive.
+test('a search at the wall survives a dive and lights the districts inside', async ({ page }) => {
+  test.slow();
+  await page.locator('#searchInput').fill('memory');
+  await page.waitForTimeout(1200);
+  const litProjects = await page.evaluate(() => document.querySelectorAll('#drum .card3d.search-hit').length);
+  expect(litProjects, 'at least one project should contain a match').toBeGreaterThan(0);
+
+  // Dive into the centred card, which the search left in place.
+  const box = page.viewportSize()!;
+  await page.mouse.click(box.width / 2, box.height / 2);
+  await page.waitForTimeout(1700);
+
+  expect(await page.locator('#searchInput').inputValue(), 'the query must survive the dive').toBe('memory');
+  const stillClassified = await page.evaluate(() =>
+    document.querySelectorAll('#drum .card3d.search-hit, #drum .card3d.search-dim').length);
+  expect(stillClassified, 'the deeper level should be classified by the same query').toBeGreaterThan(0);
+});
