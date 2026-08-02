@@ -1635,8 +1635,7 @@
       state.editingId = null;
       $('#editModalTitle').textContent = 'New memory';
       $('#editSaveBtn').textContent = 'Create';
-      const districts = H.CANONICAL_DISTRICTS;
-      $('#editDistrict').innerHTML = districts.map(d => `<option value="${esc(d)}">${esc(d)}</option>`).join('');
+      $('#editDistrict').innerHTML = CANONICAL.map(d => `<option value="${esc(d)}">${esc(d)}</option>`).join('');
       $('#editContent').value = '';
       $('#editDistrict').value = defaults.district || 'practical_execution';
       // Seeded the same way openEditModal does, so submitEdit's "only send a
@@ -1706,26 +1705,48 @@
       if (epistemic) body.epistemicStatus = epistemic;
 
       const route = creating ? '/save' : '/update';
-      let res, data;
-      try {
-        res = await fetch(`${BRIDGE}${route}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-        data = await res.json();
-      } catch {
-        showToast('Could not reach the bridge — nothing was saved.');
+
+      // Create and edit deliberately diverge below this point. Edit mode keeps
+      // its pre-existing shape byte-for-byte (single combined failure message,
+      // no catch-vs-rejection distinction) so an in-flight, unsaved edit still
+      // gets the "the modal is untouched, fix and retry" reassurance it always
+      // has. Create mode has no pre-existing behaviour to preserve, so it tells
+      // network failure and a rejected create apart instead.
+      if (creating) {
+        let res, data;
+        try {
+          res = await fetch(`${BRIDGE}${route}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+          data = await res.json();
+        } catch {
+          showToast('Could not reach the bridge — nothing was saved.');
+          return;
+        }
+        if (!res.ok || !data.ok) { showToast('Create failed.'); return; }
+        $('#editModalBg').classList.remove('open');
+        showToast('Memory created.');
+        // See the matching comment in the edit branch below for why this runs
+        // last and why its own failure is swallowed.
+        try { await loadSnapshot(); refreshAndReconcile(); } catch {}
         return;
       }
-      if (!res.ok || !data.ok) { showToast(creating ? 'Create failed.' : 'Update failed.'); return; }
-      $('#editModalBg').classList.remove('open');
-      showToast(creating ? 'Memory created.' : 'Memory updated.');
-      // The snapshot is otherwise only fetched at init, so both the card and a
-      // reopened modal would keep showing pre-edit values — and a second edit of
-      // the same memory would re-POST that stale content, silently reverting the
-      // first. This runs last so a reconcile toast ("centered card was removed",
-      // "this view emptied") lands after the success toast and survives, instead
-      // of being overwritten by it. Refresh failure is caught separately: the
-      // save already succeeded, so a stale card is acceptable but a stuck modal
-      // (or a false failure toast from the outer catch) is not.
-      try { await loadSnapshot(); refreshAndReconcile(); } catch {}
+      try {
+        const res = await fetch(`${BRIDGE}${route}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+        const data = await res.json();
+        if (!res.ok || !data.ok) throw new Error('update failed');
+        $('#editModalBg').classList.remove('open');
+        showToast('Update routed through the bridge.');
+        // The snapshot is otherwise only fetched at init, so both the card and a
+        // reopened modal would keep showing pre-edit values — and a second edit of
+        // the same memory would re-POST that stale content, silently reverting the
+        // first. This runs last so a reconcile toast ("centered card was removed",
+        // "this view emptied") lands after the success toast and survives, instead
+        // of being overwritten by it. Refresh failure is caught separately: the
+        // save already succeeded, so a stale card is acceptable but a stuck modal
+        // (or a false failure toast from the outer catch) is not.
+        try { await loadSnapshot(); refreshAndReconcile(); } catch {}
+      } catch {
+        showToast('Update failed — the modal is untouched, fix and retry.');
+      }
     }
 
     // ---------- project rename ----------
