@@ -870,3 +870,22 @@ test('a search at the wall survives a dive and lights the districts inside', asy
     document.querySelectorAll('#drum .card3d.search-hit, #drum .card3d.search-dim').length);
   expect(stillClassified, 'the deeper level should be classified by the same query').toBeGreaterThan(0);
 });
+
+// window's contextmenu handler predates the search box and only exempted
+// modal text fields from its "right-click zooms out" behaviour -- #searchInput
+// is a text field that lives outside any modal, so a right-click (or an iOS
+// long-press) on it must keep the native menu instead of navigating away
+// mid-query.
+test('right-clicking the search input does not navigate the drum', async ({ page }) => {
+  test.slow();
+  expect(await diveToMemories(page)).toBe('memories');
+  await page.locator('#searchInput').fill('memory');
+  await page.waitForTimeout(1200);
+
+  await page.locator('#searchInput').click({ button: 'right' });
+  await page.waitForTimeout(1700); // zoomOut's transitionTo takes two ~700ms halves if it fires
+
+  expect(await page.evaluate(() => (document.querySelector('#stage') as HTMLElement).dataset.level),
+    'a right-click in the search box must not zoom the drum out').toBe('memories');
+  expect(await page.locator('#searchInput').inputValue(), 'the query must survive a right-click').toBe('memory');
+});

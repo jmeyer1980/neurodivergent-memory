@@ -66,21 +66,34 @@
     #crumb .seg:disabled:hover{background:none}
     #crumb .sep{color:var(--faint);padding:0 1px}
     #position{flex:0 0 auto;font-size:.78rem;color:var(--muted);white-space:nowrap}
-    /* Shares the band's row. While a query is active the coordinate hides: the
-       coordinate answers "where am I", the query answers "what am I looking
-       for", and both are rarely needed at once. The row already wraps at every
-       width and is already guarded at five viewports. */
+    /* Shares the band's row, sized to match the surrounding pills. The
+       coordinate (#crumb) does NOT free any space when a query is active --
+       see #locus.searching below, which keeps its box on purpose -- so this
+       is purely "one more thing sharing the row", not "the row grows". */
     #searchInput{flex:1 1 12rem;min-width:0;padding:4px 10px;border-radius:999px;
       border:1px solid var(--surfaceBorder);background:var(--wash);color:var(--text);
-      font:inherit;font-size:.82rem}
+      font:inherit;font-size:.82rem;user-select:text}
     #searchInput::placeholder{color:var(--faint)}
-    /* visibility, not display:none: #crumb wraps to two lines at real
-       coordinate depths on a narrow viewport (see the #chrome comment above),
-       so REMOVING it from flow shrinks #locus, which shrinks the measured
-       --chromeH #stage insets by, which moves every card up the moment a
-       query starts -- caught by the "search must not move a single card"
-       test on mobile-safari at the memories depth. Keeping its box (just
-       painted transparent) holds #chrome's height steady either way. */
+    /* 16px, not the .82rem (~13px) above, on a coarse (touch) pointer only:
+       below 16px, iOS Safari zooms the visual viewport on focus, which would
+       visibly move every card -- the exact invariant this feature exists to
+       defend, and one Playwright's WebKit cannot reproduce (no CDP, so this
+       needed reasoning from the platform behaviour, not a failing test).
+       Scoped to touch rather than applied everywhere: a mouse pointer never
+       triggers that zoom, so the desktop band keeps its tighter, pill-matching
+       size instead of an oversized input nobody there needs. */
+    @media (pointer: coarse){
+      #searchInput{font-size:16px}
+    }
+    /* visibility, not display:none, when a query is active: #crumb wraps to
+       two lines at real coordinate depths on a narrow viewport (see the
+       #chrome comment above), so REMOVING it from flow would shrink #locus,
+       which would shrink the measured --chromeH #stage insets by, moving
+       every card up the instant a query starts -- caught by the "search must
+       not move a single card" test on mobile-safari at the memories depth.
+       Keeping its box (just painted transparent) holds #chrome's height
+       steady either way; nothing here frees up room for #searchInput, which
+       is sized independently above. */
     #locus.searching #crumb{visibility:hidden}
     /* Inset below the chrome rather than sitting under it. #chrome is fixed, so
        for as long as #stage started at the viewport top the bar simply COVERED
@@ -1703,6 +1716,13 @@
       if (action === 'dive' || action === 'centerThenDive') dive();
     });
     window.addEventListener('contextmenu', (e) => {
+      // Every text field keeps its native menu, not just the ones inside a
+      // modal -- #searchInput lives on the chrome bar itself, outside any
+      // modal, and without this a right-click (or an iOS long-press) on it
+      // suppressed the menu AND navigated the drum up a level mid-query.
+      // Same guard shape as the keydown handler below.
+      const t = e.target instanceof Element ? e.target : null;
+      if (t && t.closest('input, textarea, select')) return;
       if (document.querySelector('.modalbg.open')) return; // modal text fields keep the native menu
       e.preventDefault();
       if (!state.transitioning) zoomOut();
