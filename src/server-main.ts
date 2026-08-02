@@ -1457,9 +1457,14 @@ class NeurodivergentMemory {
   }
 
   private async saveToDiskAsync(): Promise<void> {
+    // Name the temp file BEFORE taking the lock. It needs nothing the lock
+    // protects, and computing it after acquire() put a statement between the
+    // acquire and the try/finally — so a throw there (crypto.randomBytes can
+    // fail if the entropy source does) would strand the lock and block every
+    // other writer until someone deleted the lock file by hand.
+    const tmp = this.tempSnapshotPath();
     // Acquire cross-process lock if coordination mode is enabled.
     await this.coordinationLock?.acquire();
-    const tmp = this.tempSnapshotPath();
     try {
       await fs.promises.mkdir(PERSISTENCE_DIR, { recursive: true });
       const snapshot = this.createSnapshot();
@@ -1480,8 +1485,9 @@ class NeurodivergentMemory {
     // it, two processes starting up together raced each other's snapshot write
     // while filesystem-lock mode was on, defeating the lock in the one case it
     // was added for.
-    this.coordinationLock?.acquireSync();
+    // Named before the lock, for the reason given in saveToDiskAsync.
     const tmp = this.tempSnapshotPath();
+    this.coordinationLock?.acquireSync();
     try {
       fs.mkdirSync(PERSISTENCE_DIR, { recursive: true });
       const snapshot = this.createSnapshot();

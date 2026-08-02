@@ -28,7 +28,15 @@ const POLL_MS = Number(process.env.ND_MEM_POLL_MS || 1500);
 // snapshot refetch plus a whole drum rebuild — which is why the rolodex
 // "randomly reloaded" on an iPhone and never once on the desktop. A comment
 // frame is ignored by EventSource and keeps the connection warm.
-const HEARTBEAT_MS = Number(process.env.ND_MEM_BRIDGE_HEARTBEAT_MS || 20000);
+// 0 or garbage means DISABLE the heartbeat, not "fire as fast as possible".
+// Node coerces a NaN or 0 delay to ~1ms, so a typo in this variable would have
+// spun a timer writing to every open SSE socket thousands of times a second.
+const HEARTBEAT_MS = (() => {
+  const raw = process.env.ND_MEM_BRIDGE_HEARTBEAT_MS;
+  if (raw === undefined || raw === '') return 20000;
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+})();
 
 app.use(cors());
 app.use(express.json({ limit: '2mb' }));
@@ -92,11 +100,13 @@ app.get('/events', (req, res) => {
   // See HEARTBEAT_MS. A `:` frame is an SSE comment: it reaches no listener and
   // costs 15 bytes, but it keeps the socket from going idle long enough to be
   // reaped on a phone. unref() so a live stream cannot hold the process open.
-  const heartbeat = setInterval(() => {
-    try { res.write(': keepalive\n\n'); } catch { /* the close handler cleans up */ }
-  }, HEARTBEAT_MS);
-  heartbeat.unref?.();
-  req.on('close', () => { clearInterval(heartbeat); clients.delete(res); });
+  const heartbeat = HEARTBEAT_MS > 0
+    ? setInterval(() => {
+        try { res.write(': keepalive\n\n'); } catch { /* the close handler cleans up */ }
+      }, HEARTBEAT_MS)
+    : null;
+  heartbeat?.unref?.();
+  req.on('close', () => { if (heartbeat) clearInterval(heartbeat); clients.delete(res); });
 });
 
 // Single-writer architecture: the bridge owns NO memory process. Every write

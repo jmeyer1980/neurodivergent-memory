@@ -286,7 +286,18 @@
       // Send intensity only if the field is non-empty: Number('') is 0, so
       // clearing the field to mean "leave it alone" used to overwrite the
       // stored value with 0.
-      if (rawIntensity !== '') body.intensity = Number(rawIntensity);
+      // Validate rather than forward blindly. Number('abc') is NaN, which
+      // JSON.stringify turns into null and the daemon's schema rejects; an
+      // in-range check also catches a typed 5, which the min/max attributes do
+      // not block because this form is submitted by script, not by the browser.
+      if (rawIntensity !== '') {
+        const n = Number(rawIntensity);
+        if (!Number.isFinite(n) || n < 0 || n > 1) {
+          showToast('Intensity must be a number between 0 and 1.');
+          return;
+        }
+        body.intensity = n;
+      }
       if(epistemic) body.epistemicStatus = epistemic;
       let res, data;
       try {

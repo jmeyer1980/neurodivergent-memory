@@ -1657,8 +1657,19 @@
       // untouched, so an untouched control must send nothing. An emptied number
       // field reads as '' and would post intensity: NaN; an unchanged district
       // select would post the placeholder value shown for district-less memories.
+      // Same validation as the classic app's edit modal: Number('') is 0 (hence
+      // the empty check), Number('abc') is NaN which serialises to null and the
+      // daemon rejects, and the min/max attributes do not constrain a
+      // script-submitted form — so a typed 5 would otherwise persist off-scale.
       const intensity = $('#editIntensity').value.trim();
-      if (intensity !== '') body.intensity = Number(intensity);
+      if (intensity !== '') {
+        const n = Number(intensity);
+        if (!Number.isFinite(n) || n < 0 || n > 1) {
+          showToast('Intensity must be a number between 0 and 1.');
+          return;
+        }
+        body.intensity = n;
+      }
       const district = $('#editDistrict').value;
       if (district !== state.editingDistrict) body.district = district;
       const epistemic = $('#editEpistemic').value;
