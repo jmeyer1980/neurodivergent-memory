@@ -688,3 +688,46 @@ export function parseSearchResults(text) {
   }
   return hits;
 }
+
+// ---------- search lighting ----------
+
+// One rule at every level: a card is lit if IT, or anything inside it, matched.
+// That is what turns a search into a drill-down -- query at the wall, see which
+// projects light, dive into a lit one, see which districts light -- instead of
+// needing a separate results view.
+export function isLit(item, hits, snapshot, view = {}) {
+  if (!hits || hits.size === 0 || !item) return false;
+  if (item.kind === 'memory') return hits.has(item.id);
+  const memories = Object.values(snapshot?.memories ?? {});
+  if (item.kind === 'project') {
+    return memories.some(m => hits.has(m.id) && projectOf(m) === item.id);
+  }
+  if (item.kind === 'district') {
+    // Scoped to the project being viewed. District names are shared across
+    // projects, not globally unique buckets -- without this, standing inside
+    // project beta would light its practical_execution card because something
+    // in ALPHA's practical_execution matched.
+    const scope = view.projectId;
+    return memories.some(m => hits.has(m.id)
+      && districtOf(m) === item.id
+      && (scope == null || projectOf(m) === scope));
+  }
+  return false;
+}
+
+// Stepping skips dark cards while a search is active, so a 364-memory bucket
+// stays fast. With nothing lit at this level, fall back to ordinary stepping
+// rather than refusing to move -- a search that matches nothing here must not
+// strand the drum.
+export function nextLitIndex(items, hits, snapshot, view, from, direction) {
+  const count = items.length;
+  if (!count) return from;
+  const step = direction >= 0 ? 1 : -1;
+  const plain = ((from + step) % count + count) % count;
+  if (!hits || hits.size === 0) return plain;
+  for (let i = 1; i <= count; i++) {
+    const idx = ((from + step * i) % count + count) % count;
+    if (isLit(items[idx], hits, snapshot, view)) return idx;
+  }
+  return plain;
+}

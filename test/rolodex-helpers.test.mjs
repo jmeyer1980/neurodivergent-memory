@@ -14,6 +14,7 @@ import {
   hintFor,
   truncateNodeLabel, MINIMAP_COL,
   parseSearchResults,
+  isLit, nextLitIndex,
 } from '../scripts/nd-mem-rolodex-helpers.mjs';
 
 // Fixture: alpha has 3 memories in 2 districts, beta has 2 (one custom district),
@@ -792,4 +793,86 @@ test('parseSearchResults preserves text order, not score order', () => {
     { id: 'memory_9', score: 0.412 },
     { id: 'memory_123', score: 0.873 },
   ]);
+});
+
+const WALL = { level: 'projects', projectId: null, districtId: null };
+const IN_ALPHA = { level: 'districts', projectId: 'alpha', districtId: null };
+
+test('isLit lights a memory whose own id matched', () => {
+  const hits = new Map([['mem_1', 0.9]]);
+  assert.equal(isLit({ id: 'mem_1', kind: 'memory' }, hits, SNAP, WALL), true);
+  assert.equal(isLit({ id: 'mem_2', kind: 'memory' }, hits, SNAP, WALL), false);
+});
+
+test('isLit lights a project containing a hit', () => {
+  // mem_1 is project alpha, district practical_execution (see SNAP).
+  const hits = new Map([['mem_1', 0.9]]);
+  assert.equal(isLit({ id: 'alpha', kind: 'project' }, hits, SNAP, WALL), true);
+  assert.equal(isLit({ id: 'beta', kind: 'project' }, hits, SNAP, WALL), false);
+});
+
+test('isLit scopes a district to the project you are standing in', () => {
+  // THE POINT OF THE view ARGUMENT. District names are shared across projects,
+  // not globally unique buckets: SNAP has practical_execution memories under
+  // alpha. Standing inside beta, alpha's hit must NOT light beta's
+  // same-named district card.
+  const hitInAlpha = new Map([['mem_1', 0.9]]);
+  assert.equal(
+    isLit({ id: 'practical_execution', kind: 'district' }, hitInAlpha, SNAP, IN_ALPHA), true);
+  assert.equal(
+    isLit({ id: 'practical_execution', kind: 'district' }, hitInAlpha, SNAP,
+      { level: 'districts', projectId: 'beta', districtId: null }), false);
+  assert.equal(
+    isLit({ id: 'vigilant_monitoring', kind: 'district' }, hitInAlpha, SNAP, IN_ALPHA), false);
+});
+
+test('isLit scopes correctly when standing in the UNASSIGNED (no-project) bucket', () => {
+  // Not one of the brief's verbatim tests -- added during self-review to pin
+  // down a case the brief explicitly flagged as worth checking: view.projectId
+  // can be the UNASSIGNED sentinel ('(no project)'), not just a real project
+  // id, when you have drilled into that display bucket's districts. mem_5 (see
+  // SNAP) has no project_id and no district, so projectOf/districtOf both
+  // normalize it to UNASSIGNED/UNCATEGORIZED -- the same normalization
+  // isLit's scope check relies on, which is why this is not a bug: comparing
+  // projectOf(m) to the UNASSIGNED sentinel works exactly like comparing it to
+  // a real project id.
+  const IN_UNASSIGNED = { level: 'districts', projectId: UNASSIGNED, districtId: null };
+  const hitOnUnassigned = new Map([['mem_5', 0.9]]);
+  assert.equal(
+    isLit({ id: UNCATEGORIZED, kind: 'district' }, hitOnUnassigned, SNAP, IN_UNASSIGNED), true);
+  // A hit that belongs to alpha's practical_execution must not leak into the
+  // UNASSIGNED bucket's uncategorized card.
+  const hitInAlpha = new Map([['mem_1', 0.9]]);
+  assert.equal(
+    isLit({ id: UNCATEGORIZED, kind: 'district' }, hitInAlpha, SNAP, IN_UNASSIGNED), false);
+});
+
+test('isLit lights nothing when there are no hits', () => {
+  const none = new Map();
+  assert.equal(isLit({ id: 'mem_1', kind: 'memory' }, none, SNAP, WALL), false);
+  assert.equal(isLit({ id: 'alpha', kind: 'project' }, none, SNAP, WALL), false);
+});
+
+test('nextLitIndex walks to the next lit card and wraps', () => {
+  const items = [
+    { id: 'mem_1', kind: 'memory' },
+    { id: 'mem_2', kind: 'memory' },
+    { id: 'mem_3', kind: 'memory' },
+  ];
+  const hits = new Map([['mem_3', 0.5]]);
+  assert.equal(nextLitIndex(items, hits, SNAP, WALL, 0, 1), 2);
+  // From the only lit card, forward wraps back to itself.
+  assert.equal(nextLitIndex(items, hits, SNAP, WALL, 2, 1), 2);
+  assert.equal(nextLitIndex(items, hits, SNAP, WALL, 0, -1), 2);
+});
+
+test('nextLitIndex falls back to ordinary stepping when nothing is lit', () => {
+  const items = [
+    { id: 'mem_1', kind: 'memory' },
+    { id: 'mem_2', kind: 'memory' },
+  ];
+  const none = new Map();
+  assert.equal(nextLitIndex(items, none, SNAP, WALL, 0, 1), 1);
+  assert.equal(nextLitIndex(items, none, SNAP, WALL, 1, 1), 0);
+  assert.equal(nextLitIndex(items, none, SNAP, WALL, 0, -1), 1);
 });
