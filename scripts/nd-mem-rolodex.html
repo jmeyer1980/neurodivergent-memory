@@ -74,6 +74,15 @@
        measured --chromeH closes the whole class: any future chrome growth
        displaces the card instead of obscuring it. The geometric hit-test reads
        els.stage.getBoundingClientRect(), so it follows this automatically. */
+    /* Glide, don't jump. The inset above means chrome DISPLACES the card rather
+       than covering it, which is what stops the location band hiding a memory
+       on a portrait phone — but the band's height changes whenever the
+       coordinate wraps to another line (diving from projects to memories adds
+       two segments), and the card snapping down by a whole line reads as a
+       glitch. Transitioning the edges turns that into motion the eye can
+       follow. Cheap: it only runs on the frames where --chromeH/--hudH
+       actually change, which is a level change or a rotation, not a spin. */
+    #stage,#spin{transition:top .28s cubic-bezier(.4,0,.2,1),bottom .28s cubic-bezier(.4,0,.2,1)}
     #stage{position:fixed;inset:var(--chromeH,64px) 0 var(--hudH,64px) 0;perspective:1400px;overflow:hidden;touch-action:none}
     #stage.bounce::after{content:'';position:absolute;inset:0;pointer-events:none;box-shadow:inset 0 0 120px rgba(var(--tint),.35);animation:edgeflash .45s ease}
     @keyframes edgeflash{from{opacity:1}to{opacity:0}}
@@ -265,7 +274,7 @@
     .btn.primary{background:linear-gradient(180deg,rgba(var(--tint),.24),rgba(var(--tint),.12));border-color:rgba(var(--tint),.3)}
     #toast{position:fixed;right:16px;bottom:16px;z-index:50;display:none;max-width:360px;padding:13px 16px;border-radius:16px;background:var(--overlayBg);border:1px solid rgba(var(--tint),.26)}
     #toast.show{display:block}
-    @media (prefers-reduced-motion: reduce){#scene{transition:none}#scene.bouncing,#stage.bounce::after{animation:none}.card3d{transition:none}}
+    @media (prefers-reduced-motion: reduce){#scene{transition:none}#scene.bouncing,#stage.bounce::after{animation:none}.card3d{transition:none}#stage,#spin{transition:none}}
     /* Phones. The chrome bar wants 575px of controls; a portrait phone offers
        ~370. Measured at 393px before this rule: the right-hand cluster (live
        connection state, theme toggle, Classic view) began at x=308 and ended at
