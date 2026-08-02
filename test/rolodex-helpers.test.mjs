@@ -840,11 +840,30 @@ test('isLit scopes correctly when standing in the UNASSIGNED (no-project) bucket
   const hitOnUnassigned = new Map([['mem_5', 0.9]]);
   assert.equal(
     isLit({ id: UNCATEGORIZED, kind: 'district' }, hitOnUnassigned, SNAP, IN_UNASSIGNED), true);
-  // A hit that belongs to alpha's practical_execution must not leak into the
-  // UNASSIGNED bucket's uncategorized card.
-  const hitInAlpha = new Map([['mem_1', 0.9]]);
+
+  // The assertion above cannot, by itself, prove the scope comparison runs at
+  // all: mem_5's project already normalizes to UNASSIGNED, so it passes
+  // whether or not the scope check exists. To actually exercise the scope
+  // comparison we need a memory whose district ALSO normalizes to
+  // UNCATEGORIZED but whose project is real and not UNASSIGNED -- SNAP has no
+  // such memory (every SNAP memory with an empty district also has an empty
+  // project_id), so building one here, locally, rather than editing the
+  // shared SNAP fixture that other tests depend on.
+  const withElsewhereUncategorized = {
+    ...SNAP,
+    memories: {
+      ...SNAP.memories,
+      // mem_7: real project ('beta', not alpha, not UNASSIGNED), no district
+      // -> districtOf normalizes it to UNCATEGORIZED. This is the one shape
+      // that can distinguish "scoped" from "unscoped": without the project
+      // check, this memory's UNCATEGORIZED district would incorrectly light
+      // the UNASSIGNED bucket's uncategorized card too.
+      mem_7: { id: 'mem_7', name: 'Beta loose', content: 'loose body', district: '', project_id: 'beta', tags: [], created: '2026-07-07T10:00:00Z' },
+    },
+  };
+  const hitElsewhere = new Map([['mem_7', 0.9]]);
   assert.equal(
-    isLit({ id: UNCATEGORIZED, kind: 'district' }, hitInAlpha, SNAP, IN_UNASSIGNED), false);
+    isLit({ id: UNCATEGORIZED, kind: 'district' }, hitElsewhere, withElsewhereUncategorized, IN_UNASSIGNED), false);
 });
 
 test('isLit lights nothing when there are no hits', () => {
@@ -875,4 +894,21 @@ test('nextLitIndex falls back to ordinary stepping when nothing is lit', () => {
   assert.equal(nextLitIndex(items, none, SNAP, WALL, 0, 1), 1);
   assert.equal(nextLitIndex(items, none, SNAP, WALL, 1, 1), 0);
   assert.equal(nextLitIndex(items, none, SNAP, WALL, 0, -1), 1);
+});
+
+test('nextLitIndex falls back to ordinary stepping when hits exist but none land in this drum', () => {
+  // Distinct code path from the test above: there hits.size === 0 takes the
+  // early return before the sweep ever starts. Here hits is non-empty, so the
+  // sweep runs a full lap checking every item, finds nothing lit (mem_99 isn't
+  // among these three cards at all), and only THEN falls through to the same
+  // plain-stepping answer. Without this, the loop-exhausted fallback line
+  // could be deleted or broken and no test would notice.
+  const items = [
+    { id: 'mem_1', kind: 'memory' },
+    { id: 'mem_2', kind: 'memory' },
+    { id: 'mem_3', kind: 'memory' },
+  ];
+  const hits = new Map([['mem_99', 0.9]]);
+  assert.equal(nextLitIndex(items, hits, SNAP, WALL, 0, 1), 1);
+  assert.equal(nextLitIndex(items, hits, SNAP, WALL, 0, -1), 2);
 });
