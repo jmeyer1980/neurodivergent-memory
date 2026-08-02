@@ -329,6 +329,11 @@ export function routeGesture(kind, ctx) {
     case 'clickOther': return 'centerThenDive';
     case 'arrowLeft': return 'stepPrev';
     case 'arrowRight': return 'stepNext';
+    // Long-press creates, carrying the pressed card's context. Not at the
+    // memories level: there the card is a reading surface and the press belongs
+    // to text selection. Right-click is unavailable -- `rightClick` above
+    // already means zoomOut -- so this is the only free gesture.
+    case 'longPress': return level === 'memories' ? 'none' : 'create';
     default: return 'none';
   }
 }

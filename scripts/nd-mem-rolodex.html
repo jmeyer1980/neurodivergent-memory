@@ -128,6 +128,11 @@
       background:var(--wash);font-size:.72rem;line-height:1.3;letter-spacing:.02em;
       color:var(--muted);pointer-events:none}
     .card3d{cursor:pointer}
+    /* iOS shows a selection callout on a long press. The gesture means "create"
+       on project and district cards, so suppress it there -- but NEVER on
+       .reader-scroll, whose user-select:text is deliberate and is how a memory
+       is read and copied. */
+    #stage:not([data-level="memories"]) .card3d{-webkit-touch-callout:none}
     @media (hover:hover){.card3d:not(.front):hover{opacity:.75}}
     .card3d .kicker{font-size:.7rem;text-transform:uppercase;letter-spacing:.1em;color:var(--faint)}
     .card3d h2{font-family:var(--font-display);font-size:1.15rem;line-height:1.2}
@@ -1228,12 +1233,23 @@
     let pinchStart = 0, dragMoved = 0;
     let pressTarget = null;        // pointerdown's target: the browser's real 3D hit-test
     let dragOrigin = { x: 0, y: 0 };
+    // Long-press: 500ms with the pointer essentially still. Cancelled by any
+    // real movement, a second pointer, or release -- so it can never fire in the
+    // middle of a spin, a pinch, or a reader drag.
+    const LONG_PRESS_MS = 500;
+    const LONG_PRESS_SLOP_PX = 10;
+    let longPressTimer = null;
+    function cancelLongPress(){ if (longPressTimer) { clearTimeout(longPressTimer); longPressTimer = null; } }
     els.stage.addEventListener('pointerdown', (e) => {
       // Capture so a drag that wanders over the fixed chrome bar (or off the
       // window) keeps delivering pointermove/pointerup to the stage. Without it
       // the release is never seen and state.dragging stays stuck true.
       try { els.stage.setPointerCapture(e.pointerId); } catch {}
       pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      // A second pointer means a pinch, not a long-press: pointers.size === 1
+      // already gates arming below, but an existing timer from the first
+      // pointer must still die or it would fire mid-pinch.
+      if (pointers.size > 1) cancelLongPress();
       if (pointers.size === 2) {
         const [a, b] = [...pointers.values()];
         pinchStart = Math.hypot(a.x - b.x, a.y - b.y);
@@ -1249,6 +1265,22 @@
         // — events and elementFromPoint both report #scene — and resolve
         // geometrically in cardIndexAtPoint instead.
         pressTarget = e.target instanceof Element ? e.target : null;
+        cancelLongPress();
+        if (pointers.size === 1 && H.routeGesture('longPress', { level: state.view.level, insideReader: false }) === 'create') {
+          const px = e.clientX, py = e.clientY;
+          longPressTimer = setTimeout(() => {
+            longPressTimer = null;
+            // Resolve through the geometric hit-test: Chromium cannot hit-test a
+            // rotated side card, so e.target alone would resolve to #scene.
+            const idx = cardIndexAtPoint(px, py);
+            const item = idx >= 0 ? state.items[idx] : null;
+            if (!item) return;
+            // Suppress the click that release would otherwise produce, so the
+            // press does not also dive into the card it just created from.
+            dragMoved = 999;
+            openCreateModal({ kind: item.kind, id: item.id });
+          }, LONG_PRESS_MS);
+        }
         // A horizontal drag spins at every level, reader included (spec: hdrag ->
         // spin). Only a mouse is exempt inside the reader, where press-and-drag
         // is how text gets selected.
@@ -1325,6 +1357,7 @@
       if (pointers.size === 1) {
         dragMoved = Math.max(dragMoved, Math.abs(e.clientX - dragOrigin.x) + Math.abs(e.clientY - dragOrigin.y));
       }
+      if (longPressTimer && (Math.abs(e.clientX - dragOrigin.x) > LONG_PRESS_SLOP_PX || Math.abs(e.clientY - dragOrigin.y) > LONG_PRESS_SLOP_PX)) cancelLongPress();
       if (readerDrag && pointers.size === 1) {
         const ndx = e.clientX - dragOrigin.x, ndy = e.clientY - dragOrigin.y;
         if (readerDrag.axis === 'undecided') {
@@ -1389,6 +1422,7 @@
       }
     });
     function releasePointer(e){
+      cancelLongPress();
       pointers.delete(e.pointerId);
       if (pointers.size < 2) pinchStart = 0;
       if (!pointers.size) { state.dragging = false; endReaderDrag(); }

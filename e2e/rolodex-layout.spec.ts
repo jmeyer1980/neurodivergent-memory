@@ -760,3 +760,33 @@ test('the + button opens a create modal pre-filled from where you are standing',
   expect(await page.locator('#editDistrict').inputValue()).toBe(where.district);
   await page.locator('#editCancelBtn').click();
 });
+
+// Creation in context: the pressed card supplies the defaults.
+test('long-pressing a district card creates with project and district pre-filled', async ({ page }) => {
+  test.slow();
+  // Dive once to reach districts.
+  const box = page.viewportSize()!;
+  await page.mouse.click(box.width / 2, box.height / 2);
+  await page.waitForTimeout(1700);
+  expect(await page.evaluate(() => (document.querySelector('#stage') as HTMLElement).dataset.level)).toBe('districts');
+
+  const front = await page.evaluate(() => {
+    const f = document.querySelector('#drum .card3d.front') as HTMLElement | null;
+    if (!f) return null;
+    const r = f.getBoundingClientRect();
+    return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
+  });
+  expect(front, 'a front district card should exist to press').not.toBeNull();
+
+  await page.mouse.move(front!.x, front!.y);
+  await page.mouse.down();
+  await page.waitForTimeout(750); // past LONG_PRESS_MS
+  await page.mouse.up();
+  await page.waitForTimeout(300);
+
+  await expect(page.locator('#editModalBg')).toHaveClass(/open/);
+  expect(await page.locator('#editDistrict').inputValue()).not.toBe('');
+  // The press must not ALSO dive -- the click it would otherwise produce is
+  // suppressed, so we are still at districts.
+  expect(await page.evaluate(() => (document.querySelector('#stage') as HTMLElement).dataset.level)).toBe('districts');
+});

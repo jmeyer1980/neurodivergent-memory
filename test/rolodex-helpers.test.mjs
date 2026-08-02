@@ -729,3 +729,10 @@ test('createDefaultsFor never inherits the uncategorized sentinel as a real dist
     { projectId: 'alpha', district: null },
   );
 });
+
+test('routeGesture maps a long press to create, except on memory cards', () => {
+  // A memory card is a reading surface; there the gesture belongs to selection.
+  assert.equal(routeGesture('longPress', { level: 'projects', insideReader: false }), 'create');
+  assert.equal(routeGesture('longPress', { level: 'districts', insideReader: false }), 'create');
+  assert.equal(routeGesture('longPress', { level: 'memories', insideReader: false }), 'none');
+});
