@@ -13,6 +13,7 @@ import {
   createDefaultsFor,
   hintFor,
   truncateNodeLabel, MINIMAP_COL,
+  parseSearchResults,
 } from '../scripts/nd-mem-rolodex-helpers.mjs';
 
 // Fixture: alpha has 3 memories in 2 districts, beta has 2 (one custom district),
@@ -735,4 +736,42 @@ test('routeGesture maps a long press to create, except on memory cards', () => {
   assert.equal(routeGesture('longPress', { level: 'projects', insideReader: false }), 'create');
   assert.equal(routeGesture('longPress', { level: 'districts', insideReader: false }), 'create');
   assert.equal(routeGesture('longPress', { level: 'memories', insideReader: false }), 'none');
+});
+
+const SEARCH_TEXT = [
+  '🔍 Found 2 memories (ranked by BM25 relevance):',
+  '• [0.873] memory_123 — Some title (scholar)',
+  '  first eighty characters of content…',
+  '• [0.412] memory_9 — Another title (merchant)',
+  '  more content here',
+].join('\n');
+
+test('parseSearchResults recovers id and score, in rank order', () => {
+  assert.deepEqual(parseSearchResults(SEARCH_TEXT), [
+    { id: 'memory_123', score: 0.873 },
+    { id: 'memory_9', score: 0.412 },
+  ]);
+});
+
+test('parseSearchResults returns nothing for a no-results response', () => {
+  assert.deepEqual(parseSearchResults('🔍 No memories found matching query: "zzz"'), []);
+});
+
+test('parseSearchResults ignores the did-you-mean suffix', () => {
+  const text = SEARCH_TEXT + '\nDid you mean project_id: alpha?';
+  assert.deepEqual(parseSearchResults(text).map(h => h.id), ['memory_123', 'memory_9']);
+});
+
+test('parseSearchResults ignores the partial-matches block, which also uses bullets', () => {
+  // Partial matches are formatted "• candidate (similarity=0.9, field=..., memories=memory_5, ...)".
+  // Those bullets carry no [score] prefix and must not be read as hits.
+  const text = SEARCH_TEXT +
+    '\n\nPartial matches:\n• alpah (similarity=0.833, field=project_id, memories=memory_5, projects=alpha)';
+  assert.deepEqual(parseSearchResults(text).map(h => h.id), ['memory_123', 'memory_9']);
+});
+
+test('parseSearchResults tolerates junk without throwing', () => {
+  assert.deepEqual(parseSearchResults(''), []);
+  assert.deepEqual(parseSearchResults(null), []);
+  assert.deepEqual(parseSearchResults('completely unrelated text'), []);
 });

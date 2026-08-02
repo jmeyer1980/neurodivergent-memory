@@ -660,3 +660,31 @@ export function hintFor(level, pointerKind) {
   const table = HINTS[pointerKind] ?? HINTS.fine;
   return table[level] ?? table.default;
 }
+
+// search_memories answers in PROSE, for a reader:
+//   • [0.873] memory_123 — Some title (scholar)
+//     first eighty characters of content…
+// There is no structured search API and the BM25 index is private to
+// server-main.ts, so the bridge recovers the two tokens it cannot get locally --
+// the id and its score -- and hydrates everything else from the snapshot it
+// already reads. Deliberately anchored on the "[score] id" shape: the partial-
+// matches block below the results uses bullets too, but carries no score, so
+// requiring the bracket keeps those out.
+//
+// This regex is the whole fragile seam in the search feature. Its failure mode
+// is SILENT -- zero hits, not an error -- which is why a contract test runs the
+// real tool and asserts this still parses it.
+const SEARCH_HIT_RE = /^\s*[•*-]\s*\[(\d+(?:\.\d+)?)\]\s*(\S+)\s+—/;
+
+export function parseSearchResults(text) {
+  if (typeof text !== 'string' || text === '') return [];
+  const hits = [];
+  for (const line of text.split('\n')) {
+    const m = SEARCH_HIT_RE.exec(line);
+    if (!m) continue;
+    const score = Number(m[1]);
+    if (!Number.isFinite(score)) continue;
+    hits.push({ id: m[2], score });
+  }
+  return hits;
+}
