@@ -8,6 +8,8 @@
 
 **Tech Stack:** Vanilla ES modules, no build step for the web apps. `node --test` for unit tests (`npm test`), Playwright for browser tests (`npx playwright test`, projects `desktop-chrome` and `mobile-safari`).
 
+**Epic:** #162
+
 **Spec:** `docs/superpowers/specs/2026-08-02-rolodex-search-and-creation-design.md`
 
 ## Global Constraints
@@ -29,7 +31,7 @@ Creation is nearly self-contained: `POST /save` already exists and routes to `st
 
 ---
 
-### Task 1: Autofill resolver
+### Task 1 [#163]: Autofill resolver
 
 The pure function that decides what a new memory inherits from where you are standing.
 
@@ -147,7 +149,7 @@ git commit -m "feat(rolodex): resolve what a new memory inherits from context"
 
 ---
 
-### Task 2: Create mode on the edit modal
+### Task 2 [#164]: Create mode on the edit modal
 
 One modal, two modes. Not a second copy — the two apps' near-duplicate modals have already drifted once.
 
@@ -338,7 +340,7 @@ git commit -m "feat(rolodex): create memories, in one modal with two modes"
 
 ---
 
-### Task 3: Long-press to create in context
+### Task 3 [#165]: Long-press to create in context
 
 **Files:**
 - Modify: `scripts/nd-mem-rolodex-helpers.mjs` (`routeGesture`), `scripts/nd-mem-rolodex.html` (pointer handlers, CSS)
@@ -499,7 +501,7 @@ git commit -m "feat(rolodex): long-press a project or district to create in cont
 
 ---
 
-### Task 4: The result parser
+### Task 4 [#166]: The result parser
 
 The one fragile seam in the design, isolated into a pure function and pinned by a contract test in Task 5.
 
@@ -607,7 +609,7 @@ git commit -m "feat(rolodex): parse search hits out of the daemon's prose"
 
 ---
 
-### Task 5: The `/search` route and its contract test
+### Task 5 [#167]: The `/search` route and its contract test
 
 **Files:**
 - Modify: `scripts/nd-mem-bridge-server.mjs`
@@ -746,7 +748,7 @@ git commit -m "feat(bridge): serve BM25 search, pinned by a format contract test
 
 ---
 
-### Task 6: The lit predicate and lit-stepping
+### Task 6 [#168]: The lit predicate and lit-stepping
 
 **Files:**
 - Modify: `scripts/nd-mem-rolodex-helpers.mjs`
@@ -891,7 +893,7 @@ git commit -m "feat(rolodex): light a card when it or anything inside it matches
 
 ---
 
-### Task 7: Search in the page
+### Task 7 [#169]: Search in the page
 
 **Files:**
 - Modify: `scripts/nd-mem-rolodex.html` — markup, CSS, `state`, `updateChrome`, `updateFrontCard`/`buildDrum` render path, `stepBy`
