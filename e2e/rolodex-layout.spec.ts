@@ -1078,3 +1078,56 @@ test('a failing search says so instead of looking like no matches', async ({ pag
   expect(await page.evaluate(() => document.querySelectorAll('#drum .card3d.search-dim').length),
     'a failed search must not dim the whole drum as though nothing matched').toBe(0);
 });
+
+// A bridge process is long-lived; the page is served fresh from disk on every
+// request. A bridge that was started before /search landed answers with
+// Express's own default 404 -- an HTML page, not our {ok, hits} contract --
+// which is a *reachable*, stale bridge, not an unreachable one. Mirrors
+// Express's real default body so the regression this pins is the one that
+// actually shipped, not a stand-in for it.
+//
+// The toast must not promise that restarting fixes it, either: a bridge that
+// fails to bind its port can linger alive instead of exiting, so a user who
+// restarts still has the same stale process answering on the port -- a real
+// field case, not a hypothetical. Point at the bridge being out of date, not
+// at an action that may not work.
+test('a stale bridge (404 on /search) says so, not "could not reach"', async ({ page }) => {
+  test.slow();
+  await page.route('**/search?*', (route) => route.fulfill({
+    status: 404,
+    contentType: 'text/html; charset=utf-8',
+    body: '<!DOCTYPE html>\n<html lang="en">\n<head><title>Error</title></head>\n<body><pre>Cannot GET /search</pre></body></html>',
+  }));
+
+  await page.locator('#searchInput').fill('memory');
+  await page.waitForTimeout(1200); // 250ms debounce + the round trip
+
+  await expect(page.locator('#toast')).toHaveClass(/show/);
+  const toastText = await page.locator('#toast').textContent();
+  expect(toastText, 'a stale bridge must name itself, not read as unreachable').not.toMatch(/could not reach/i);
+  expect(toastText, 'a 404 on /search means an old bridge process, not a dead one').toMatch(/bridge/i);
+  expect(toastText, 'a restart may not clear a bridge that lingered holding the port -- do not promise it fixes this')
+    .not.toMatch(/restart it/i);
+  expect(toastText, 'point at the bridge being out of date, since that survives a failed restart attempt')
+    .toMatch(/out of date/i);
+  // A stale-route response is not evidence the store stopped matching --
+  // the previous classification (none yet, here) must stand, not be wiped.
+  expect(await page.evaluate(() => document.querySelectorAll('#drum .card3d.search-dim').length),
+    'a stale-bridge 404 must not dim the whole drum as though nothing matched').toBe(0);
+});
+
+// The genuinely unreachable case -- nothing answered at all -- must keep its
+// own wording rather than being folded into the stale-bridge or generic
+// failure messages now that all three are told apart.
+test('a search with no bridge listening says it could not reach it', async ({ page }) => {
+  test.slow();
+  await page.route('**/search?*', (route) => route.abort('connectionrefused'));
+
+  await page.locator('#searchInput').fill('memory');
+  await page.waitForTimeout(1200); // 250ms debounce + the round trip
+
+  await expect(page.locator('#toast')).toHaveClass(/show/);
+  expect(await page.locator('#toast').textContent()).toMatch(/could not reach the bridge/i);
+  expect(await page.evaluate(() => document.querySelectorAll('#drum .card3d.search-dim').length),
+    'an unreachable bridge must not dim the whole drum as though nothing matched').toBe(0);
+});

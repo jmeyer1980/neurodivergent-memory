@@ -1795,23 +1795,51 @@
     async function runSearch(query){
       const seq = ++searchSeq;
       if (!query) { state.search = { query: '', hits: new Map() }; renderSearchState(); return; }
+      // A failed search and a search that matched nothing both arrive as an
+      // empty hit set, and both would render as "every card dimmed" if we let
+      // them -- so a dead daemon, a stale bridge, or a store that refuses to
+      // serve all need to say so instead of looking like an honest miss.
+      // res.ok/status is checked *before* the body is ever parsed, because the
+      // three failures below are told apart by how the response failed, not by
+      // what (if anything) is inside it:
+      //   1. the fetch itself threw -- nothing answered on that port at all.
+      //   2. HTTP 404 -- the bridge answered, but has no /search route. This
+      //      process is long-lived while the page is served fresh each load,
+      //      so in practice this means the bridge predates the page and is
+      //      running stale code. Do not promise a restart fixes it: a bridge
+      //      that fails to bind its port can linger alive instead of exiting,
+      //      so a plain restart can leave the same stale process answering --
+      //      point at the bridge's version being wrong, not at a fix.
+      //   3. any other non-ok status, or a 2xx response whose body isn't the
+      //      {ok, hits} contract our own route promises (including a body
+      //      that fails to parse as JSON at all) -- the bridge is current and
+      //      reachable but the search itself failed.
+      // Every branch below leaves the previous hit classification standing
+      // rather than clearing it: an error is not evidence the store stopped
+      // matching, and wiping the drum to "unclassified" would look exactly
+      // like no search being active, silently undoing the point of the toast.
+      let res;
       try {
-        const res = await fetch(`${BRIDGE}/search?q=${encodeURIComponent(query)}`);
-        const data = await res.json();
-        if (seq !== searchSeq) return; // superseded
-        // A failed search and a search that matched nothing both arrive as an
-        // empty hit set, and both render as "every card dimmed" -- so without
-        // this check a 500 (a dead daemon, a store the bridge refuses to serve)
-        // is indistinguishable from an honest miss, silently and with no toast.
-        // The route answers ok:false with a JSON body on failure, so res.ok
-        // alone is not enough.
-        if (!res.ok || !data.ok) { showToast('Search failed — the drum is unchanged.'); return; }
-        state.search = { query, hits: new Map((data.hits || []).map(h => [h.id, h.score])) };
+        res = await fetch(`${BRIDGE}/search?q=${encodeURIComponent(query)}`);
       } catch {
-        if (seq !== searchSeq) return;
-        state.search = { query, hits: new Map() };
+        if (seq !== searchSeq) return; // superseded
         showToast('Search could not reach the bridge.');
+        return;
       }
+      if (seq !== searchSeq) return; // superseded
+      if (res.status === 404) { showToast('Search needs a newer bridge — the one answering is out of date.'); return; }
+      if (!res.ok) { showToast('Search failed — the drum is unchanged.'); return; }
+      let data;
+      try {
+        data = await res.json();
+      } catch {
+        if (seq !== searchSeq) return; // superseded
+        showToast('Search failed — the drum is unchanged.');
+        return;
+      }
+      if (seq !== searchSeq) return; // superseded
+      if (!data.ok) { showToast('Search failed — the drum is unchanged.'); return; }
+      state.search = { query, hits: new Map((data.hits || []).map(h => [h.id, h.score])) };
       renderSearchState();
     }
     els.searchInput.addEventListener('input', () => {
