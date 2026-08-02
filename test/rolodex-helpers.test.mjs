@@ -775,3 +775,21 @@ test('parseSearchResults tolerates junk without throwing', () => {
   assert.deepEqual(parseSearchResults(null), []);
   assert.deepEqual(parseSearchResults('completely unrelated text'), []);
 });
+
+test('parseSearchResults preserves text order, not score order', () => {
+  // Hits appear in text order: 0.412, then 0.873. If the implementation
+  // silently added a score sort, this would become [0.873, 0.412]. The test
+  // must catch that. This guards against regressions that would silently
+  // discard the daemon's ranking work.
+  const textWithReversedScores = [
+    '🔍 Found 2 memories (ranked by BM25 relevance):',
+    '• [0.412] memory_9 — First hit by rank, lower score',
+    '  content snippet',
+    '• [0.873] memory_123 — Second hit by rank, higher score',
+    '  more content',
+  ].join('\n');
+  assert.deepEqual(parseSearchResults(textWithReversedScores), [
+    { id: 'memory_9', score: 0.412 },
+    { id: 'memory_123', score: 0.873 },
+  ]);
+});
