@@ -10,6 +10,7 @@ import {
   LEVELS, nextLevel, createHistory, pushView, popView, atWall,
   itemIdsForView, reconcileView, reconcilePop,
   routeGesture, DRAG_AXIS_THRESHOLD_PX, classifyDragAxis, routeDragAxis,
+  createDefaultsFor,
   hintFor,
   truncateNodeLabel, MINIMAP_COL,
 } from '../scripts/nd-mem-rolodex-helpers.mjs';
@@ -665,4 +666,52 @@ test('layoutNavTree columns leave room for a truncated label', () => {
   // If the pitch ever drops back below that, labels from adjacent columns
   // collide and the map becomes less readable than the bare dots it replaced.
   assert.ok(MINIMAP_COL >= 67, `MINIMAP_COL is ${MINIMAP_COL}, too tight for a 10-char label`);
+});
+
+test('createDefaultsFor inherits nothing at the projects level', () => {
+  assert.deepEqual(
+    createDefaultsFor({ level: 'projects', projectId: null, districtId: null }, null),
+    { projectId: null, district: null },
+  );
+});
+
+test('createDefaultsFor inherits the project at the districts level', () => {
+  assert.deepEqual(
+    createDefaultsFor({ level: 'districts', projectId: 'alpha', districtId: null }, null),
+    { projectId: 'alpha', district: null },
+  );
+});
+
+test('createDefaultsFor inherits project and district at the memories level', () => {
+  assert.deepEqual(
+    createDefaultsFor({ level: 'memories', projectId: 'alpha', districtId: 'logical_analysis' }, null),
+    { projectId: 'alpha', district: 'logical_analysis' },
+  );
+});
+
+test('createDefaultsFor takes a long-pressed project card over the current view', () => {
+  assert.deepEqual(
+    createDefaultsFor({ level: 'projects', projectId: null, districtId: null }, { kind: 'project', id: 'beta' }),
+    { projectId: 'beta', district: null },
+  );
+});
+
+test('createDefaultsFor takes a long-pressed district card with its parent project', () => {
+  assert.deepEqual(
+    createDefaultsFor({ level: 'districts', projectId: 'alpha', districtId: null }, { kind: 'district', id: 'vigilant_monitoring' }),
+    { projectId: 'alpha', district: 'vigilant_monitoring' },
+  );
+});
+
+test('createDefaultsFor never inherits the unassigned sentinel as a real project', () => {
+  // '(no project)' is a display bucket, not a project id -- storing it would
+  // create a literal project named after the placeholder.
+  assert.deepEqual(
+    createDefaultsFor({ level: 'districts', projectId: UNASSIGNED, districtId: null }, null),
+    { projectId: null, district: null },
+  );
+  assert.deepEqual(
+    createDefaultsFor({ level: 'projects', projectId: null, districtId: null }, { kind: 'project', id: UNASSIGNED }),
+    { projectId: null, district: null },
+  );
 });

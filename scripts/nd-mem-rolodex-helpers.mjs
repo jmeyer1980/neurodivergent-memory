@@ -540,6 +540,31 @@ export function truncateNodeLabel(label, max = NODE_LABEL_MAX) {
   return `${s.slice(0, head)}…${tail ? s.slice(-tail) : ''}`;
 }
 
+// What a new memory inherits from where you are standing. The deeper you are,
+// the more context it takes -- which is exactly what the coordinate already
+// means. A long-pressed card outranks the current view, because pressing a
+// specific card is a more explicit statement of intent than standing near it.
+//
+// UNASSIGNED is a DISPLAY bucket for memories with no project, not a project
+// id. Inheriting it would create a real project literally named '(no project)'.
+export function createDefaultsFor(view, pressedCard = null) {
+  const realProject = (id) => (id && id !== UNASSIGNED ? String(id) : null);
+
+  if (pressedCard && pressedCard.kind === 'project') {
+    return { projectId: realProject(pressedCard.id), district: null };
+  }
+  if (pressedCard && pressedCard.kind === 'district') {
+    return { projectId: realProject(view.projectId), district: String(pressedCard.id) };
+  }
+  if (view.level === 'memories') {
+    return { projectId: realProject(view.projectId), district: view.districtId ? String(view.districtId) : null };
+  }
+  if (view.level === 'districts') {
+    return { projectId: realProject(view.projectId), district: null };
+  }
+  return { projectId: null, district: null };
+}
+
 // Columns are deliberately much wider than a node (r=5, so 10px across): at 26px a
 // fork read as a jog in a trunk rather than a branch. Rows are tighter than columns
 // so a deep chain does not stretch the tree into a thread.
