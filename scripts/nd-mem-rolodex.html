@@ -171,7 +171,14 @@
        .reader-scroll, whose user-select:text is deliberate and is how a memory
        is read and copied. */
     #stage:not([data-level="memories"]) .card3d{-webkit-touch-callout:none}
-    @media (hover:hover){.card3d:not(.front):hover{opacity:.75}}
+    /* :not(.search-dim) rather than a specificity fight. This rule is two
+       classes plus a pseudo-class and would beat .card3d.search-dim outright,
+       so hovering a miss used to un-dim it -- and hovering is exactly what a
+       mouse does while scanning the ring for the lit cards, which made the
+       answer disappear at the moment it was being read. Search dims; hover
+       feedback keeps every card the query did not already answer "no" for, and
+       a dimmed card is still cursor:pointer and still clickable. */
+    @media (hover:hover){.card3d:not(.front):not(.search-dim):hover{opacity:.75}}
     .card3d .kicker{font-size:.7rem;text-transform:uppercase;letter-spacing:.1em;color:var(--faint)}
     .card3d h2{font-family:var(--font-display);font-size:1.15rem;line-height:1.2}
     .card3d p{color:var(--muted);line-height:1.5;font-size:.9rem;overflow:hidden}
@@ -398,7 +405,7 @@
       <button class="pill" id="themeBtn" title="Toggle theme">◐</button>
       <a class="pill" href="/">Classic view</a>
     </div>
-    <div id="locus"><input id="searchInput" type="search" placeholder="Search memories…" autocomplete="off" spellcheck="false" /><span id="crumb"></span><span id="position">—</span></div>
+    <div id="locus"><input id="searchInput" type="search" aria-label="Search memories" placeholder="Search memories…" autocomplete="off" spellcheck="false" /><span id="crumb"></span><span id="position">—</span></div>
   </div>
   <div id="stage" data-level="projects"><div id="scene"><div id="drum"></div></div></div>
   <div id="spin">
@@ -1338,7 +1345,15 @@
         // unrelated side card's div instead (see frontControlAt's comment),
         // which makes pressTarget alone unreliable for exactly this check.
         const onControl = !!pressTarget?.closest('button, a') || !!frontControlAt(e.clientX, e.clientY);
-        if (pointers.size === 1 && !onControl && H.routeGesture('longPress', { level: state.view.level, insideReader: false }) === 'create') {
+        // Not while a dive/zoom is in flight. The gesture arms on the level read
+        // HERE but resolves the pressed card 500ms later, and transitionTo flips
+        // state.view a third of the way through its ~1400ms run (ZOOM_MS = 700).
+        // A press begun 200-700ms into a dive therefore armed at `districts` and
+        // fired at `memories` -- opening a create modal at exactly the level
+        // routeGesture exists to forbid it at. Every other gesture path on this
+        // page is already gated on this flag.
+        if (pointers.size === 1 && !onControl && !state.transitioning
+            && H.routeGesture('longPress', { level: state.view.level, insideReader: false }) === 'create') {
           const px = e.clientX, py = e.clientY;
           longPressTimer = setTimeout(() => {
             longPressTimer = null;
@@ -1784,6 +1799,13 @@
         const res = await fetch(`${BRIDGE}/search?q=${encodeURIComponent(query)}`);
         const data = await res.json();
         if (seq !== searchSeq) return; // superseded
+        // A failed search and a search that matched nothing both arrive as an
+        // empty hit set, and both render as "every card dimmed" -- so without
+        // this check a 500 (a dead daemon, a store the bridge refuses to serve)
+        // is indistinguishable from an honest miss, silently and with no toast.
+        // The route answers ok:false with a JSON body on failure, so res.ok
+        // alone is not enough.
+        if (!res.ok || !data.ok) { showToast('Search failed — the drum is unchanged.'); return; }
         state.search = { query, hits: new Map((data.hits || []).map(h => [h.id, h.score])) };
       } catch {
         if (seq !== searchSeq) return;
@@ -1814,7 +1836,6 @@
     });
 
     // ---------- edit modal ----------
-    const CANONICAL = H.CANONICAL_DISTRICTS;
     // One modal, two modes. A second modal would drift from this one exactly as
     // the classic app's copy already drifted from it -- that divergence was a
     // code-review finding, not a hypothetical.
@@ -1824,7 +1845,13 @@
       state.editingId = null;
       $('#editModalTitle').textContent = 'New memory';
       $('#editSaveBtn').textContent = 'Create';
-      $('#editDistrict').innerHTML = CANONICAL.map(d => `<option value="${esc(d)}">${esc(d)}</option>`).join('');
+      // Through the same helper openEditModal uses. Populated from the canonical
+      // five alone, the assignment below found no matching <option> for a custom or
+      // legacy district, left the select at selectedIndex -1, and the user saw
+      // an EMPTY District field -- and because create mode always sends the
+      // select's value, it then posted district: ''. (Distinct from the
+      // UNCATEGORIZED sentinel, which createDefaultsFor resolves to null first.)
+      $('#editDistrict').innerHTML = H.districtOptions(defaults.district).map(d => `<option value="${esc(d)}">${esc(d)}</option>`).join('');
       $('#editContent').value = '';
       $('#editDistrict').value = defaults.district || 'practical_execution';
       // Seeded the same way openEditModal does, so submitEdit's "only send a
@@ -1843,8 +1870,7 @@
       state.modalMode = 'edit';
       $('#editModalTitle').textContent = 'Edit memory';
       $('#editSaveBtn').textContent = 'Save changes';
-      const districts = CANONICAL.includes(m.district) || !m.district ? CANONICAL : [m.district, ...CANONICAL];
-      $('#editDistrict').innerHTML = districts.map(d => `<option value="${esc(d)}">${esc(d)}</option>`).join('');
+      $('#editDistrict').innerHTML = H.districtOptions(m.district).map(d => `<option value="${esc(d)}">${esc(d)}</option>`).join('');
       $('#editContent').value = m.content || '';
       $('#editDistrict').value = m.district || 'practical_execution';
       $('#editProject').value = m.project_id ?? '';

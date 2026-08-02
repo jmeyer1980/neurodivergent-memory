@@ -10,7 +10,7 @@ import {
   LEVELS, nextLevel, createHistory, pushView, popView, atWall,
   itemIdsForView, reconcileView, reconcilePop,
   routeGesture, DRAG_AXIS_THRESHOLD_PX, classifyDragAxis, routeDragAxis,
-  createDefaultsFor,
+  createDefaultsFor, districtOptions,
   hintFor,
   truncateNodeLabel, MINIMAP_COL,
   parseSearchResults,
@@ -730,6 +730,28 @@ test('createDefaultsFor never inherits the uncategorized sentinel as a real dist
     createDefaultsFor({ level: 'districts', projectId: 'alpha', districtId: null }, { kind: 'district', id: UNCATEGORIZED }),
     { projectId: 'alpha', district: null },
   );
+});
+
+test('districtOptions always contains the district the select is about to be set to', () => {
+  // The invariant: whatever createDefaultsFor (or a memory being edited) hands
+  // the modal, the <select> must have an <option> for it. Miss that and the
+  // browser reports selectedIndex -1 and renders the field BLANK -- which is
+  // what create mode did for every non-canonical district, and then posted the
+  // resulting empty string as the new memory's district.
+  assert.deepEqual(districtOptions('logical_analysis'), CANONICAL_DISTRICTS);
+  assert.deepEqual(districtOptions(null), CANONICAL_DISTRICTS);
+  assert.deepEqual(districtOptions(''), CANONICAL_DISTRICTS);
+  // 'weird_custom' is in the fixture snapshot precisely because register_district
+  // is a supported tool and deriveDistricts renders a card for it.
+  assert.deepEqual(districtOptions('weird_custom'), ['weird_custom', ...CANONICAL_DISTRICTS]);
+  assert.equal(districtOptions('weird_custom')[0], 'weird_custom', 'the stray district leads, as in the edit modal');
+  for (const d of ['weird_custom', 'progressiongraph_debug', ...CANONICAL_DISTRICTS]) {
+    assert.ok(districtOptions(d).includes(d), `a select built from districtOptions(${d}) could not hold ${d}`);
+  }
+  // Never mutates the shared canonical list.
+  districtOptions('weird_custom');
+  assert.deepEqual(CANONICAL_DISTRICTS,
+    ['logical_analysis', 'emotional_processing', 'practical_execution', 'vigilant_monitoring', 'creative_synthesis']);
 });
 
 test('routeGesture maps a long press to create, except on memory cards', () => {

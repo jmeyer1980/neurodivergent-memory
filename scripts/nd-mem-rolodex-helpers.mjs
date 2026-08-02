@@ -572,6 +572,22 @@ export function createDefaultsFor(view, pressedCard = null) {
   return { projectId: null, district: null };
 }
 
+// What the edit modal's district <select> should be populated with, so that
+// assigning `district` to it always finds an <option>.
+//
+// register_district is a supported tool and deriveDistricts renders a card for
+// whatever district the data actually contains, so a legacy or custom district
+// reaches the modal routinely -- and a <select> asked for a value it has no
+// option for silently goes to selectedIndex -1, i.e. renders BLANK. Edit mode
+// prepended the stray value; create mode did not, so long-pressing a custom
+// district card opened a modal with an empty District field and then posted
+// district: ''. One function now, because the defect was precisely that the
+// rule lived in one of the two places that needed it.
+export function districtOptions(district) {
+  if (!district || CANONICAL_DISTRICTS.includes(district)) return CANONICAL_DISTRICTS;
+  return [district, ...CANONICAL_DISTRICTS];
+}
+
 // Columns are deliberately much wider than a node (r=5, so 10px across): at 26px a
 // fork read as a jog in a trunk rather than a branch. Rows are tighter than columns
 // so a deep chain does not stretch the tree into a thread.
