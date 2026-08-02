@@ -1266,7 +1266,22 @@
         // geometrically in cardIndexAtPoint instead.
         pressTarget = e.target instanceof Element ? e.target : null;
         cancelLongPress();
-        if (pointers.size === 1 && H.routeGesture('longPress', { level: state.view.level, insideReader: false }) === 'create') {
+        // A slow, careful click on a real control (Rename…, today's only
+        // create-eligible-level example) is an ordinary click, not a long
+        // press -- holding still is what a deliberate click looks like, unlike
+        // the movement/second-pointer/release cancellations above, which all
+        // require the user to have done something else. Two checks, matching
+        // the click handler's own two-layer pattern below: pressTarget's
+        // closest('button, a') is the cheap DOM-hit-test check ('button, a'
+        // is the same selector the click handler uses, and routeGesture's doc
+        // comment on "Controls inside a card" already names the convention),
+        // then frontControlAt as the geometric fallback that is actually
+        // load-bearing here -- measured directly that WebKit's hit-test for a
+        // point over the front card's OWN button can return a completely
+        // unrelated side card's div instead (see frontControlAt's comment),
+        // which makes pressTarget alone unreliable for exactly this check.
+        const onControl = !!pressTarget?.closest('button, a') || !!frontControlAt(e.clientX, e.clientY);
+        if (pointers.size === 1 && !onControl && H.routeGesture('longPress', { level: state.view.level, insideReader: false }) === 'create') {
           const px = e.clientX, py = e.clientY;
           longPressTimer = setTimeout(() => {
             longPressTimer = null;
@@ -1520,6 +1535,35 @@
       return best;
     }
     /**
+     * The front card's own real control (button/link) at a point, found by
+     * bounding-box containment rather than DOM hit-testing.
+     *
+     * This has to be geometric, not `e.target`/elementFromPoint-based: on
+     * WebKit, elementsFromPoint at a point over the FRONT card's own button
+     * can return an entirely unrelated SIDE card's plain div ahead of that
+     * button in the hit-test order -- measured directly (a project card's
+     * Rename… button at (292,317) resolved via pointerdown's e.target to a
+     * different card's data-idx="10" div, not the button at all, purely
+     * because that side card's flat, unrotated bounding box happens to
+     * overlap the same screen pixel). `pressTarget`, being `e.target`,
+     * inherits that unreliability. A real element's own rect, checked
+     * directly, sidesteps the hit-test entirely -- the same reasoning
+     * `cardIndexAtPoint` above already relies on for resolving WHICH card,
+     * extended here to resolving WHICH CONTROL.
+     *
+     * Originally inline in the click handler below (as `overFrontButton`);
+     * factored out because the long-press arming guard needs the identical
+     * check at pointerdown time.
+     */
+    function frontControlAt(x, y) {
+      if (!state.frontEl) return null;
+      for (const el of state.frontEl.querySelectorAll('button, a')) {
+        const r = el.getBoundingClientRect();
+        if (r.width && x >= r.left && x <= r.right && y >= r.top && y <= r.bottom) return el;
+      }
+      return null;
+    }
+    /**
      * The element a click should be attributed to.
      *
      * pressTarget is pointerdown's target, kept because pointer capture
@@ -1570,14 +1614,9 @@
       // half of an angled card, so this check was the only thing standing
       // between that click and a wrong dive; measured on a 3-card fan back
       // then, Edit worked at -24deg and 0deg but dived at +24deg without it.
-      const overFrontButton = (() => {
-        if (!state.frontEl) return null;
-        for (const el of state.frontEl.querySelectorAll('button, a')) {
-          const r = el.getBoundingClientRect();
-          if (r.width && e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom) return el;
-        }
-        return null;
-      })();
+      // (Factored out as frontControlAt, above -- the long-press guard needs
+      // the identical geometric check at pointerdown time.)
+      const overFrontButton = frontControlAt(e.clientX, e.clientY);
       if (overFrontButton) {
         // The other two delegated click listeners on #stage (rename, edit) resolve
         // their own `hit` the same pressTarget-first way this one does, and pressTarget

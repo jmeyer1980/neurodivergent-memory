@@ -790,3 +790,32 @@ test('long-pressing a district card creates with project and district pre-filled
   // suppressed, so we are still at districts.
   expect(await page.evaluate(() => (document.querySelector('#stage') as HTMLElement).dataset.level)).toBe('districts');
 });
+
+// A slow, deliberate click on a real control is still an ordinary click -- the
+// long-press gesture must not steal it. Rename… lives on the project card
+// (the wall level), the one control that sits inside a create-eligible level.
+test("long-pressing a project card's Rename control opens rename, not create", async ({ page }) => {
+  test.slow();
+  // Already at the wall (projects level) on load. settleLayout first: the
+  // debounced buildDrum rebuild (see its own comment above) can still be
+  // in flight right after load, and measuring the button's rect mid-settle
+  // is exactly the trap that comment warns about -- the press would land
+  // on wherever the card was BEFORE the rebuild finished, not the button.
+  await settleLayout(page);
+  const renameBtn = await page.evaluate(() => {
+    const btn = document.querySelector('#drum .card3d.front [data-rename]') as HTMLElement | null;
+    if (!btn) return null;
+    const r = btn.getBoundingClientRect();
+    return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
+  });
+  expect(renameBtn, 'the front project card should have a Rename control to press').not.toBeNull();
+
+  await page.mouse.move(renameBtn!.x, renameBtn!.y);
+  await page.mouse.down();
+  await page.waitForTimeout(750); // past LONG_PRESS_MS
+  await page.mouse.up();
+  await page.waitForTimeout(300);
+
+  await expect(page.locator('#renameModalBg')).toHaveClass(/open/);
+  await expect(page.locator('#editModalBg')).not.toHaveClass(/open/);
+});
