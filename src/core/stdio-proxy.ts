@@ -54,6 +54,10 @@ export async function runStdioProxy(options: ProxyOptions): Promise<void> {
   // a real session id to the shared daemon instead of pretending every call
   // is independent.
   let sessionId: string | undefined;
+  // The client's own handshake, replayed if the daemon forgets us. See the 404
+  // branch in handleLine.
+  let cachedInitialize: unknown;
+  let cachedInitializedNotification: unknown;
 
   // Warm start (non-blocking): most sessions' first real call skips the spawn wait.
   void ensureDaemon({ port, entryPath: options.entryPath, logFile }).catch((err) => {
@@ -80,6 +84,13 @@ export async function runStdioProxy(options: ProxyOptions): Promise<void> {
       return;
     }
 
+    // Remember the handshake so a session lost to the daemon's idle sweep (or a
+    // daemon restart) can be re-established instead of silently degrading every
+    // later write to an unattributed one. Kept verbatim: replaying the client's
+    // own initialize is what makes the new session identical to the old.
+    if (msg.method === "initialize") cachedInitialize = msg;
+    if (msg.method === "notifications/initialized") cachedInitializedNotification = msg;
+
     // Notifications carry no id and the daemon is stateless per MCP-message —
     // drop them (the daemon's session, once minted, doesn't need them).
     if (msg.id === undefined) return;
@@ -88,7 +99,7 @@ export async function runStdioProxy(options: ProxyOptions): Promise<void> {
       const health = await ensureDaemon({ port, entryPath: options.entryPath, logFile });
       warnOnMemoryPathMismatch(health.memoryPath, health.pid);
 
-      const forwardOnce = async () => {
+      const forwardOnce = async (payload: unknown = msg) => {
         const headers: Record<string, string> = {
           "content-type": "application/json",
           accept: "application/json, text/event-stream",
@@ -98,7 +109,7 @@ export async function runStdioProxy(options: ProxyOptions): Promise<void> {
         const res = await fetch(`http://127.0.0.1:${port}/mcp`, {
           method: "POST",
           headers,
-          body: JSON.stringify(msg),
+          body: JSON.stringify(payload),
         });
         const returnedSessionId = res.headers.get("mcp-session-id");
         if (returnedSessionId) sessionId = returnedSessionId;
@@ -126,6 +137,37 @@ export async function runStdioProxy(options: ProxyOptions): Promise<void> {
       // identity (`Agent: unassigned` for a memory write).
       if (status === 404 && sentSessionId) {
         sessionId = undefined;
+        // Re-establish rather than degrade. Retrying sessionless does produce a
+        // properly id'd response, but the stateless fallback mints no session
+        // id — so `sessionId` stayed undefined for the REST OF THIS PROCESS,
+        // and every later write lost its bound identity (Agent: unassigned),
+        // silently and permanently. The design intent is that callers omit
+        // agent_id and rely on session binding, so losing the session loses the
+        // attribution entirely; the comment above described this as a one-call
+        // degradation, which it was not.
+        //
+        // Replaying the client's own initialize mints a fresh session and
+        // forwardOnce captures its id from the response header. If that fails
+        // for any reason we still fall through to the sessionless retry, which
+        // is exactly the old behaviour — strictly no worse than before.
+        if (cachedInitialize) {
+          try {
+            await forwardOnce(cachedInitialize);
+          } catch (err) {
+            logger.warn({ err }, "Proxy could not re-initialize after session loss; falling back to a sessionless call");
+            sessionId = undefined;
+          }
+          if (sessionId && cachedInitializedNotification) {
+            // Complete the handshake, but never let it discard the session it
+            // was meant to finish: a notification is answered 202 with an EMPTY
+            // body, so forwardOnce's JSON.parse throws on success. Swallow it
+            // separately from the initialize above, whose failure genuinely
+            // does mean we have no session.
+            try {
+              await forwardOnce(cachedInitializedNotification);
+            } catch { /* 202 + empty body is the expected outcome */ }
+          }
+        }
         ({ status, response } = await forwardOnce());
       }
 

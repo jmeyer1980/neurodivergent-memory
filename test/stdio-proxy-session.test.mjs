@@ -159,17 +159,48 @@ test("stdio-proxy recovers from an expired session: retries once with no session
     });
     assert.ok(initResult.result, `initialize failed: ${JSON.stringify(initResult)}\n${proxyStderr}\n${daemonStderr}`);
 
+    // A write BEFORE the sweep, to capture the session id that is about to die.
+    const beforeResult = await send(2, "tools/call", { name: "store_memory", arguments: { content: "pre-expiry store, no explicit agent_id" } });
+    assert.ok(!beforeResult.error, `pre-expiry store_memory failed: ${JSON.stringify(beforeResult)}\n${proxyStderr}\n${daemonStderr}`);
+    const beforeText = beforeResult.result.content[0].text;
+    assert.match(beforeText, /Agent: expiry-test-agent/, "precondition: the live session binds the client's identity");
+    const deadSessionId = (beforeText.match(/Session: (\S+)/) ?? [])[1];
+    assert.ok(deadSessionId, `precondition: a session id was reported\n${beforeText}`);
+
     // Let the session go idle past the 200ms sweep window so the daemon
     // forgets it — the proxy still remembers the now-dead session id.
     await new Promise((r) => setTimeout(r, 600));
 
     // This must resolve at all (not hang) — a `null`-id response from the
     // daemon's 404 would never match a pending-request lookup, so the promise
-    // resolving is itself proof the retry-with-no-session-header path fired.
-    const storeResult = await send(2, "tools/call", { name: "store_memory", arguments: { content: "post-expiry store, no explicit agent_id" } });
+    // resolving is itself proof the recovery path fired.
+    const storeResult = await send(3, "tools/call", { name: "store_memory", arguments: { content: "post-expiry store, no explicit agent_id" } });
     assert.ok(!storeResult.error, `store_memory failed: ${JSON.stringify(storeResult)}\n${proxyStderr}\n${daemonStderr}`);
     const text = storeResult.result.content[0].text;
-    assert.match(text, /Agent: unassigned/, "retry must fall through to the stateless path, not somehow reuse the dead session's identity");
+
+    // This assertion was inverted deliberately. It used to require
+    // `Agent: unassigned`, on the reasoning that the retry "must fall through
+    // to the stateless path, not somehow reuse the dead session's identity" --
+    // but that encoded a real defect as the contract: because the stateless
+    // path mints no session id, the proxy stayed sessionless for the REST OF
+    // THE PROCESS, so every later write in a long-lived client silently lost
+    // its identity. The design intent is that callers omit agent_id and rely
+    // on session binding, so losing the session lost the attribution entirely.
+    //
+    // The original concern still holds and is now asserted directly: the dead
+    // session must NOT be reused. The proxy instead replays the client's own
+    // initialize to mint a FRESH session, which legitimately re-binds the same
+    // client -- so the identity returns while the session id differs.
+    assert.match(text, /Agent: expiry-test-agent/, "the proxy must re-establish the session, not degrade to unattributed writes");
+    const newSessionId = (text.match(/Session: (\S+)/) ?? [])[1];
+    assert.ok(newSessionId, `a session id was reported after recovery\n${text}`);
+    assert.notEqual(newSessionId, deadSessionId, "recovery must mint a NEW session, never resurrect the swept one");
+
+    // And it must persist: the whole point is that the next call does not have
+    // to rediscover this. A one-call fix would leave the process degraded again.
+    const thirdResult = await send(4, "tools/call", { name: "store_memory", arguments: { content: "third store, still attributed" } });
+    assert.ok(!thirdResult.error, `third store_memory failed: ${JSON.stringify(thirdResult)}`);
+    assert.match(thirdResult.result.content[0].text, /Agent: expiry-test-agent/, "the re-established session must survive beyond the call that created it");
   } finally {
     if (proxy) proxy.kill();
     await stopDaemonOnPort(daemonPort);
