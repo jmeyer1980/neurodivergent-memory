@@ -350,6 +350,7 @@
     </div>
     <div class="cluster">
       <span class="pill" id="connState">Connecting…</span>
+      <button class="pill" id="createBtn" title="New memory" aria-label="New memory">+</button>
       <button class="pill" id="helpBtn" title="What is this?" aria-label="What is this?">?</button>
       <button class="pill" id="themeBtn" title="Toggle theme">◐</button>
       <a class="pill" href="/">Classic view</a>
@@ -366,7 +367,7 @@
   <div id="overlay"><div class="box"><h2>Bridge offline</h2><p id="overlayMsg">Could not reach the bridge. Start it with <code>node scripts/nd-mem-bridge-server.mjs</code> and retry.</p><button class="btn primary" id="retryBtn">Retry</button></div></div>
   <div class="modalbg" id="editModalBg">
     <div class="modal">
-      <h2>Edit memory</h2>
+      <h2 id="editModalTitle">Edit memory</h2>
       <div class="grid">
         <div class="field span2"><label>Content</label><textarea id="editContent"></textarea></div>
         <div class="field"><label>District</label><select id="editDistrict"></select></div>
@@ -415,7 +416,7 @@
     const NODE_LABEL_PX = 58; // 10 monospace chars at .6rem; see truncateNodeLabel
 
     const $ = s => document.querySelector(s);
-    const els = { stage: $('#stage'), scene: $('#scene'), drum: $('#drum'), crumb: $('#crumb'), position: $('#position'), connState: $('#connState'), backBtn: $('#backBtn'), overlay: $('#overlay'), overlayMsg: $('#overlayMsg'), retryBtn: $('#retryBtn'), toast: $('#toast'), hudHint: $('#hudHint'), minimap: $('#minimap'), mapBody: $('#mapBody'), mapToggle: $('#mapToggle'), spin: $('#spin'), spinPrev: $('#spinPrev'), spinNext: $('#spinNext'), helpBtn: $('#helpBtn'), helpModalBg: $('#helpModalBg') };
+    const els = { stage: $('#stage'), scene: $('#scene'), drum: $('#drum'), crumb: $('#crumb'), position: $('#position'), connState: $('#connState'), backBtn: $('#backBtn'), overlay: $('#overlay'), overlayMsg: $('#overlayMsg'), retryBtn: $('#retryBtn'), toast: $('#toast'), hudHint: $('#hudHint'), minimap: $('#minimap'), mapBody: $('#mapBody'), mapToggle: $('#mapToggle'), spin: $('#spin'), spinPrev: $('#spinPrev'), spinNext: $('#spinNext'), helpBtn: $('#helpBtn'), helpModalBg: $('#helpModalBg'), createBtn: $('#createBtn') };
 
     // Three hand-tuned offsets (64/108/56) each encoded a guess at how tall
     // #chrome renders at that breakpoint. The band would have needed a fourth.
@@ -458,6 +459,7 @@
       lastBounceAt: 0,
       editingId: null,
       editingDistrict: null, // district the edit modal was seeded with, to detect a real change
+      modalMode: null,       // 'edit' or 'create' -- which mode the edit modal is currently wearing
       renamingProject: null,
     };
 
@@ -1624,8 +1626,35 @@
 
     // ---------- edit modal ----------
     const CANONICAL = H.CANONICAL_DISTRICTS;
+    // One modal, two modes. A second modal would drift from this one exactly as
+    // the classic app's copy already drifted from it -- that divergence was a
+    // code-review finding, not a hypothetical.
+    function openCreateModal(pressedCard = null){
+      const defaults = H.createDefaultsFor(state.view, pressedCard);
+      state.modalMode = 'create';
+      state.editingId = null;
+      $('#editModalTitle').textContent = 'New memory';
+      $('#editSaveBtn').textContent = 'Create';
+      const districts = H.CANONICAL_DISTRICTS;
+      $('#editDistrict').innerHTML = districts.map(d => `<option value="${esc(d)}">${esc(d)}</option>`).join('');
+      $('#editContent').value = '';
+      $('#editDistrict').value = defaults.district || 'practical_execution';
+      // Seeded the same way openEditModal does, so submitEdit's "only send a
+      // district the user actually chose" guard behaves identically in both modes.
+      state.editingDistrict = $('#editDistrict').value;
+      $('#editProject').value = defaults.projectId ?? '';
+      $('#editVisibility').value = 'private';
+      $('#editIntensity').value = '0.5';
+      $('#editEpistemic').value = '';
+      $('#editTags').value = '';
+      $('#editModalBg').classList.add('open');
+      $('#editContent').focus();
+    }
     function openEditModal(m){
       state.editingId = m.id;
+      state.modalMode = 'edit';
+      $('#editModalTitle').textContent = 'Edit memory';
+      $('#editSaveBtn').textContent = 'Save changes';
       const districts = CANONICAL.includes(m.district) || !m.district ? CANONICAL : [m.district, ...CANONICAL];
       $('#editDistrict').innerHTML = districts.map(d => `<option value="${esc(d)}">${esc(d)}</option>`).join('');
       $('#editContent').value = m.content || '';
@@ -1643,55 +1672,60 @@
       $('#editContent').focus(); // must follow .open — a display:none field cannot take focus
     }
     async function submitEdit(){
+      const creating = state.modalMode === 'create';
       const content = $('#editContent').value.trim();
       if (!content) { showToast('Content cannot be empty.'); return; }
       const project = $('#editProject').value.trim();
+      const district = $('#editDistrict').value;
+      const rawIntensity = $('#editIntensity').value.trim();
+      const epistemic = $('#editEpistemic').value;
+
       const body = {
-        memoryId: state.editingId,
         content,
         visibility: $('#editVisibility').value,
         projectId: project === '' ? null : project,
         tags: $('#editTags').value.split(',').map(s => s.trim()).filter(Boolean),
       };
+      if (!creating) body.memoryId = state.editingId;
       // The bridge forwards only the keys present, leaving everything else
-      // untouched, so an untouched control must send nothing. An emptied number
-      // field reads as '' and would post intensity: NaN; an unchanged district
-      // select would post the placeholder value shown for district-less memories.
+      // untouched, so an untouched control must send nothing. Editing sends a
+      // district only when the user actually changed it, so an untouched select
+      // cannot silently refile a district-less memory. Creating must always
+      // send one -- there is nothing to preserve.
+      if (creating || district !== state.editingDistrict) body.district = district;
+      // An emptied number field reads as '' and would post intensity: NaN.
       // Same validation as the classic app's edit modal: Number('') is 0 (hence
       // the empty check), Number('abc') is NaN which serialises to null and the
       // daemon rejects, and the min/max attributes do not constrain a
       // script-submitted form — so a typed 5 would otherwise persist off-scale.
-      const intensity = $('#editIntensity').value.trim();
-      if (intensity !== '') {
-        const n = Number(intensity);
-        if (!Number.isFinite(n) || n < 0 || n > 1) {
-          showToast('Intensity must be a number between 0 and 1.');
-          return;
-        }
+      if (rawIntensity !== '') {
+        const n = Number(rawIntensity);
+        if (!Number.isFinite(n) || n < 0 || n > 1) { showToast('Intensity must be a number between 0 and 1.'); return; }
         body.intensity = n;
       }
-      const district = $('#editDistrict').value;
-      if (district !== state.editingDistrict) body.district = district;
-      const epistemic = $('#editEpistemic').value;
       if (epistemic) body.epistemicStatus = epistemic;
+
+      const route = creating ? '/save' : '/update';
+      let res, data;
       try {
-        const res = await fetch(`${BRIDGE}/update`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-        const data = await res.json();
-        if (!res.ok || !data.ok) throw new Error('update failed');
-        $('#editModalBg').classList.remove('open');
-        showToast('Update routed through the bridge.');
-        // The snapshot is otherwise only fetched at init, so both the card and a
-        // reopened modal would keep showing pre-edit values — and a second edit of
-        // the same memory would re-POST that stale content, silently reverting the
-        // first. This runs last so a reconcile toast ("centered card was removed",
-        // "this view emptied") lands after the success toast and survives, instead
-        // of being overwritten by it. Refresh failure is caught separately: the
-        // save already succeeded, so a stale card is acceptable but a stuck modal
-        // (or a false failure toast from the outer catch) is not.
-        try { await loadSnapshot(); refreshAndReconcile(); } catch {}
+        res = await fetch(`${BRIDGE}${route}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+        data = await res.json();
       } catch {
-        showToast('Update failed — the modal is untouched, fix and retry.');
+        showToast('Could not reach the bridge — nothing was saved.');
+        return;
       }
+      if (!res.ok || !data.ok) { showToast(creating ? 'Create failed.' : 'Update failed.'); return; }
+      $('#editModalBg').classList.remove('open');
+      showToast(creating ? 'Memory created.' : 'Memory updated.');
+      // The snapshot is otherwise only fetched at init, so both the card and a
+      // reopened modal would keep showing pre-edit values — and a second edit of
+      // the same memory would re-POST that stale content, silently reverting the
+      // first. This runs last so a reconcile toast ("centered card was removed",
+      // "this view emptied") lands after the success toast and survives, instead
+      // of being overwritten by it. Refresh failure is caught separately: the
+      // save already succeeded, so a stale card is acceptable but a stuck modal
+      // (or a false failure toast from the outer catch) is not.
+      try { await loadSnapshot(); refreshAndReconcile(); } catch {}
     }
 
     // ---------- project rename ----------
@@ -1875,6 +1909,7 @@
       const card = btn.closest('.card3d.front');
       if (card) card.classList.toggle('flipped', btn.dataset.flip === 'open');
     });
+    els.createBtn.addEventListener('click', () => openCreateModal());
     $('#editCancelBtn').addEventListener('click', () => $('#editModalBg').classList.remove('open'));
     $('#editSaveBtn').addEventListener('click', submitEdit);
     $('#editModalBg').addEventListener('click', (e) => { if (e.target.id === 'editModalBg') $('#editModalBg').classList.remove('open'); });

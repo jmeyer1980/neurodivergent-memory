@@ -735,3 +735,28 @@ test('spinning to another card resets the flip to the front', async ({ page }) =
   expect(back!.readerShown, 'the re-selected card should show its text again').toBe(true);
   expect(back!.metaShown, "the re-selected card should not still show its earlier-opened meta pane").toBe(false);
 });
+
+// The rolodex could read, navigate, rename and edit -- but not create. The
+// classic app has had a New Card form all along.
+test('the + button opens a create modal pre-filled from where you are standing', async ({ page }) => {
+  test.slow();
+  // At the wall: nothing inherited.
+  await page.locator('#createBtn').click();
+  await expect(page.locator('#editModalBg')).toHaveClass(/open/);
+  expect(await page.locator('#editModalTitle').textContent()).toMatch(/new memory/i);
+  expect(await page.locator('#editProject').inputValue()).toBe('');
+  await page.locator('#editCancelBtn').click();
+
+  // At memories depth: project AND district inherited.
+  expect(await diveToMemories(page)).toBe('memories');
+  const where = await page.evaluate(() => {
+    const segs = [...document.querySelectorAll('#crumb .seg')];
+    return { project: (segs[1]?.getAttribute('title') ?? segs[1]?.textContent ?? '').trim(),
+             district: (segs[2]?.getAttribute('title') ?? segs[2]?.textContent ?? '').trim() };
+  });
+  await page.locator('#createBtn').click();
+  await expect(page.locator('#editModalBg')).toHaveClass(/open/);
+  expect(await page.locator('#editProject').inputValue()).toBe(where.project);
+  expect(await page.locator('#editDistrict').inputValue()).toBe(where.district);
+  await page.locator('#editCancelBtn').click();
+});
