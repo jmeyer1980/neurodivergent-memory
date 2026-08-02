@@ -170,3 +170,10 @@ benchmark-results/memory-benchmark-latest.md
 
 # local tool/agent conversation logs (may contain machine-specific paths and environment data)
 plan/conversation-logs-for-review/
+
+# Playwright
+/test-results/
+/playwright-report/
+/blob-report/
+/playwright/.cache/
+/playwright/.auth/

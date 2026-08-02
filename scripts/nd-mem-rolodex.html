@@ -7,21 +7,84 @@
   <link rel="preconnect" href="https://api.fontshare.com">
   <link href="https://api.fontshare.com/v2/css?f[]=satoshi@300,400,500,700,900&f[]=clash-display@400,500,600,700&display=swap" rel="stylesheet">
   <style>
-    :root,[data-theme="light"]{--bg:#f7f6f2;--border:#d4d1ca;--text:#28251d;--muted:#7a7974;--faint:#8d8c86;--primary:#01696f;--cardW:340px;--cardH:230px;--font-display:'Clash Display','Inter',sans-serif;--font-body:'Satoshi','Inter',sans-serif;--surface:rgba(255,255,255,.75);--surfaceBorder:rgba(0,0,0,.12);--bgEnd:#efece6;--overlayBg:rgba(250,249,246,.96);--cardWash:linear-gradient(180deg,rgba(255,255,255,.55),rgba(255,255,255,.3))}
-    [data-theme="dark"]{--bg:#111318;--border:#37404b;--text:#edf2f4;--muted:#a3b0b8;--faint:#6e7a84;--primary:#60d7d2;--surface:rgba(16,20,24,.72);--surfaceBorder:rgba(255,255,255,.1);--bgEnd:#0d0f13;--overlayBg:rgba(20,24,29,.96);--cardWash:linear-gradient(180deg,rgba(255,255,255,.08),rgba(255,255,255,.03))}
+    /* Light is a warm SEPIA, not a white page. The old light theme was built
+       from #f7f6f2 over a near-white translucent surface and read as glare on a
+       phone. These are parchment tones a couple of steps down in luminance, and
+       the surfaces stay warm so translucency over them never trends back toward
+       white. Text/muted hold >=4.5:1 against --bg; --faint is a label tone only.
+       --bg/--bgEnd are ~20% darker (HSL lightness, hue/sat held) than the first
+       cut of this theme, to give cards the same separation-from-background depth
+       the dark theme already has; --muted/--faint moved down with them (24%, a
+       touch more than the background) so the >=4.5:1 invariant still holds --
+       see the measured ratios in .superpowers/sdd/2026-07-31-rolodex-legibility.
+       --tint is the accent wash: dark keeps the original bright cyan, light
+       swaps it for an earthy brown so the glow reads as warm light on leather
+       instead of the cyan cast both themes used to share (rgba(96, 215, 210, ..)
+       hardcoded everywhere below). --primary follows the same swap in light --
+       it was a dark shade of that same cyan; now it's a dark shade of the new
+       brown, so depth badge / map cursor / focus accents stay one hue family
+       with the wash instead of reverting to cyan. */
+    :root,[data-theme="light"]{--bg:#c1ae8c;--border:#b8ab95;--text:#2b2419;--muted:#474035;--faint:#575043;--primary:#5c3a1a;--tint:150,95,45;--cardW:340px;--cardH:230px;--font-display:'Clash Display','Inter',sans-serif;--font-body:'Satoshi','Inter',sans-serif;--surface:rgba(243,236,224,.8);--surfaceBorder:rgba(64,52,36,.22);--bgEnd:#b49f7b;--overlayBg:rgba(232,223,206,.97);--cardWash:linear-gradient(180deg,rgba(255,250,240,.18),rgba(90,74,50,.04));--optionBg:#f6f1e6;--optionText:#2b2419;--wash:rgba(64,52,36,.06);--washStrong:rgba(64,52,36,.11);--cardBase:#ebe2d1}
+    [data-theme="dark"]{--bg:#111318;--border:#37404b;--text:#edf2f4;--muted:#a3b0b8;--faint:#6e7a84;--primary:#60d7d2;--tint:96,215,210;--surface:rgba(16,20,24,.72);--surfaceBorder:rgba(255,255,255,.1);--bgEnd:#0d0f13;--overlayBg:rgba(20,24,29,.96);--cardWash:linear-gradient(180deg,rgba(255,255,255,.08),rgba(255,255,255,.03));--optionBg:#1b1f24;--optionText:#edf2f4;--wash:rgba(255,255,255,.05);--washStrong:rgba(255,255,255,.12);--cardBase:rgba(16,20,24,.72)}
     *{box-sizing:border-box;margin:0;padding:0}
     html,body{height:100%;overflow:hidden;overscroll-behavior:none}
-    body{font-family:var(--font-body);color:var(--text);background:radial-gradient(circle at top left,rgba(96,215,210,.1),transparent 24%),linear-gradient(180deg,var(--bg),var(--bgEnd));user-select:none}
+    body{font-family:var(--font-body);color:var(--text);background:radial-gradient(circle at top left,rgba(var(--tint),.1),transparent 24%),linear-gradient(180deg,var(--bg),var(--bgEnd));user-select:none}
     button{font:inherit;color:inherit;cursor:pointer}
-    #chrome{position:fixed;inset:0 0 auto 0;z-index:10;display:flex;justify-content:space-between;align-items:center;gap:12px;padding:14px 18px;pointer-events:none}
-    #chrome .cluster{display:flex;gap:10px;align-items:center;pointer-events:auto}
+    /* flex-wrap is on at EVERY width, not just below the phone breakpoint. The
+       first version of this treated "narrow" as the only way to overflow, and
+       landscape proved otherwise: a phone on its side is ~737-852px CSS wide,
+       so it missed the 560px query, fell back to the one-row desktop layout,
+       and pushed the right-hand cluster off screen — with #crumb's 52vw alone
+       claiming ~383px of it. Wrapping means no viewport width can overflow; the
+       clusters just drop onto their own rows when they stop fitting. */
+    #chrome{position:fixed;inset:0 0 auto 0;z-index:10;display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:12px;row-gap:8px;padding:14px 18px;pointer-events:none}
+    #chrome .cluster{display:flex;gap:10px;align-items:center;min-width:0;pointer-events:auto}
     .pill{padding:9px 14px;border-radius:999px;border:1px solid var(--surfaceBorder);background:var(--surface);backdrop-filter:blur(10px);font-size:.82rem;color:var(--muted)}
     .pill strong{color:var(--text);font-weight:500}
     a.pill{text-decoration:none}
     #backBtn{font-size:1rem;line-height:1}
-    #levelName{font-family:var(--font-display);text-transform:uppercase;letter-spacing:.14em;font-size:.74rem}
-    #stage{position:fixed;inset:0;perspective:1400px;overflow:hidden;touch-action:none}
-    #stage.bounce::after{content:'';position:absolute;inset:0;pointer-events:none;box-shadow:inset 0 0 120px rgba(96,215,210,.35);animation:edgeflash .45s ease}
+    /* One band, one answer to "where am I". It is a flex item of #chrome with
+       flex-basis:100%, so it always takes its own row without a second fixed
+       element to position around. coordinateOf returns at most four segments
+       however deep 0^N goes, so wrapping is always enough and nothing is ever
+       dropped -- the per-segment ellipsis below only guards one absurd id. */
+    #locus{flex:1 1 100%;display:flex;align-items:baseline;gap:10px;min-width:0;pointer-events:auto;
+      padding:8px 14px;border-radius:16px;border:1px solid var(--surfaceBorder);
+      background:var(--surface);backdrop-filter:blur(10px)}
+    /* row-gap is nonzero, not 0: #crumb wraps to two lines on ordinary
+       coordinates at real narrow-viewport widths, not just on pathological
+       ones, so it needs real leading between them or the two lines read as
+       one squashed block. */
+    #crumb{flex:1 1 auto;min-width:0;display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 2px;
+      font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:.95rem;
+      letter-spacing:.02em;color:var(--text)}
+    #crumb .seg{background:none;border:0;padding:0 2px;font:inherit;color:var(--muted);cursor:pointer;
+      border-radius:4px;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    #crumb .seg:hover{color:var(--text);background:var(--washStrong)}
+    #crumb .seg.depth{color:var(--primary);font-weight:600;white-space:nowrap}
+    #crumb .seg.leaf,#crumb .seg:disabled{color:var(--text);cursor:default}
+    #crumb .seg:disabled:hover{background:none}
+    #crumb .sep{color:var(--faint);padding:0 1px}
+    #position{flex:0 0 auto;font-size:.78rem;color:var(--muted);white-space:nowrap}
+    /* Inset below the chrome rather than sitting under it. #chrome is fixed, so
+       for as long as #stage started at the viewport top the bar simply COVERED
+       the card — harmless while the coordinate was one ellipsised pill, and not
+       at all harmless once the location band could wrap to four lines on a
+       portrait phone and hide most of a memory. Driving the inset from the
+       measured --chromeH closes the whole class: any future chrome growth
+       displaces the card instead of obscuring it. The geometric hit-test reads
+       els.stage.getBoundingClientRect(), so it follows this automatically. */
+    /* Glide, don't jump. The inset above means chrome DISPLACES the card rather
+       than covering it, which is what stops the location band hiding a memory
+       on a portrait phone — but the band's height changes whenever the
+       coordinate wraps to another line (diving from projects to memories adds
+       two segments), and the card snapping down by a whole line reads as a
+       glitch. Transitioning the edges turns that into motion the eye can
+       follow. Cheap: it only runs on the frames where --chromeH/--hudH
+       actually change, which is a level change or a rotation, not a spin. */
+    #stage,#spin{transition:top .28s cubic-bezier(.4,0,.2,1),bottom .28s cubic-bezier(.4,0,.2,1)}
+    #stage{position:fixed;inset:var(--chromeH,64px) 0 var(--hudH,64px) 0;perspective:1400px;overflow:hidden;touch-action:none}
+    #stage.bounce::after{content:'';position:absolute;inset:0;pointer-events:none;box-shadow:inset 0 0 120px rgba(var(--tint),.35);animation:edgeflash .45s ease}
     @keyframes edgeflash{from{opacity:1}to{opacity:0}}
     #scene{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;transform-style:preserve-3d;transition:transform .7s cubic-bezier(.4,0,.2,1),opacity .55s ease}
     #scene.zoom-in{transform:translateZ(900px);opacity:0}
@@ -29,24 +92,100 @@
     #scene.bouncing{animation:wallbounce .45s ease}
     @keyframes wallbounce{0%{transform:translateZ(0)}35%{transform:translateZ(-90px)}100%{transform:translateZ(0)}}
     #drum{position:relative;width:var(--cardW);height:var(--cardH);transform-style:preserve-3d}
-    #stage[data-level="memories"]{--cardH:500px}
-    .card3d{position:absolute;inset:0;display:flex;flex-direction:column;gap:10px;padding:18px;border-radius:24px;border:1px solid var(--surfaceBorder);background:var(--cardWash),radial-gradient(circle at top right,rgba(96,215,210,.16),transparent 38%),var(--surface);box-shadow:0 18px 40px rgba(0,0,0,.35);backface-visibility:hidden;transition:opacity .3s,box-shadow .3s,border-color .3s;opacity:.55}
-    .card3d.front{opacity:1;border-color:rgba(96,215,210,.4);box-shadow:0 24px 60px rgba(0,0,0,.5),0 0 30px rgba(96,215,210,.12)}
+    /* A flat 500px did not fit a phone held sideways — the viewport is only
+       ~393px tall there, so memory cards were clipped top and bottom. Tie it to
+       the viewport: 78vh only bites below ~640px of height, so portrait and
+       desktop keep the 500px they always had. */
+    /* 88% of the STAGE, not 78vh. Sizing a memory card against the viewport was
+       fine while #stage WAS the viewport; now that it is inset between the two
+       fixed bars, a viewport-relative card can be taller than the box holding
+       it and overflow back under the very bars the inset exists to clear.
+       #scene is inset:0 in #stage, so the percentage resolves against the space
+       actually available. */
+    #stage[data-level="memories"]{--cardH:min(500px, 88%)}
+    .card3d{position:absolute;inset:0;display:flex;flex-direction:column;gap:10px;padding:18px;border-radius:24px;border:1px solid var(--surfaceBorder);background:var(--cardWash),radial-gradient(circle at top right,rgba(var(--tint),.16),transparent 38%),var(--cardBase);box-shadow:0 18px 40px rgba(0,0,0,.35);backface-visibility:hidden;transition:opacity .3s,box-shadow .3s,border-color .3s,transform .25s ease;opacity:.55}
+    .card3d.front{opacity:1;border-color:rgba(var(--tint),.4);box-shadow:0 24px 60px rgba(0,0,0,.5),0 0 30px rgba(var(--tint),.12)}
+    /* A sign, not a control. Chromium cannot hit-test a 3D-rotated card —
+       pointer events AND elementFromPoint both return #scene — which is why
+       every real button lives on .card3d.front only. A pseudo-element adds no
+       node to hit, and pointer-events:none makes that belt-and-braces. The
+       whole card is already clickable (routeGesture clickOther =>
+       centerThenDive); this just admits it.
+       A bare `›` shipped first and read as unexplained noise ("confusing as
+       to what that means or what it is for") -- text reads as a control, a
+       lone glyph does not. "Open ›" is deliberately uniform, not mirrored per
+       side: the trailing `›` is a disclosure idiom read after the word, not a
+       direction, and updateFrontCard (below) already relies on never having
+       to sweep a class over all N cards on every front-card change, which a
+       per-side variant would require. Styled to echo .chip -- the same quiet
+       pill language already used elsewhere on this card -- so it reads as
+       tappable without competing with the title. The `/ ''` alt text is load-
+       bearing, not decorative: without it, a screen reader would announce
+       "Open" a second time on every one of the ~24 non-front cards in the
+       rendered window, on top of the name and kind it already reads. */
+    .card3d:not(.front)::after{content:'Open ›' / '';position:absolute;right:16px;bottom:12px;
+      padding:5px 12px;border-radius:999px;border:1px solid var(--surfaceBorder);
+      background:var(--wash);font-size:.72rem;line-height:1.3;letter-spacing:.02em;
+      color:var(--muted);pointer-events:none}
+    .card3d{cursor:pointer}
+    @media (hover:hover){.card3d:not(.front):hover{opacity:.75}}
     .card3d .kicker{font-size:.7rem;text-transform:uppercase;letter-spacing:.1em;color:var(--faint)}
     .card3d h2{font-family:var(--font-display);font-size:1.15rem;line-height:1.2}
     .card3d p{color:var(--muted);line-height:1.5;font-size:.9rem;overflow:hidden}
     .chips{display:flex;gap:8px;flex-wrap:wrap}
-    .chip{padding:6px 10px;border-radius:999px;background:rgba(255,255,255,.05);border:1px solid var(--surfaceBorder);font-size:.74rem;color:var(--muted)}
-    .card3d .reader-scroll{display:none;flex:1;min-height:0;overflow:auto;padding-right:6px;line-height:1.6;color:var(--text);font-size:.92rem;white-space:pre-wrap;user-select:text;touch-action:pan-y;overscroll-behavior:contain}
+    .chip{padding:6px 10px;border-radius:999px;background:var(--wash);border:1px solid var(--surfaceBorder);font-size:.74rem;color:var(--muted)}
+    .card3d .reader-scroll{display:none;flex:1;min-height:0;overflow:auto;padding-right:6px;line-height:1.6;color:var(--text);font-size:.92rem;white-space:pre-wrap;user-select:text;touch-action:none;overscroll-behavior:contain}
     .card3d.front .reader-scroll{display:block}
     .card3d.front .preview{display:none}
     .card3d .meta{display:none;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:8px}
-    .card3d.front .meta{display:grid}
-    .mini{padding:8px 10px;border-radius:12px;background:rgba(255,255,255,.04);border:1px solid var(--surfaceBorder)}
+    /* Meta only shows on the front card's BACK face now -- see the flip block
+       below, which is the only place this rule's condition is widened. */
+    .card3d.front.flipped .meta{display:grid}
+    .mini{padding:8px 10px;border-radius:12px;background:var(--wash);border:1px solid var(--surfaceBorder)}
     .mini label{display:block;font-size:.66rem;color:var(--faint);text-transform:uppercase;letter-spacing:.08em;margin-bottom:3px}
     .mini span{font-size:.8rem}
     .card3d .actions{display:none;justify-content:flex-end}
     .card3d.front .actions{display:flex}
+    /* ---------- card flip (memory cards only) ----------
+       The metadata grid and its chips used to render unconditionally on the
+       front card and ate most of the room the memory text needed ("those meta
+       containers are huge... they really don't need to take up so much space").
+       Flip swaps which pane is shown IN PLACE -- never a 3D rotateY of the
+       visible face. Chromium cannot hit-test a 3D-rotated card (pointer events
+       and elementFromPoint both resolve to #scene for any non-flat card, see
+       cardIndexAtPoint below), which is exactly why every real control already
+       lives on .card3d.front only; a true 3D flip would put the Back button on
+       a rotated face and reintroduce that defect for the one card meant to be
+       fully interactive. A plain class toggle plus a fade sidesteps it entirely.
+       Only .card3d.front ever carries .flipped (updateFrontCard clears it the
+       moment a card stops being front), so these rules are inert for every
+       other rendered card and never touch the project/district branches, which
+       have no .meta and keep their own always-on .chips untouched -- that is
+       why the memory card's own tag list below carries the extra .card-chips
+       class instead of relying on the bare .chips selector. */
+    .card3d.front.flipped .kicker,
+    .card3d.front.flipped h2,
+    .card3d.front.flipped .preview,
+    .card3d.front.flipped .reader-scroll,
+    .card3d.front.flipped .front-actions{display:none}
+    .card3d .card-chips{display:none}
+    .card3d.front.flipped .card-chips{display:flex}
+    /* Specificity note: .back-actions also carries .actions, and the base
+       ".card3d.front .actions{display:flex}" rule above is three classes --
+       a plain ".card3d .back-actions{display:none}" (two classes) would lose
+       that cascade fight on the front-not-flipped card and show the Back
+       button early. ":not(.flipped)" keeps this rule at four classes so it
+       wins there; once .flipped is added this selector stops matching and
+       the base .actions{display:flex} rule shows it instead. */
+    .card3d.front:not(.flipped) .back-actions{display:none}
+    /* Fade-in is scoped to the .flipped class actually changing (a Details
+       click), not to .front changing (an ordinary spin step) -- .meta/
+       .card-chips/.back-actions only ever go display:none -> shown when
+       .flipped is added, so this never fires while spinning past cards. */
+    @media (prefers-reduced-motion: no-preference){
+      @keyframes cardFaceIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
+      .card3d.front.flipped .meta,.card3d.front.flipped .card-chips,.card3d.front.flipped .back-actions{animation:cardFaceIn .18s ease}
+    }
     .modalbg{position:fixed;inset:0;z-index:40;background:rgba(7,10,12,.66);backdrop-filter:blur(10px);display:none;align-items:center;justify-content:center;padding:16px}
     .modalbg.open{display:flex}
     .modal{width:min(680px,100%);max-height:88vh;overflow:auto;border-radius:26px;background:var(--cardWash),var(--overlayBg);border:1px solid var(--surfaceBorder);padding:22px;user-select:text}
@@ -54,38 +193,176 @@
     .grid{display:grid;grid-template-columns:repeat(2,1fr);gap:12px}
     .field label{display:block;margin-bottom:6px;font-size:.72rem;color:var(--muted);text-transform:uppercase;letter-spacing:.08em}
     .field input,.field select,.field textarea{width:100%;padding:11px 13px;border-radius:13px;border:1px solid var(--surfaceBorder);background:var(--surface);font:inherit;color:inherit}
+    /* The native <option> list is drawn by the OS on its OWN background, which
+       is usually white — so inheriting the app's text colour left every option
+       near-invisible until it was hovered. Options need their own explicit
+       pair; they cannot borrow the page's. */
+    select option{background-color:var(--optionBg);color:var(--optionText)}
     .field textarea{min-height:140px}
     .span2{grid-column:span 2}
     .foot{display:flex;justify-content:flex-end;gap:10px;margin-top:16px}
-    #hud{position:fixed;inset:auto 0 0 0;z-index:10;display:flex;justify-content:center;padding:16px;pointer-events:none}
+    .hint{color:var(--muted);font-size:.82rem;line-height:1.5;margin-top:10px}
+    #hud{position:fixed;inset:auto 0 0 0;z-index:10;display:flex;justify-content:center;padding:16px;pointer-events:none;gap:10px;flex-wrap:wrap}
+    /* Shown only at the wall: at depth the card needs the room more than a
+       first-timer needs the premise restated. */
+    #wallCopy{max-width:min(560px,92vw);text-align:center;line-height:1.5}
+    /* Document order after Task 5 is #stage, #spin, #hud -- ~ (general
+       sibling) is required here; + (adjacent sibling) would silently never
+       match, since #spin sits between #stage and #hud. */
+    #stage:not([data-level="projects"]) ~ #hud #wallCopy{display:none}
+    /* A 3x3 grid where only the middle row's outer cells are filled. The middle
+       COLUMN's outer rows are deliberately left empty: that is the reserved
+       slot for the deferred floor chevrons, so adding them is an insertion
+       rather than a relayout. */
+    /* Same inset as #stage, so the buttons stay vertically centred ON THE CARD
+       rather than on the viewport — otherwise they drift above it by half the
+       chrome's height. The <=560px rule below re-anchors them to the bottom. */
+    #spin{position:fixed;inset:var(--chromeH,64px) 0 var(--hudH,64px) 0;z-index:8;display:grid;grid-template-columns:auto 1fr auto;
+      grid-template-rows:1fr auto 1fr;align-items:center;padding:0 10px;pointer-events:none}
+    #spin>*{pointer-events:auto}
+    #spinPrev{grid-column:1;grid-row:2}
+    #spinNext{grid-column:3;grid-row:2}
+    #spin.hidden{display:none}
+    .spinBtn{font-size:1.05rem;line-height:1;padding:12px 14px}
+    /* A phone card is near-full-width, so a side gutter would sit on top of it.
+       The bottom row is both clear of the card and where thumbs already are. */
+    @media (max-width:560px){
+      #spin{inset:auto 0 0 0;display:flex;justify-content:space-between;padding:0 14px 14px}
+      #hud{padding:16px 76px}
+    }
+    /* Below ~360px the 76px side padding just above (added to clear the spin
+       buttons) leaves #wallCopy's flex line only ~168px wide -- its
+       min(560px,92vw) max-width is inert there, since the padding binds
+       first. The 108-character line wraps to five rows and pushes #hud tall
+       enough to sit on top of the card (measured: 240px of #hud against a
+       230px-tall card at 320x568, ~31% of the card covered). #hudHint has no
+       such problem -- it is a handful of words -- so only the long orienting
+       string needs to go; the short hint keeps showing. */
+    @media (max-width:360px){
+      #wallCopy{display:none}
+    }
+    #minimap{position:fixed;left:0;top:calc(var(--chromeH, 64px) + 8px);bottom:64px;z-index:9;display:flex;flex-direction:column;justify-content:flex-end;align-items:flex-start;gap:8px;padding:10px;pointer-events:none}
+    #minimap>*{pointer-events:auto}
+    #mapToggle{font-size:.7rem;letter-spacing:.08em;text-transform:uppercase;padding:6px 10px}
+    #mapBody{max-height:100%;max-width:260px;overflow:auto;border-radius:16px;border:1px solid var(--surfaceBorder);background:var(--surface);backdrop-filter:blur(10px);padding:6px}
+    #minimap.collapsed #mapBody{display:none}
+    #mapBody svg{display:block}
+    #mapBody .edge{fill:none;stroke:var(--faint);stroke-width:1.5;opacity:.45}
+    #mapBody .edge.on{stroke:var(--primary);opacity:.9}
+    /* The dot and its label are one target. .nodeHit is the transparent rect
+       spanning both; `fill:transparent` (not fill:none) is what makes it
+       hittable, since the default pointer-events only counts painted area. */
+    #mapBody .nodeG{cursor:pointer}
+    #mapBody .nodeHit{fill:transparent}
+    #mapBody .node{fill:var(--surface);stroke:var(--faint);stroke-width:1.5}
+    #mapBody .node.on{stroke:var(--primary)}
+    #mapBody .node.cursor{fill:var(--primary);stroke:var(--primary)}
+    /* Hover is driven from the group, so pointing anywhere in the hitbox --
+       including at the label -- lights the same node the click will take. */
+    #mapBody .nodeG:hover .node{stroke:var(--text)}
+    #mapBody .nodeG:hover .nodeLabel{fill:var(--text)}
+    #mapBody .nodeLabel{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:.6rem;fill:var(--faint);pointer-events:none;user-select:none}
+    #mapBody .nodeLabel.on{fill:var(--muted)}
+    @media (prefers-reduced-motion: no-preference){#mapBody .node.cursor{animation:pulse 1.8s ease-in-out infinite}}
+    @keyframes pulse{0%,100%{r:5}50%{r:7}}
     #overlay{position:fixed;inset:0;z-index:20;display:none;align-items:center;justify-content:center;background:rgba(7,10,12,.7)}
     #overlay.open{display:flex}
     #overlay .box{max-width:420px;text-align:center;padding:28px;border-radius:24px;background:var(--overlayBg);border:1px solid var(--surfaceBorder)}
     #overlay h2{font-family:var(--font-display);margin-bottom:10px}
     #overlay p{color:var(--muted);margin-bottom:16px;line-height:1.55}
-    .btn{padding:11px 16px;border-radius:999px;border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.05)}
-    .btn.primary{background:linear-gradient(180deg,rgba(96,215,210,.24),rgba(96,215,210,.12));border-color:rgba(96,215,210,.3)}
-    #toast{position:fixed;right:16px;bottom:16px;z-index:50;display:none;max-width:360px;padding:13px 16px;border-radius:16px;background:var(--overlayBg);border:1px solid rgba(96,215,210,.26)}
+    .btn{padding:11px 16px;border-radius:999px;border:1px solid var(--washStrong);background:var(--wash)}
+    .btn.primary{background:linear-gradient(180deg,rgba(var(--tint),.24),rgba(var(--tint),.12));border-color:rgba(var(--tint),.3)}
+    #toast{position:fixed;right:16px;bottom:16px;z-index:50;display:none;max-width:360px;padding:13px 16px;border-radius:16px;background:var(--overlayBg);border:1px solid rgba(var(--tint),.26)}
     #toast.show{display:block}
-    @media (prefers-reduced-motion: reduce){#scene{transition:none}#scene.bouncing,#stage.bounce::after{animation:none}.card3d{transition:none}}
+    @media (prefers-reduced-motion: reduce){#scene{transition:none}#scene.bouncing,#stage.bounce::after{animation:none}.card3d{transition:none}#stage,#spin{transition:none}}
+    /* Phones. The chrome bar wants 575px of controls; a portrait phone offers
+       ~370. Measured at 393px before this rule: the right-hand cluster (live
+       connection state, theme toggle, Classic view) began at x=308 and ended at
+       x=575, so all three sat past the right edge and could not be tapped at
+       all, while the coordinate ellipsised away to "0^2 > proj_a >…". Nothing
+       was overlapping and nothing had been squeezed — the clusters were at
+       their natural width and the row simply overflowed.
+       So: give each cluster its own row. Both fit unsqueezed (278px and 267px).
+       #levelName and the #crumb width override that used to live here are gone
+       along with it: the location band (#locus) replaced both, taking its own
+       full-width row below the clusters instead of squeezing into one. */
+    @media (max-width: 560px){
+      #chrome{flex-wrap:wrap;row-gap:8px;padding:10px 12px}
+      /* Tighter than the desktop pill so this cluster's controls stay on ONE
+         line at real content widths — "Bridge :3941" is wider than it looks.
+         The coordinate and the card count used to compete for this same row;
+         they now live in #locus, a full-width row of their own below. */
+      #chrome .pill{padding:7px 10px;font-size:.76rem}
+      #chrome .cluster{flex:1 1 100%;gap:8px}
+      #chrome .cluster:last-child{justify-content:flex-end}
+    }
+    /* A phone held sideways: plenty of width, almost no height. Nothing here is
+       about width — it is about buying the card back the vertical space the
+       chrome and the hud text were taking. Both #hudHint and #wallCopy go
+       entirely: at 393px tall either one was sitting on the card (measured at
+       500x393: #hud grew to 111px against a 230px-tall card, ~13% covered
+       with #wallCopy alone; #hudHint would only make that worse), and
+       landscape has no room to spare for prose -- the ? panel is where a
+       landscape user gets the full story. */
+    @media (max-height: 500px){
+      /* Tighter than the max-width:560px padding above (8px/6px), not just
+         that rule repeated: #stage centres the card in the FULL viewport with
+         no space reserved for #chrome at all, so at a genuinely short height
+         every pixel #chrome spends is a pixel closer to the card. See the
+         #chrome .cluster rule below for the row count this combines with. */
+      #chrome{padding:6px 12px;row-gap:4px}
+      #chrome .pill{padding:6px 10px;font-size:.74rem}
+      #hudHint{display:none}
+      #wallCopy{display:none}
+      #minimap{bottom:48px}
+      /* Landscape has width to spare but not much height, so the band trims
+         its own padding rather than claiming extra vertical space. It still
+         WRAPS, never truncates: nowrap+overflow:hidden here used to ellipsise
+         the coordinate routinely (not just pathologically) once a real
+         project/district name ran past the narrowed width -- exactly the
+         "0^2 > proj_a >…" defect this task exists to fix. A wrapped second
+         line costs ~16px of a ~393px-tall viewport, which is worth it; the
+         hint bar above already gave back its own row. */
+      #locus{flex:1 1 auto;padding:5px 10px}
+      #crumb{font-size:.82rem}
+      /* The max-width:560px rule above stacks each cluster onto its own row --
+         a fix for a PORTRAIT phone, where the two clusters genuinely do not
+         fit side by side (measured at 393px width: 575px of controls against
+         ~370px available). A short LANDSCAPE viewport has the opposite
+         problem: 500-852px of width to spare and ~390px of height to lose.
+         Forcing the same three-row stack there (2 clusters + #locus, on top of
+         a card with no headroom reserved for #chrome at all) measured out to
+         a 110px #chrome sitting 28px into a 230px wall card at 500x393. Both
+         clusters together need ~350px, which fits easily once they are
+         allowed to share a row again -- #chrome's own flex-wrap (see the
+         comment on #chrome itself) still drops #locus to a row of its own
+         beneath them exactly as it does today. Combined with the tighter
+         padding above, #chrome now ends at 72px against that same card's
+         81.5px top: a 9.5px margin, not a coincidence of one measurement. */
+      #chrome .cluster{flex:1 1 auto}
+    }
   </style>
 </head>
 <body>
   <div id="chrome">
     <div class="cluster">
       <button class="pill" id="backBtn" title="Zoom out (Esc / right-click)">⤺</button>
-      <span class="pill" id="crumb"><strong>All projects</strong></span>
-      <span class="pill" id="levelName">Projects</span>
     </div>
     <div class="cluster">
-      <span class="pill" id="position">—</span>
       <span class="pill" id="connState">Connecting…</span>
+      <button class="pill" id="helpBtn" title="What is this?" aria-label="What is this?">?</button>
       <button class="pill" id="themeBtn" title="Toggle theme">◐</button>
       <a class="pill" href="/">Classic view</a>
     </div>
+    <div id="locus"><span id="crumb"></span><span id="position">—</span></div>
   </div>
   <div id="stage" data-level="projects"><div id="scene"><div id="drum"></div></div></div>
-  <div id="hud"><span class="pill" id="hudHint">Scroll to spin · click a card to dive · right-click / Esc to zoom out · Ctrl+scroll zooms</span></div>
+  <div id="spin">
+    <button class="pill spinBtn" id="spinPrev" aria-label="Previous card">◀</button>
+    <button class="pill spinBtn" id="spinNext" aria-label="Next card">▶</button>
+  </div>
+  <div id="hud"><span class="pill" id="wallCopy">Your memory, as a card drum. Spin to browse projects, open one to go deeper: projects → districts → memories.</span><span class="pill" id="hudHint"></span></div>
+  <div id="minimap"><div id="mapBody"></div><button class="pill" id="mapToggle" title="Toggle the exploration map">Map 0^0</button></div>
   <div id="overlay"><div class="box"><h2>Bridge offline</h2><p id="overlayMsg">Could not reach the bridge. Start it with <code>node scripts/nd-mem-bridge-server.mjs</code> and retry.</p><button class="btn primary" id="retryBtn">Retry</button></div></div>
   <div class="modalbg" id="editModalBg">
     <div class="modal">
@@ -102,38 +379,100 @@
       <div class="foot"><button class="btn" id="editCancelBtn">Cancel</button><button class="btn primary" id="editSaveBtn">Save changes</button></div>
     </div>
   </div>
+  <div class="modalbg" id="renameModalBg">
+    <div class="modal">
+      <h2>Rename project</h2>
+      <div class="grid">
+        <div class="field span2"><label>New project id</label><input id="renameInput" /></div>
+      </div>
+      <p class="hint" id="renameHint"></p>
+      <div class="foot"><button class="btn" id="renameCancelBtn">Cancel</button><button class="btn primary" id="renameGoBtn">Rename</button></div>
+    </div>
+  </div>
+  <div class="modalbg" id="helpModalBg">
+    <div class="modal">
+      <h2>What this is</h2>
+      <p class="hint">Every memory you have stored, arranged as a drum of cards. You move through it in three levels — <strong>projects → districts → memories</strong> — and diving past the last one wraps you back to the first.</p>
+      <p class="hint"><strong>The location band</strong> at the top is where you are. <code>0^2</code> is your depth: how many times you have dived from the start. Each segment after it is a step you can click to jump straight back to.</p>
+      <p class="hint"><strong>The branch map</strong> on the left records every dive this session, including the ones you backed out of. Any node jumps you there, so an abandoned path is never lost.</p>
+      <p class="hint" id="helpGestures"></p>
+      <div class="foot"><button class="btn primary" id="helpCloseBtn">Got it</button></div>
+    </div>
+  </div>
   <div id="toast"></div>
 
   <script type="module">
     const BRIDGE = location.protocol.startsWith('http') ? location.origin : 'http://localhost:3737';
     const H = await import(BRIDGE + '/nd-mem-rolodex-helpers.mjs');
+    // Rename/merge semantics are the classic app's; import them rather than
+    // reimplement, so both UIs always agree on what counts as a collision.
+    let RENAME_HELPERS = null;
+    try { RENAME_HELPERS = await import(BRIDGE + '/nd-mem-app-helpers.mjs'); } catch { /* rename button explains when clicked */ }
     const REDUCED = matchMedia('(prefers-reduced-motion: reduce)').matches;
+    // Matched once at load, not per render: a pointer type does not change
+    // mid-session, and matchMedia in a hot path is wasted work.
+    const POINTER_KIND = matchMedia('(pointer: coarse)').matches ? 'coarse' : 'fine';
+    const NODE_LABEL_PX = 58; // 10 monospace chars at .6rem; see truncateNodeLabel
 
     const $ = s => document.querySelector(s);
-    const els = { stage: $('#stage'), scene: $('#scene'), drum: $('#drum'), crumb: $('#crumb'), levelName: $('#levelName'), position: $('#position'), connState: $('#connState'), backBtn: $('#backBtn'), overlay: $('#overlay'), overlayMsg: $('#overlayMsg'), retryBtn: $('#retryBtn'), toast: $('#toast'), hudHint: $('#hudHint') };
+    const els = { stage: $('#stage'), scene: $('#scene'), drum: $('#drum'), crumb: $('#crumb'), position: $('#position'), connState: $('#connState'), backBtn: $('#backBtn'), overlay: $('#overlay'), overlayMsg: $('#overlayMsg'), retryBtn: $('#retryBtn'), toast: $('#toast'), hudHint: $('#hudHint'), minimap: $('#minimap'), mapBody: $('#mapBody'), mapToggle: $('#mapToggle'), spin: $('#spin'), spinPrev: $('#spinPrev'), spinNext: $('#spinNext'), helpBtn: $('#helpBtn'), helpModalBg: $('#helpModalBg') };
+
+    // Three hand-tuned offsets (64/108/56) each encoded a guess at how tall
+    // #chrome renders at that breakpoint. The band would have needed a fourth.
+    // Measure it once and let CSS read the answer.
+    // Both fixed bars are measured, and #stage is inset between them, so the
+    // card occupies the space that is actually free rather than the whole
+    // viewport with two bars floating on top of it. Measuring BOTH matters:
+    // insetting only the top pushed the card down into #hud instead.
+    const syncBarHeight = (sel, prop) => {
+      const el = $(sel);
+      const sync = () => document.documentElement.style
+        .setProperty(prop, `${Math.ceil(el.getBoundingClientRect().height)}px`);
+      new ResizeObserver(sync).observe(el);
+      sync();
+    };
+    syncBarHeight('#chrome', '--chromeH');
+    syncBarHeight('#hud', '--hudH');
 
     const state = {
       snapshot: { memories: {} },
       view: { level: 'projects', projectId: null, districtId: null, centeredId: null, rotation: 0, itemIds: [] },
-      history: H.createHistory(),
+      // Supersedes the history stack: the cursor's ancestor chain behaves
+      // exactly as the stack did, and abandoned branches stay for the minimap.
+      tree: H.createNavTree({ level: 'projects', projectId: null, districtId: null, centeredId: null, rotation: 0, itemIds: [] }),
       items: [],           // [{id, kind, data}] for the current drum
       rotation: 0,         // live continuous rotation (deg)
       velocity: 0,
       radius: 260,
+      layout: H.drumLayout(340, 0),
       dragging: false,
       transitioning: false,
       frontIndex: -1,
       frontEl: null,        // the .card3d currently wearing .front, so updates touch two cards, not N
+      drumMarkup: null,     // last markup written to #drum, so an unchanged rebuild can skip the DOM entirely
+      drumAnchor: null,     // item index the rendered window was cut around (null = nothing rendered)
       stepTarget: null,     // arrow-key destination the tick loop eases toward (null = no step pending)
+      wheelAccum: 0,       // fan mode: wheel pixels banked toward the next selection step
+      dragAccum: 0,        // fan mode: drag pixels banked toward the next selection step
       gestureGain: 1,       // gesture degrees are scaled by this so a gesture moves a constant number of CARDS
       lastBounceAt: 0,
       editingId: null,
       editingDistrict: null, // district the edit modal was seeded with, to detect a real change
+      renamingProject: null,
     };
 
     function esc(v){ return String(v ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
     function showToast(msg){ els.toast.textContent = msg; els.toast.classList.add('show'); clearTimeout(showToast.t); showToast.t = setTimeout(() => els.toast.classList.remove('show'), 3200); }
     function fmt(v){ try { return new Date(v).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }); } catch { return '—'; } }
+    // Intensity is a 0-1 float and was rendered raw, so any value that is not
+    // exactly representable arrived on the card as "0.8999999999999999".
+    // Two decimals is more precision than the field carries; trailing zeros go
+    // so 0.9 does not become "0.90".
+    function fmtNum(v){
+      if (v === null || v === undefined || v === '') return '—';
+      const n = Number(v);
+      return Number.isFinite(n) ? n.toFixed(2).replace(/\.?0+$/, '') || '0' : String(v);
+    }
 
     function itemsForView(view){
       if (view.level === 'projects') return H.deriveProjects(state.snapshot).map(p => ({ id: p.id, kind: 'project', data: p }));
@@ -142,13 +481,31 @@
     }
 
     function currentViewSnapshot(){
-      return { ...state.view, centeredId: centeredItem()?.id ?? null, rotation: state.rotation, itemIds: state.items.map(i => i.id) };
+      // With a live drum the DOM is the truth. Before one exists — a cold load,
+      // or a restore after the tab was reloaded out from under us — state.view
+      // still carries the centering and item list we are trying to reconcile
+      // back to, and reading them off the empty drum would erase exactly the
+      // thing being restored.
+      const live = state.items.length > 0;
+      return {
+        ...state.view,
+        centeredId: live ? (centeredItem()?.id ?? null) : (state.view.centeredId ?? null),
+        rotation: state.rotation,
+        itemIds: live ? state.items.map(i => i.id) : [...(state.view.itemIds || [])],
+      };
     }
     function centeredItem(){ return state.frontIndex >= 0 ? state.items[state.frontIndex] : null; }
 
     function cardFace(item){
       const d = item.data;
-      if (item.kind === 'project') return `<span class="kicker">Project</span><h2>${esc(d.id)}</h2><div class="chips"><span class="chip">${d.memoryCount} memories</span><span class="chip">${d.districtCount} district${d.districtCount === 1 ? '' : 's'}</span></div>`;
+      if (item.kind === 'project') {
+        // Only the front card shows actions (see `.card3d .actions`), and the
+        // unassigned bucket is not a project you can rename.
+        const canRename = d.id !== H.UNASSIGNED;
+        return `<span class="kicker">Project</span><h2>${esc(d.id)}</h2>`
+          + `<div class="chips"><span class="chip">${d.memoryCount} memories</span><span class="chip">${d.districtCount} district${d.districtCount === 1 ? '' : 's'}</span></div>`
+          + (canRename ? `<div class="actions"><button class="btn" data-rename="${esc(d.id)}">Rename…</button></div>` : '');
+      }
       if (item.kind === 'district') return `<span class="kicker">District</span><h2>${esc(d.id)}</h2><div class="chips"><span class="chip">${d.memoryCount} memories</span>${d.topTags.map(t => `<span class="chip">${esc(t)}</span>`).join('')}</div>`;
       const metaRow = (label, value) => `<div class="mini"><label>${label}</label><span>${esc(value)}</span></div>`;
       // Content is deliberately NOT baked in twice (or in full) here. A real
@@ -157,13 +514,96 @@
       // innerHTML per rebuild. The preview is clipped by overflow:hidden anyway
       // so 300 chars is more than the card can show, and the reader is filled by
       // updateFrontCard for the one card that is actually facing the camera.
+      // Flip, not a bigger card: the meta grid + chips used to render right on
+      // the front face and ate the room the memory text needed. They still
+      // exist in the same markup position (order matters for .card3d's own
+      // flex gap, so they are NOT moved into a wrapper) -- the flip CSS block
+      // above is what hides them until Details is clicked, and clears itself
+      // the moment this card stops being .front (see updateFrontCard). Details
+      // and Back are TEXT buttons, not an icon: a bare glyph shipped once
+      // already on this same card (the outer-card "Open" affordance) and had
+      // to be replaced because nobody could tell what it meant -- see that
+      // rule's own comment above. .front-actions/.back-actions are extra
+      // classes on top of the shared .actions/.chips classes, not a
+      // replacement for them, so project/district cards (whose own actions
+      // and always-on chips reuse those same base classes) are untouched.
       return `<span class="kicker">${esc(d.id)} · ${esc(d.district || 'uncategorized')}</span>`
         + `<h2>${esc(d.name || '(untitled)')}</h2>`
         + `<p class="preview">${esc(String(d.content ?? '').slice(0, 300))}</p>`
         + `<div class="reader-scroll"></div>`
-        + `<div class="meta">${metaRow('Intensity', d.intensity ?? '—')}${metaRow('Visibility', d.visibility || 'private')}${metaRow('Created', fmt(d.created))}${metaRow('Tags', (d.tags || []).length)}</div>`
-        + `<div class="chips">${(d.tags || []).slice(0, 4).map(t => `<span class="chip">${esc(t)}</span>`).join('')}</div>`
-        + `<div class="actions"><button class="btn" data-edit="${esc(d.id)}">Edit</button></div>`;
+        + `<div class="actions front-actions"><button class="btn" data-edit="${esc(d.id)}">Edit</button><button class="btn" data-flip="open">Details</button></div>`
+        + `<div class="meta">${metaRow('Intensity', fmtNum(d.intensity))}${metaRow('Visibility', d.visibility || 'private')}${metaRow('Created', fmt(d.created))}${metaRow('Tags', (d.tags || []).length)}</div>`
+        + `<div class="chips card-chips">${(d.tags || []).slice(0, 4).map(t => `<span class="chip">${esc(t)}</span>`).join('')}</div>`
+        + `<div class="actions back-actions"><button class="btn" data-flip="close">Back</button></div>`;
+    }
+
+    // ---------- the rendered window ----------
+    // Every card used to go into the DOM. The real store has a 364-memory
+    // bucket, and at n=364 the cylinder's radius is ~32,400px with cards 0.99deg
+    // apart — so a card two steps from centre already sits ~1,100px off the side
+    // of a phone. Essentially none of those 364 cards could be seen, yet each was
+    // a composited 3D layer, ~9,100 DOM nodes in one innerHTML. Building and
+    // tearing that down on every dive is what made entering a district lag about
+    // half a second and then take the tab's renderer with it on iOS — reproduced
+    // on Safari, Edge and DuckDuckGo alike, which are all WebKit, and worst on
+    // the one with the least memory headroom.
+    //
+    // WINDOW is how many cards are kept each side of the anchor; SLACK is how far
+    // the selection may drift before the window is re-cut. So the rendered set
+    // always covers at least +/-(WINDOW-SLACK) = +/-6 cards around the true
+    // front, against a visible span of roughly +/-2 even on a wide desktop —
+    // while re-cutting at most once every SLACK cards, so a fast spin does not
+    // rebuild on every single card change.
+    const DRUM_WINDOW = 12;
+    const DRUM_SLACK = 6;
+
+    function windowIndices(n, front, mode){
+      if (n <= DRUM_WINDOW * 2 + 1) return Array.from({ length: n }, (_, i) => i);
+      const out = [];
+      for (let d = -DRUM_WINDOW; d <= DRUM_WINDOW; d++) {
+        // A cylinder wraps: at front=0 the cards immediately to the left are
+        // n-1, n-2, ... Clamping instead of wrapping would leave a hole exactly
+        // where the user is about to rotate. A fan has real ends, so it clamps.
+        const i = mode === 'fan' ? front + d : ((front + d) % n + n) % n;
+        if (i >= 0 && i < n) out.push(i);
+      }
+      return out;
+    }
+
+    // Wrap-aware, so drifting from card 0 to card n-1 counts as one step, not n-1.
+    function cardDistance(a, b, n, mode){
+      const raw = Math.abs(a - b);
+      return mode === 'fan' ? raw : Math.min(raw, n - raw);
+    }
+
+    // Re-cuts #drum's markup when the window has moved (or its content changed).
+    // Deliberately does NOT call updateFrontCard — updateFrontCard calls THIS,
+    // and the other direction would recurse.
+    function syncDrumWindow(force = false){
+      const n = state.items.length;
+      if (!n) return false;
+      if (!force && state.drumAnchor !== null
+          && cardDistance(state.frontIndex, state.drumAnchor, n, state.layout.mode) <= DRUM_SLACK) return false;
+      const markup = windowIndices(n, state.frontIndex, state.layout.mode).map((i) => {
+        const tf = `rotateY(${state.layout.angles[i]}deg) translateZ(${state.radius}px)`;
+        // data-idx stays the TRUE index into state.items, never the position
+        // within the window, so every consumer of it keeps working untouched.
+        return `<div class="card3d" data-idx="${i}" style="transform:${tf}">${cardFace(state.items[i])}</div>`;
+      }).join('');
+      state.drumAnchor = state.frontIndex;
+      // Only touch the DOM when the markup actually differs. buildDrum runs on
+      // every SSE memory-change AND every reconnect `hello`, and with 1595
+      // memories across many buckets almost none of those events change the
+      // bucket being viewed — yet each one used to destroy and recreate every
+      // card. Two things fall out of skipping it, both wanted: the reader keeps
+      // its scroll position across a reconnect instead of being wiped
+      // mid-sentence, and the front card's DOM node survives. Same idea as
+      // mapSignature further down.
+      if (markup === state.drumMarkup) return false;
+      els.drum.innerHTML = markup;
+      state.drumMarkup = markup;
+      state.frontEl = null; // every node was just replaced
+      return true;
     }
 
     function buildDrum(){
@@ -174,9 +614,18 @@
       // readable content. The CSS var and the radius math share this one number.
       const cardW = state.view.level === 'memories' ? Math.min(560, Math.round(window.innerWidth * 0.92)) : 340;
       els.stage.style.setProperty('--cardW', cardW + 'px');
-      state.radius = H.drumRadius(cardW, n);
+      // One descriptor drives placement, hit-testing, snapping and clamping, so
+      // fan and cylinder never need a branch at the call site. It is assigned
+      // before the empty-drum return below, because updateFrontCard reads it
+      // even when there is nothing to show.
+      state.layout = H.drumLayout(cardW, n);
+      state.radius = state.layout.radius;
       els.stage.dataset.level = state.view.level;
-      const theta = H.anglePerCard(n);
+      // No CSS reads this any more (its only consumer was the deleted fan
+      // transition rule) — it is write-only now, kept as a test/debug hook
+      // so a driven browser (or a curious human) can read the live mode off
+      // the DOM without reaching into page-internal state.
+      els.stage.dataset.layout = state.layout.mode;
       // Gestures are authored in degrees, but a degree buys wildly different
       // amounts of travel depending on drum size: one card is 30deg at n=12 and
       // 0.99deg at n=364, so a fixed degree gain that feels right on a small
@@ -184,27 +633,43 @@
       // angle so a gesture moves a comparable number of CARDS instead. The
       // ceiling keeps 2-3 card drums from whipping past the item you aimed at;
       // the floor keeps a 364-card drum from needing 364 notches to lap it.
-      state.gestureGain = Math.min(3, Math.max(0.2, theta / 30));
+      state.gestureGain = Math.min(3, Math.max(0.2, state.layout.step / 30));
       state.stepTarget = null;
       if (!n) {
         // translateZ puts the placeholder on the camera plane, where real cards
         // sit; at z=0 it renders a drum-radius deep and reads as a recessed card.
         els.drum.innerHTML = `<div class="card3d front placeholder" style="transform:translateZ(${state.radius}px)"><span class="kicker">Empty</span><h2>${state.view.level === 'projects' ? 'No memories yet' : 'Nothing here'}</h2><p>Store a memory through MCP or the classic app and it will appear.</p></div>`;
+        // The placeholder is not card markup, so the cache must not claim to
+        // hold it: leaving a stale value here would let a later rebuild of that
+        // exact same drum be skipped while the placeholder is still on screen.
+        state.drumMarkup = null;
+        state.drumAnchor = null;
         state.rotation = 0; state.velocity = 0; state.frontIndex = -1; state.frontEl = null;
         applyDrumTransform(); updateChrome(); return;
       }
-      els.drum.innerHTML = state.items.map((item, i) =>
-        `<div class="card3d" data-idx="${i}" style="transform:rotateY(${i * theta}deg) translateZ(${state.radius}px)">${cardFace(item)}</div>`).join('');
+      // The window is cut around the selection, so the selection has to be known
+      // before any markup exists — hence this runs ahead of the render, not after
+      // it the way it did when every card went into the DOM regardless.
       const idx = Math.max(0, state.items.findIndex(i => i.id === state.view.centeredId));
-      state.rotation = H.rotationForIndex(idx, n);
+      state.rotation = H.rotationForCard(idx, state.layout);
+      state.frontIndex = idx;
+      syncDrumWindow(true);
+      state.wheelAccum = 0;
+      state.dragAccum = 0;
       state.velocity = 0;
       state.frontEl = null; // the old element is gone with the innerHTML it lived in
       applyDrumTransform();
       updateFrontCard(true);
     }
 
+    // The rotation the DOM currently shows. null forces the first frame through.
+    let lastAppliedRotation = null;
     function applyDrumTransform(){
       els.drum.style.transform = `translateZ(${-state.radius}px) rotateY(${state.rotation}deg)`;
+      // Records what the DOM now shows, so tick() can skip a frame that would
+      // rewrite the identical transform. Kept here rather than at tick's call
+      // site so every caller keeps it accurate.
+      lastAppliedRotation = state.rotation;
     }
 
     // The reader's text lives on exactly one card at a time. Keeping it in the
@@ -215,20 +680,70 @@
       if (rs) rs.textContent = text;
     }
 
+    // On a cylinder the front card is derived from the angle. A fan still keeps
+    // state.frontIndex as its own source of truth rather than deriving it from
+    // the angle: a gesture selects discretely (one card per notch/step), and
+    // the rotation then eases to follow the selection — see selectCard.
+    function frontIndexNow(){
+      if (state.layout.mode !== 'fan') return H.indexAtRotation(state.rotation, state.layout);
+      const count = state.items.length;
+      return count ? Math.min(count - 1, Math.max(0, state.frontIndex)) : -1;
+    }
     function updateFrontCard(force = false){
-      const n = state.items.length;
-      const idx = H.nearestIndex(state.rotation, n);
+      const idx = frontIndexNow();
       if (!force && idx === state.frontIndex) return;
+      // Which memory was front on the way in. Captured before anything mutates,
+      // and deliberately by ID rather than by element or index: buildDrum nulls
+      // state.frontEl and reassigns state.frontIndex before it calls us, so both
+      // of those are already gone by the time the sweep below runs. centeredId
+      // is the only identity that survives, and it is the right one anyway --
+      // the flip belongs to a MEMORY, not to a DOM node or a slot number.
+      const prevCenteredId = state.view.centeredId;
       state.frontIndex = idx;
-      // Cards are appended in item order, so children[idx] is the card for item idx.
-      const next = idx >= 0 ? (els.drum.children[idx] ?? null) : null;
-      if (force) {
-        // buildDrum just rewrote the drum: every card needs its class settled.
-        els.drum.querySelectorAll('.card3d').forEach((el, i) => el.classList.toggle('front', i === idx));
+      // Slide the rendered window if the selection has drifted out of its slack.
+      // Must happen before `next` is resolved: a re-cut replaces every node, so a
+      // handle taken beforehand would be detached.
+      const recut = syncDrumWindow();
+      // Only a WINDOW of cards is in the DOM now, so position no longer implies
+      // item index — data-idx does. This was `els.drum.children[idx]`, which
+      // silently pointed at the wrong card the moment the window stopped
+      // starting at item 0.
+      const next = idx >= 0 ? els.drum.querySelector(`.card3d[data-idx="${idx}"]`) : null;
+      if (force || recut) {
+        // Fresh markup: every card needs its class settled.
+        els.drum.querySelectorAll('.card3d').forEach((el) => {
+          const isFront = Number(el.dataset.idx) === idx;
+          el.classList.toggle('front', isFront);
+          // selectCard forces this path on a live drum (not just fresh markup),
+          // so a previously-selected memory card's full content must be cleared
+          // from its hidden .reader-scroll here too.
+          if (!isFront) fillReader(el, '');
+          // "Flip THIS card over" must not survive a front CHANGE -- selectCard's
+          // fan-mode force update reuses the same persisted nodes without
+          // rebuilding markup, so a card flipped earlier and re-selected via a
+          // fan gesture would otherwise come back showing its meta pane.
+          //
+          // But it must survive a rebuild that does not change the front card.
+          // buildDrum calls updateFrontCard(true) from refreshAndReconcile on
+          // EVERY SSE memory-change and reconnect hello, and from the debounced
+          // resize -- so clearing unconditionally slammed the Details pane shut
+          // mid-read whenever an agent wrote any memory anywhere in the store,
+          // even though nothing about this card changed.
+          const sameMemoryStillFront = isFront
+            && prevCenteredId != null
+            && state.items[idx]?.id === prevCenteredId;
+          if (!sameMemoryStillFront) el.classList.remove('flipped');
+        });
       } else if (state.frontEl !== next) {
         // Steady state touches two cards. Sweeping all N here ran once per front
         // change, i.e. many times a second during a spin, on every card.
-        if (state.frontEl) { state.frontEl.classList.remove('front'); fillReader(state.frontEl, ''); }
+        // 'flipped' rides alongside 'front' here for the same reason: the same
+        // DOM node can become front again later without an intervening rebuild
+        // (spin away and back within one drum window), and "flip THIS card
+        // over" must not survive that round trip -- spinning to another card
+        // resets to the front, unconditionally, not just on a fresh render.
+        if (state.frontEl) { state.frontEl.classList.remove('front', 'flipped'); fillReader(state.frontEl, ''); }
+        if (next) next.classList.remove('flipped');
         if (next) next.classList.add('front');
       }
       state.frontEl = next;
@@ -237,25 +752,152 @@
       updateChrome();
     }
 
+    function depthNow(){ return H.navDepth(state.tree); }
+    // renderMinimap runs from updateChrome, which runs from every updateFrontCard —
+    // i.e. many times a second while a cylinder spins, even though the tree itself
+    // is not changing at all during a spin. Rebuilding the SVG on every one of those
+    // calls restarted the cursor's pulse animation, destroyed any open tooltip, and
+    // reset the rail's scroll position back to the frontier, yanking it away from
+    // wherever the user had scrolled to inspect an older column. Node count plus
+    // cursor id is a cheap-to-compute signature of "did the tree actually change":
+    // both change on every dive/zoom-out/jump (the cursor always moves), so a real
+    // navigation event still rebuilds. A rename remap is the one mutation that
+    // changes neither (it only rewrites ids already on the tree, not its shape or
+    // cursor) — bulkReassign calls invalidateMinimap() right after H.navRemapProject
+    // so that mutation still forces a rebuild despite the unchanged signature.
+    let mapSignature = null;
+    function invalidateMinimap(){ mapSignature = null; }
+    // The map is drawn from the tree itself, never from a parallel record, so
+    // it cannot drift out of sync with where you can actually go. A layout
+    // failure must not take navigation down with it — the rail hides instead.
+    function renderMinimap(){
+      els.mapToggle.textContent = `Map 0^${depthNow()}`;
+      if (els.minimap.classList.contains('collapsed')) return;
+      const sig = `${state.tree.nodes.length}:${state.tree.cursor}`;
+      if (sig === mapSignature) return; // tree unchanged since the last real render
+      try {
+        mapSignature = sig;
+        const laid = H.layoutNavTree(state.tree);
+        // Elbow, not a straight diagonal: rise from the parent, run across, then rise
+        // into the child. Over a short horizontal gap a diagonal is visually just a
+        // tilted trunk, while an elbow reads unmistakably as a branch. A same-column
+        // edge degenerates to a plain vertical line, as it should.
+        const edges = laid.edges.map(e => {
+          const midY = (e.y1 + e.y2) / 2;
+          return `<path class="edge${e.onPath ? ' on' : ''}" d="M ${e.x1} ${e.y1} V ${midY} H ${e.x2} V ${e.y2}" />`;
+        }).join('');
+        // The label is a sibling <text>, not a child of <circle>: SVG will not
+        // render text inside a shape, and the circle stays the only click
+        // target so the existing [data-node] delegation is untouched.
+        // A 10px dot was the entire target; the label beside it read as part of
+        // the node but did nothing. Each node is now a <g> carrying data-node,
+        // fronted by a transparent rect spanning the dot AND its label, so the
+        // whole pair is one hitbox. Order matters: the rect goes FIRST so the
+        // circle keeps its own paint and hover on top of it, and the label
+        // stays pointer-events:none so clicks on a glyph fall through to the
+        // rect rather than depending on where the letter strokes happen to be.
+        // The rect's width is bounded by the column pitch, so neighbours cannot
+        // steal each other's clicks.
+        const hitW = 8 + 9 + NODE_LABEL_PX;
+        const nodes = laid.nodes.map(n =>
+          `<g class="nodeG" data-node="${n.id}">`
+          + `<rect class="nodeHit" x="${n.x - 8}" y="${n.y - 9}" width="${hitW}" height="18" />`
+          + `<circle class="node${n.onPath ? ' on' : ''}${n.isCursor ? ' cursor' : ''}" cx="${n.x}" cy="${n.y}" r="5"><title>${esc(n.label)} (0^${n.depth})</title></circle>`
+          + `<text class="nodeLabel${n.onPath ? ' on' : ''}" x="${n.x + 9}" y="${n.y + 3.5}">${esc(H.truncateNodeLabel(n.label))}</text>`
+          + `</g>`).join('');
+        // laid.width measures dot positions only; the rightmost label overhangs it.
+        const labelOverhang = 9 + NODE_LABEL_PX;
+        const w = laid.width + labelOverhang;
+        els.mapBody.innerHTML = `<svg width="${w}" height="${laid.height}" viewBox="0 0 ${w} ${laid.height}">${edges}${nodes}</svg>`;
+        els.mapBody.scrollTop = 0; // deepest row is at the top; keep the frontier in view
+        els.mapBody.scrollLeft = els.mapBody.scrollWidth; // newest column (rightmost) is the frontier; keep it in view
+      } catch (err) {
+        console.error('minimap layout failed', err);
+        mapSignature = null; // do not suppress a retry on whatever caused this
+        els.minimap.style.display = 'none';
+      }
+    }
     function updateChrome(){
       const { level, projectId, districtId } = state.view;
-      els.levelName.textContent = level[0].toUpperCase() + level.slice(1);
-      els.crumb.innerHTML = level === 'projects' ? '<strong>All projects</strong>'
-        : level === 'districts' ? `<strong>${esc(projectId)}</strong>`
-        : `<strong>${esc(projectId)}</strong> ▸ ${esc(districtId)}`;
-      els.position.textContent = state.items.length ? `card ${state.frontIndex + 1} / ${state.items.length}` : '—';
-      // At the memories level a click reads, never dives — advertising "click
-      // to dive" there sent people clicking a reading surface and concluding
-      // the app was broken.
-      els.hudHint.textContent = level === 'memories'
-        ? 'Scroll to spin · scroll inside the card to read · Ctrl+scroll up dives onward · right-click / Esc goes back'
-        : 'Scroll to spin · click a card to dive · right-click / Esc to zoom out · Ctrl+scroll zooms';
+      // `0^N > project > district > card`: N answers "how deep", the path
+      // answers "where", and each segment is a way back to that view.
+      const segs = H.coordinateOf(state.view, depthNow(), centeredItem()?.id ?? null);
+      // Matches the 560px breakpoint the rest of the phone layout uses. Read at
+      // render time rather than cached: buildDrum() runs on resize and cascades
+      // to updateChrome, so a rotation re-evaluates this for free.
+      const narrowBand = window.innerWidth <= 560;
+      els.crumb.innerHTML = segs.map((s, i) => {
+        const sep = i ? '<span class="sep">&gt;</span>' : '';
+        // A segment whose target is the view we're already standing in (the
+        // rightmost non-leaf segment at districts/memories level) must be a
+        // dead click just like the leaf — otherwise it's the most inviting
+        // button on screen and does nothing but replay a 700ms zoom in place.
+        const atCurrent = s.target
+          && s.target.level === state.view.level
+          && s.target.projectId === state.view.projectId
+          && s.target.districtId === state.view.districtId;
+        // The depth badge (0^N) jumps home. At the wall (0^0) home is where we
+        // already are, so it needs the same disabled treatment as any other
+        // current-view segment above — otherwise it shows the hover highlight
+        // and pointer cursor while doing nothing on click, the same defect
+        // already fixed for context segments.
+        const atWallBadge = s.kind === 'depth' && H.navAtWall(state.tree);
+        const jumpable = !atCurrent && !atWallBadge && (s.kind === 'depth' || s.target != null);
+        // The ⌂ is added here, not in coordinateOf: the helper stays pure text
+        // so its unit tests and any non-visual caller are unaffected.
+        //
+        // On a phone the full coordinate wrapped to four lines. Middle-elide the
+        // CONTEXT segments — the same treatment, and the same helper, the branch
+        // map gives its nodes — but never the leaf: the standing ruling is that
+        // truncation eats leftmost first because the leaf is the one segment you
+        // always need. The untruncated value stays in the title, and every
+        // segment remains a jump; only its rendered width changes.
+        const label = s.kind === 'depth' ? `⌂ ${s.text}`
+          : (narrowBand && (s.kind === 'project' || s.kind === 'district')) ? H.truncateNodeLabel(s.text, 10)
+          : s.text;
+        const tip = label === s.text ? '' : ` title="${esc(s.text)}"`;
+        return sep + `<button class="seg ${s.kind}" data-seg="${i}"${jumpable ? '' : ' disabled'}${tip}>${esc(label)}</button>`;
+      }).join('');
+      // An empty store has no centered card, so the coordinate collapses to a
+      // lone depth badge and the band would read "⌂ 0^0" and nothing else.
+      if (segs.length <= 1) els.crumb.innerHTML += '<span class="sep">·</span><span class="seg leaf">All projects</span>';
+      els.crumb.dataset.segments = JSON.stringify(segs.map(s => s.target));
+      els.position.textContent = state.items.length ? `card ${state.frontIndex + 1} of ${state.items.length}` : '—';
+      els.hudHint.textContent = H.hintFor(level, POINTER_KIND);
+      // One card cannot be stepped between, and a lone ◀ ▶ pair implies it can.
+      els.spin.classList.toggle('hidden', state.items.length < 2);
+      renderMinimap();
+      schedulePersist(); // coalesced; see persistNav
+    }
+
+    // Fan selection: mark the new front card immediately (a force update is cheap
+    // here — a fan is four cards at most), then ease the drum's own rotation to
+    // bring it to centre, reusing the same stepTarget machinery arrow-stepping
+    // uses. The class/reader update and the rotation are deliberately not the
+    // same write: a gesture selects discretely, and the rotation catches up.
+    function selectCard(next){
+      const count = state.items.length;
+      if (!count || state.transitioning) return;
+      const idx = Math.min(count - 1, Math.max(0, next));
+      if (idx === state.frontIndex) return;
+      state.frontIndex = idx;
+      updateFrontCard(true);
+      state.velocity = 0;
+      const goal = H.rotationForCard(idx, state.layout);
+      if (REDUCED) { state.stepTarget = null; state.rotation = goal; applyDrumTransform(); }
+      else state.stepTarget = goal;
     }
 
     function stepBy(n){
       const count = state.items.length;
       if (!count || state.transitioning) return;
-      const target = H.rotationForIndex(((state.frontIndex + n) % count + count) % count, count);
+      // A fan has ends: stepping past one is a no-op rather than a wrap
+      // (selectCard's own clamp), and selectCard drives the rotation there.
+      if (state.layout.mode === 'fan') { selectCard(state.frontIndex + n); return; }
+      const raw = state.frontIndex + n;
+      const idx = ((raw % count) + count) % count;
+      if (idx === state.frontIndex) return;
+      const target = H.rotationForCard(idx, state.layout);
       const goal = state.rotation + H.shortestDelta(state.rotation, target);
       state.velocity = 0;
       // One card is ~1deg on a 364-card drum. Assigning the rotation outright
@@ -307,12 +949,16 @@
       if (state.transitioning || !state.items.length) return;
       const front = centeredItem();
       if (!front) return;
-      H.pushView(state.history, currentViewSnapshot());
+      // Record where we are leaving from before descending, so backing out
+      // returns to this exact rotation and centered card.
+      H.navSetCursorView(state.tree, currentViewSnapshot());
       const level = H.nextLevel(state.view.level);
       let next;
       if (state.view.level === 'projects') next = { level, projectId: front.id, districtId: null, centeredId: null, rotation: 0, itemIds: [] };
       else if (state.view.level === 'districts') next = { level, projectId: state.view.projectId, districtId: front.id, centeredId: null, rotation: 0, itemIds: [] };
       else next = { level, projectId: null, districtId: null, centeredId: null, rotation: 0, itemIds: [] }; // memories wraps to projects
+      // The wrap is an ordinary child: one tree, one depth, no loop counter.
+      H.navPush(state.tree, next);
       transitionTo(next, 'in');
     }
 
@@ -328,8 +974,11 @@
 
     function zoomOut(){
       if (state.transitioning) return;
-      if (H.atWall(state.history)) { bounce(); return; }
-      const restored = H.reconcilePop(state.history, state.snapshot);
+      if (H.navAtWall(state.tree)) { bounce(); return; }
+      // Keep this view current before leaving it, so re-diving here later
+      // restores the card you were on rather than the one you arrived on.
+      H.navSetCursorView(state.tree, currentViewSnapshot());
+      const restored = H.navReconcileBack(state.tree, state.snapshot);
       if (!restored) {
         transitionTo({ level: 'projects', projectId: null, districtId: null, centeredId: null, rotation: 0, itemIds: [] }, 'out');
         showToast('Earlier views no longer exist — back to all projects.');
@@ -338,38 +987,176 @@
       transitionTo(restored, 'out');
     }
 
+    // One animated hop, however far back the target is — replaying a
+    // transition per level would make a seven-deep jump take ten seconds.
+    function jumpToNode(nodeId){
+      if (state.transitioning) return;
+      H.navSetCursorView(state.tree, currentViewSnapshot());
+      const view = H.navReconcileJump(state.tree, nodeId, state.snapshot);
+      if (!view) {
+        // navReconcileJump leaves the cursor node untouched when nodeId doesn't
+        // resolve (an unknown id), so without this the tree cursor could still
+        // be deep while we show "All projects" — the coordinate would read a
+        // nonzero depth over that view. Walk the cursor home to match; this is
+        // a no-op if navReconcileBack already reached the wall.
+        while (!H.navAtWall(state.tree)) H.navBack(state.tree);
+        transitionTo({ level: 'projects', projectId: null, districtId: null, centeredId: null, rotation: 0, itemIds: [] }, 'out');
+        showToast('That view no longer exists — back to all projects.');
+        return;
+      }
+      transitionTo(view, 'out');
+    }
+
+    els.crumb.addEventListener('click', (e) => {
+      const btn = e.target instanceof Element ? e.target.closest('.seg') : null;
+      if (!btn || btn.disabled || state.transitioning) return;
+      const targets = JSON.parse(els.crumb.dataset.segments || '[]');
+      const target = targets[Number(btn.dataset.seg)];
+      if (target === null || target === undefined) {
+        // The depth badge is the origin: go all the way home.
+        if (btn.classList.contains('depth') && !H.navAtWall(state.tree)) jumpToNode(0);
+        return;
+      }
+      const nodeId = H.navFindContext(state.tree, target);
+      if (nodeId === null) { showToast('That step is not on the path you walked.'); return; }
+      jumpToNode(nodeId);
+    });
+
+    els.mapBody.addEventListener('click', (e) => {
+      // data-node lives on the wrapping <g>, so this resolves from the dot, the
+      // label, or the transparent hit rect between them — whichever was struck.
+      const node = e.target instanceof Element ? e.target.closest('[data-node]') : null;
+      if (!node) return;
+      const id = Number(node.dataset.node);
+      if (id === state.tree.cursor) return;
+      jumpToNode(id);
+    });
+    const MAP_KEY = 'ndmem.rolodex.minimap';
+    els.mapToggle.addEventListener('click', () => {
+      const collapsed = els.minimap.classList.toggle('collapsed');
+      try { localStorage.setItem(MAP_KEY, collapsed ? 'collapsed' : 'open'); } catch {}
+      renderMinimap();
+    });
+    // The rail sits over the drum's bottom-left corner, which is exactly where a
+    // narrow-viewport memory card lives — an always-open rail there steals both
+    // taps and drag-scroll from the card. A stored preference always wins once
+    // the user has set one; absent that, default collapsed below ~760px (phones
+    // and narrow tablets) and open at wider (tablet-landscape and desktop)
+    // widths.
+    const MAP_NARROW_PX = 760;
+    try {
+      const stored = localStorage.getItem(MAP_KEY);
+      const collapsedByDefault = stored ? stored === 'collapsed' : window.innerWidth < MAP_NARROW_PX;
+      if (collapsedByDefault) els.minimap.classList.add('collapsed');
+    } catch {}
+
     // ---------- animation loop ----------
     function tick(){
-      if (!state.transitioning && !state.dragging && state.items.length) {
+      // Drives both modes: a fan rotates and clamps at its ends here exactly
+      // as a cylinder decays and wraps; selectCard/stepBy only set the target
+      // (stepTarget) or nudge velocity, this eases the rotation there.
+      //
+      // The dragging guard is cylinder-only: a cylinder's own pointermove
+      // handler writes state.rotation directly every event (see below), so
+      // this loop must stay out of its way until release. A fan's drag
+      // branch never touches state.rotation itself — each DRAG_PX crossing
+      // calls selectCard, which only sets stepTarget — so without an
+      // exception here the drum would sit frozen on a static pose for the
+      // whole drag and only visibly rotate once the pointer lifts. Fan mode
+      // needs this loop running DURING the drag for the same reason a step
+      // needs it after a keypress: something has to ease stepTarget.
+      const dragBlocksTick = state.dragging && state.layout.mode !== 'fan';
+      if (!state.transitioning && !dragBlocksTick && state.items.length) {
         if (state.stepTarget != null) {
           const d = state.stepTarget - state.rotation;
           if (Math.abs(d) > 0.05) state.rotation += d * 0.14;
           else { state.rotation = state.stepTarget; state.stepTarget = null; }
         } else if (Math.abs(state.velocity) > 0.02) {
           state.rotation += state.velocity;
+          // Defensive, not the live mechanism: no fan gesture path (wheel,
+          // drag) ever sets state.velocity away from 0 today — both bank
+          // pixels into discrete selectCard calls instead — so this branch
+          // is unreachable for a fan in practice, and what actually keeps a
+          // fan's rotation from wrapping is selectCard's own index clamp
+          // (Math.min(count-1, Math.max(0, next))). This call stays as a
+          // cheap guard in case a future fan gesture ever does bank velocity;
+          // a cylinder's minRotation/maxRotation are +-Infinity, so
+          // clampRotation is a no-op there and this is exactly its old
+          // decay-only behaviour, unchanged.
+          const clamped = H.clampRotation(state.rotation, state.layout);
+          if (clamped !== state.rotation) { state.rotation = clamped; state.velocity = 0; }
           state.velocity *= 0.93;
         } else {
           state.velocity = 0;
-          const target = H.snapTarget(state.rotation, state.items.length);
+          // A fan's target is state.frontIndex, not the rotation nearest to.
+          // A wheel/drag event unconditionally nulls stepTarget on every call
+          // (a live gesture outranks a pending step), including one that banks
+          // less than a full notch and issues no new selectCard — so a step
+          // can be interrupted mid-ease with no replacement target queued. If
+          // this branch re-derived the target from state.rotation (via
+          // snapRotation -> indexAtRotation), it would find whatever card the
+          // PARTIALLY-eased rotation is nearest — the card being left, not the
+          // one already selected — and ease back to it, while .front, the
+          // position pill and centeredId all already show the new selection.
+          // Keying off state.frontIndex instead makes it the single source of
+          // truth for a fan's resting rotation, exactly as frontIndexNow()
+          // already assumes, so every frame converges on the actual selection
+          // no matter how many times something else nulled stepTarget first.
+          const target = state.layout.mode === 'fan'
+            ? H.rotationForCard(state.frontIndex, state.layout)
+            : H.snapRotation(state.rotation, state.layout);
           const d = target - state.rotation;
           if (Math.abs(d) > 0.05) state.rotation += REDUCED ? d : d * 0.14;
           else state.rotation = target;
         }
-        applyDrumTransform();
-        updateFrontCard();
+        // Only touch the DOM when the rotation actually moved. At rest the
+        // branches above converge on `state.rotation === target` and then keep
+        // re-deriving the same number forever, so this used to rewrite the
+        // drum's transform and re-run updateFrontCard 60 times a second on a
+        // drum nobody was touching — pure battery cost on exactly the phones
+        // this UI is read on. The settling frame still runs (the rotation
+        // differs on it), so the selection is applied once and then left alone.
+        //
+        // The cache is maintained INSIDE applyDrumTransform, not here, so the
+        // other callers — buildDrum, the reduced-motion jumps, the drag and
+        // click paths — keep it coherent for free. Tracking it only here would
+        // have stranded the two reduced-motion paths that apply a transform
+        // without an updateFrontCard beside it.
+        if (state.rotation !== lastAppliedRotation) {
+          applyDrumTransform();
+          updateFrontCard();
+        }
       }
       requestAnimationFrame(tick);
     }
 
     // ---------- input: wheel ----------
-    function insideReader(target){
-      if (state.view.level !== 'memories' || !(target instanceof Element)) return false;
-      // A reader with nothing to scroll must not swallow the wheel: short
-      // memories would otherwise sit in a dead zone the size of the front card,
-      // where scrolling does nothing at all.
-      const el = target.closest('.reader-scroll');
-      return !!el && el.scrollHeight > el.clientHeight;
+    // Returns the scrollable reader under `target`, or null. A reader with
+    // nothing to scroll must not swallow the wheel or claim a drag: short
+    // memories would otherwise sit in a dead zone the size of the front card,
+    // where scrolling does nothing at all.
+    function readerAt(target, clientX, clientY){
+      if (state.view.level !== 'memories') return null;
+      const scrollable = el => (el && el.scrollHeight > el.clientHeight) ? el : null;
+      if (target instanceof Element) {
+        const hit = scrollable(target.closest('.reader-scroll'));
+        if (hit) return hit;
+      }
+      // DOM path first, then geometry — the same order, and for the same
+      // reason, as the click handler. Hit-testing inside the preserve-3d card
+      // stack is not dependable across engines, and a reader that silently
+      // fails to resolve does not degrade into "no scrolling", it degrades into
+      // "the drum spins instead", which is the whole defect being fixed here.
+      // The selected card is rotated flat to face the camera, so its reader's
+      // own rect is an exact test rather than an approximation.
+      if (Number.isFinite(clientX) && Number.isFinite(clientY) && state.frontEl) {
+        const el = scrollable(state.frontEl.querySelector('.reader-scroll'));
+        const r = el && el.getBoundingClientRect();
+        if (r && r.width && clientX >= r.left && clientX <= r.right && clientY >= r.top && clientY <= r.bottom) return el;
+      }
+      return null;
     }
+    function insideReader(target, clientX, clientY){ return !!readerAt(target, clientX, clientY); }
     els.stage.addEventListener('wheel', (e) => {
       // deltaMode 1 = lines, 2 = pages. Firefox reports line deltas for real
       // mouse wheels, which are ~50x smaller than the pixel deltas this spin
@@ -381,7 +1168,25 @@
         return;
       }
       const action = H.routeGesture('wheel', ctx(e));
-      if (action === 'scrollContent') return; // native scroll of the reader div
+      if (action === 'scrollContent') {
+        // Drive it, do not delegate. This used to `return` and let the browser
+        // scroll the reader natively, which silently does nothing in Chromium:
+        // the drum sits at translateZ(-radius) and the front card at +radius,
+        // and at 125 cards that radius is ~11,139px. The two cancel visually,
+        // but the scroller ends up at an extreme Z inside a preserve-3d subtree,
+        // and WHEEL scrolling is routed by the compositor's hit-test rather than
+        // the one elementFromPoint uses — elementFromPoint resolves the reader
+        // correctly here while the wheel still reaches nothing.
+        // Same shape as the touch path: the page owns this scroller on every
+        // engine rather than negotiating with the browser for it. Nothing else
+        // writes scrollTop, so there is no second writer to race.
+        const el = readerAt(e.target, e.clientX, e.clientY);
+        if (el) {
+          e.preventDefault(); // we are handling it; do not also scroll the page
+          el.scrollTop += dy; // clamps at both ends, matching overscroll-behavior:contain
+        }
+        return;
+      }
       e.preventDefault();
       // preventDefault stays above this guard so the page never scrolls or
       // zooms mid-transition. Banking velocity here would not: tick() is gated
@@ -389,9 +1194,24 @@
       // already visible would all release at once as a multi-card lurch.
       if (state.transitioning) return;
       state.stepTarget = null; // a live gesture outranks a pending arrow step
+      if (state.layout.mode === 'fan') {
+        // No momentum in a fan — notches bank until they add up to one card.
+        // Kept below a typical ~100px Chromium wheel notch so a single scroll
+        // click always moves the selection instead of reading as dead input.
+        const NOTCH_PX = 90;
+        state.wheelAccum += dy;
+        while (Math.abs(state.wheelAccum) >= NOTCH_PX) {
+          const dir = state.wheelAccum > 0 ? 1 : -1;
+          state.wheelAccum -= dir * NOTCH_PX;
+          // Matches the cylinder: dy > 0 raises rotation, which lowers the
+          // index there, so scrolling down must also step the fan backward.
+          selectCard(state.frontIndex - dir);
+        }
+        return;
+      }
       state.velocity = Math.max(-30, Math.min(30, state.velocity + dy * 0.02 * state.gestureGain));
     }, { passive: false });
-    function ctx(e){ return { level: state.view.level, insideReader: insideReader(e.target) }; }
+    function ctx(e){ return { level: state.view.level, insideReader: insideReader(e.target, e.clientX, e.clientY) }; }
     // The stage covers most of the window but not the chrome bar or the HUD, and
     // Ctrl+wheel there browser-zooms the whole app — which a fixed-position 3D
     // scene does not survive gracefully. Suppress it document-wide (the modal is
@@ -415,8 +1235,10 @@
       if (pointers.size === 2) {
         const [a, b] = [...pointers.values()];
         pinchStart = Math.hypot(a.x - b.x, a.y - b.y);
+        endReaderDrag(); // a pinch outranks a reader scroll
       } else if (pointers.size === 1) {
         dragMoved = 0;
+        state.dragAccum = 0; // a fresh press must not inherit a residue banked by the wheel
         dragOrigin = { x: e.clientX, y: e.clientY };
         // Kept for the click handler: pointer capture retargets the click to
         // #stage, and this preserves what the press actually landed on for
@@ -426,17 +1248,101 @@
         // geometrically in cardIndexAtPoint instead.
         pressTarget = e.target instanceof Element ? e.target : null;
         // A horizontal drag spins at every level, reader included (spec: hdrag ->
-        // spin). Only a mouse is exempt inside the reader, where press-and-drag is
-        // how text gets selected; touch has no such conflict — it scrolls the
-        // reader vertically via touch-action:pan-y and spins horizontally here.
-        if (!insideReader(e.target) || e.pointerType !== 'mouse') { state.dragging = true; state.velocity = 0; state.stepTarget = null; }
+        // spin). Only a mouse is exempt inside the reader, where press-and-drag
+        // is how text gets selected.
+        //
+        // A non-mouse press inside a scrollable reader commits to NOTHING yet.
+        // This used to arm the spin immediately, on the assumption that touch
+        // "scrolls the reader vertically via touch-action:pan-y and spins
+        // horizontally here" — true in Blink, false on iOS/WebKit inside the
+        // preserve-3d card stack, where the native pan never happens and the
+        // vertical read-swipe therefore spun the drum instead (device-tested,
+        // iPhone 15 / iOS 26.5.2). Now the axis decides, and a vertical swipe
+        // scrolls the reader by hand. See beginReaderDrag.
+        const reader = readerAt(e.target, e.clientX, e.clientY);
+        if (reader && e.pointerType !== 'mouse') beginReaderDrag(reader, e);
+        else if (!reader || e.pointerType !== 'mouse') { state.dragging = true; state.velocity = 0; state.stepTarget = null; }
       }
     });
+    // ---------- input: reader drag (the touch half of `scrollContent`) ----------
+    // routeGesture has always mapped vswipe-inside-the-reader to 'scrollContent',
+    // but nothing ever dispatched a vswipe from a pointer event: scrolling was
+    // left entirely to the browser's own panning of the .reader-scroll box.
+    // Blink honours that; WebKit does not honour it inside the rotated
+    // preserve-3d card, so the swipe fell through to the drum. Rather than chase
+    // which WebKit rule is responsible, drive scrollTop here — that is correct in
+    // every engine.
+    //
+    // THIS DRIVER IS THE SOLE OWNER OF THE READER'S scrollTop ON TOUCH, which is
+    // why `.reader-scroll` carries touch-action:none. An earlier version tried to
+    // share: it drove scrollTop AND left the browser free to pan (touch-action:
+    // pan-y), standing down once a `scroll` event suggested the browser had taken
+    // over. Two writers to one value is racy, and it produced two separate bugs on
+    // iOS — first the driver's own write tripped the stand-down check and killed
+    // scrolling after a single delta; then, once that was fixed, the browser's
+    // late async scroll landed on top of ours and yanked the text backwards
+    // mid-drag. Owning it outright deletes both failure modes and the mechanism
+    // behind them. touch-action only governs touch and pen, so the wheel path on
+    // desktop is untouched.
+    // TRADEOFF, accepted: no native momentum. The text tracks the finger and stops
+    // when you lift. The drum keeps its own inertia (state.velocity); the reader
+    // has none, and adding it would be new behaviour rather than a fix.
+    let readerDrag = null;
+    function beginReaderDrag(el, e){
+      // A press arrests the drum whatever it goes on to mean, exactly as a
+      // press outside the reader always has.
+      state.velocity = 0;
+      state.stepTarget = null;
+      readerDrag = { el, lastY: e.clientY, axis: 'undecided' };
+    }
+    function endReaderDrag(){
+      readerDrag = null;
+    }
+    // Hands the gesture to the drum, exactly as a press outside the reader would.
+    function readerDragToSpin(){
+      endReaderDrag();
+      state.dragging = true;
+      state.velocity = 0;
+      state.stepTarget = null;
+    }
     els.stage.addEventListener('pointermove', (e) => {
       const prev = pointers.get(e.pointerId);
       if (!prev) return;
       const dx = e.clientX - prev.x, dy = e.clientY - prev.y;
       pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      // Net displacement from the press origin, tracked for ANY single captured
+      // pointer before the branches below claim the gesture. The click handler
+      // gates on dragMoved > 8, so every drag has to feed it -- including the
+      // one gesture that owns neither branch: a MOUSE drag inside the reader.
+      // pointerdown deliberately arms neither readerDrag (non-mouse only) nor
+      // state.dragging (non-reader or non-mouse) there, so native text
+      // selection works -- but that left dragMoved at 0, so selecting a phrase
+      // and releasing passed the click guard and DIVED, wiping the selection
+      // and wrapping the memories view back to projects. Measured, not
+      // theorised: level went memories -> projects on every trial.
+      if (pointers.size === 1) {
+        dragMoved = Math.max(dragMoved, Math.abs(e.clientX - dragOrigin.x) + Math.abs(e.clientY - dragOrigin.y));
+      }
+      if (readerDrag && pointers.size === 1) {
+        const ndx = e.clientX - dragOrigin.x, ndy = e.clientY - dragOrigin.y;
+        if (readerDrag.axis === 'undecided') {
+          const axis = H.classifyDragAxis(ndx, ndy);
+          if (axis !== 'undecided') {
+            readerDrag.axis = axis;
+            if (H.routeDragAxis(axis, { level: state.view.level, insideReader: true }) !== 'scrollContent') {
+              readerDragToSpin();
+              return; // the deciding move only decides; the next one spins
+            }
+          }
+          if (readerDrag) readerDrag.lastY = e.clientY;
+          return; // likewise: never scroll on the move that picked the axis, or
+                  // Blink would apply this delta AND then pan natively on top
+        }
+        // Unconditional: touch-action:none means nothing else is writing this.
+        readerDrag.el.scrollTop -= e.clientY - readerDrag.lastY;
+        readerDrag.lastY = e.clientY;
+        return;
+      }
       if (pointers.size === 2 && pinchStart > 0) {
         const [a, b] = [...pointers.values()];
         const ratio = Math.hypot(a.x - b.x, a.y - b.y) / pinchStart;
@@ -451,12 +1357,28 @@
         // threshold on jitter alone, silently eating clicks "at random". The
         // max is sticky, and tracked above the guard below, so a drag that
         // swings out and back (or was refused mid-transition) still
-        // suppresses the click it ends with.
-        dragMoved = Math.max(dragMoved, Math.abs(e.clientX - dragOrigin.x) + Math.abs(e.clientY - dragOrigin.y));
+        // suppresses the click it ends with. (Now computed once above, for every
+        // single-pointer gesture rather than only the two that used to claim
+        // one; this comment stays because the NET-not-accumulated rule is the
+        // part that is easy to get wrong again.)
         // Mirror the wheel's transition guard: a drag mid-zoom rotates the drum
         // the swap is about to replace, and banks a velocity that releases into
         // the new view as a lurch. The placeholder has no drum to spin at all.
         if (state.transitioning || !state.items.length) return;
+        if (state.layout.mode === 'fan') {
+          // Dragging right brings the card to the left forward, matching how a drum
+          // would have carried it toward you.
+          const DRAG_PX = 80;
+          state.dragAccum += dx;
+          while (Math.abs(state.dragAccum) >= DRAG_PX) {
+            const dir = state.dragAccum > 0 ? 1 : -1;
+            state.dragAccum -= dir * DRAG_PX;
+            selectCard(state.frontIndex - dir);
+          }
+          return;
+        }
+        // Cylinder only — the fan branch above already returned and delegates
+        // to selectCard, which drives the fan's own rotation instead.
         const spin = dx * 0.22 * state.gestureGain;
         state.rotation += spin;
         state.velocity = Math.max(-30, Math.min(30, spin)); // same rail as the wheel
@@ -467,7 +1389,7 @@
     function releasePointer(e){
       pointers.delete(e.pointerId);
       if (pointers.size < 2) pinchStart = 0;
-      if (!pointers.size) state.dragging = false;
+      if (!pointers.size) { state.dragging = false; endReaderDrag(); }
     }
     // Bound to window, not the stage: a release outside the stage must still
     // clear state.dragging, or tick() short-circuits forever and the drum
@@ -475,6 +1397,45 @@
     window.addEventListener('pointerup', releasePointer);
     window.addEventListener('pointercancel', releasePointer);
     window.addEventListener('lostpointercapture', releasePointer);
+
+    // ---------- input: iOS pinch ----------
+    // Pinch-together is the zoom-OUT gesture, and it was routed purely off
+    // counting two pointers on #stage. That works right up until Safari decides
+    // the two fingers mean "zoom the document" — after which the page stops
+    // seeing the gesture at all. At the memories level the front card is mostly
+    // reader text, and a pinch starting over text is exactly the case Safari
+    // claims, so surfacing from a memory was "next to impossible" on an iPhone
+    // while working fine on a desktop trackpad.
+    // gesturestart/change/end are WebKit-only and non-standard, which here is a
+    // feature: they are the events iOS actually delivers for a pinch, and
+    // claiming them is also what stops the document zoom. Blink never fires
+    // them, so the pointer path above remains the only one that runs there.
+    // Modals are exempt — pinch-zooming a text form is legitimate.
+    let pinchHandled = false;
+    const modalOpen = () => !!document.querySelector('.modalbg.open');
+    addEventListener('gesturestart', (e) => {
+      if (modalOpen()) return;
+      e.preventDefault();
+      pinchHandled = false;
+    }, { passive: false });
+    addEventListener('gesturechange', (e) => {
+      if (modalOpen()) return;
+      e.preventDefault(); // stays above the guards so the page never zooms mid-transition
+      if (pinchHandled || state.transitioning) return;
+      // Same thresholds as the pointer pinch, so the two paths cannot disagree
+      // about how far a pinch has to travel to count.
+      const kind = e.scale > 1.25 ? 'pinchSpread' : e.scale < 0.8 ? 'pinchTogether' : null;
+      if (!kind) return;
+      pinchHandled = true; // one level per gesture; releasing arms the next
+      const action = H.routeGesture(kind, { level: state.view.level, insideReader: false });
+      if (action === 'dive') dive();
+      else if (action === 'zoomOut') zoomOut();
+    }, { passive: false });
+    addEventListener('gestureend', (e) => {
+      if (modalOpen()) return;
+      e.preventDefault();
+      pinchHandled = false;
+    }, { passive: false });
 
     // ---------- input: click, context menu, keys ----------
     // Chromium's hit-testing — pointer events AND elementFromPoint — misses
@@ -485,7 +1446,6 @@
     // containing the point. Exact for the horizontal extent (both edges are
     // projected); the vertical band uses the larger edge scale, which is
     // slightly generous at strong angles and errs toward accepting clicks.
-    const PERSPECTIVE = 1400; // keep in sync with #stage{perspective:1400px}
     function cardIndexAtPoint(clientX, clientY){
       const n = state.items.length;
       if (!n) return -1;
@@ -494,7 +1454,7 @@
       const styles = getComputedStyle(els.stage);
       const cardW = parseFloat(styles.getPropertyValue('--cardW')) || 340;
       const cardH = parseFloat(styles.getPropertyValue('--cardH')) || 230;
-      const theta = H.anglePerCard(n);
+      const angles = state.layout.angles;
       // Screen position + depth of the point localX along card face at angle a:
       // the card transform is rotateY(a) translateZ(radius) inside a drum at
       // translateZ(-radius), so (localX, 0, 0) lands at the coordinates below.
@@ -502,12 +1462,16 @@
         const sin = Math.sin(a), cos = Math.cos(a);
         const x = localX * cos + state.radius * sin;
         const z = -localX * sin + state.radius * cos - state.radius; // toward viewer, <= 0
-        const s = PERSPECTIVE / (PERSPECTIVE - z);
+        const s = H.FAN_PERSPECTIVE / (H.FAN_PERSPECTIVE - z);
         return { sx: originX + x * s, s, z };
       };
       let best = -1, bestZ = -Infinity;
-      for (let i = 0; i < n; i++) {
-        const a = (state.rotation + i * theta) * Math.PI / 180;
+      // Only cards actually in the DOM are candidates: resolving a click to a
+      // windowed-out card would select something that is not on screen. Anchored
+      // on drumAnchor, not frontIndex, because that is what the window was cut
+      // around and the two differ by up to DRUM_SLACK between re-cuts.
+      for (const i of windowIndices(n, state.drumAnchor ?? state.frontIndex, state.layout.mode)) {
+        const a = (state.rotation + angles[i]) * Math.PI / 180;
         if (Math.cos(a) <= 0.05) continue; // facing away or edge-on: not clickable
         const L = project(-cardW / 2, a), R = project(cardW / 2, a);
         const lo = Math.min(L.sx, R.sx), hi = Math.max(L.sx, R.sx);
@@ -519,19 +1483,88 @@
       }
       return best;
     }
+    /**
+     * The element a click should be attributed to.
+     *
+     * pressTarget is pointerdown's target, kept because pointer capture
+     * retargets the click and because Chromium cannot hit-test 3D-rotated
+     * cards. But it is ONLY meaningful for a click a pointer actually
+     * produced. A keyboard activation (Enter/Space on a focused button)
+     * dispatches a click with detail 0 and coordinates 0,0 and never runs
+     * pointerdown, so preferring pressTarget there attributed the press to
+     * whatever the LAST mouse click hit: after clicking Details, Enter on the
+     * focused Back button re-resolved to Details and re-asserted the flip, so
+     * Back was dead; keyboard Edit and Rename resolved elementFromPoint(0,0)
+     * and silently no-opped. Measured on both counts.
+     *
+     * e.detail counts the click sequence, so it is > 0 for real pointer
+     * clicks and 0 for keyboard-synthesised ones — the discriminator the
+     * synthetic front-button click below also relies on.
+     */
+    function clickHit(e) {
+      const fromPointer = e.detail > 0;
+      if (fromPointer && pressTarget && pressTarget.isConnected) return pressTarget;
+      return e.target instanceof Element ? e.target : null;
+    }
     els.stage.addEventListener('click', (e) => {
       if (dragMoved > 8 || state.transitioning) return; // a drag, not a click
       // DOM resolution first — it works for the flat front card and carries
-      // the button/reader guards — then the geometric fallback for the side
-      // cards Chromium cannot hit-test. pressTarget survives the capture
-      // retargeting; isConnected covers a drum rebuilt (SSE) mid-press.
-      let hit = (pressTarget && pressTarget.isConnected) ? pressTarget
-        : (e.target instanceof Element ? e.target : null);
+      // the button guard — then the geometric fallback for the side
+      // cards Chromium cannot hit-test.
+      let hit = clickHit(e);
       if (!hit || !hit.closest('.card3d[data-idx]')) {
         const under = document.elementFromPoint(e.clientX, e.clientY);
         if (under instanceof Element && under.closest('.card3d[data-idx]')) hit = under;
       }
-      if (hit && hit.closest('button, a, .reader-scroll')) return;
+      // `.reader-scroll` is deliberately NOT exempt any more: clicking the
+      // memory text dives onward like clicking anywhere else on the card.
+      // Reading is still safe — wheel-inside-the-reader scrolls (see
+      // insideReader), and a text-selection drag exceeds the click threshold
+      // and suppresses its own click.
+      // Belt-and-braces, not load-bearing any more: a fan now rotates to bring
+      // the selected card to 0deg — flat, facing the camera — instead of
+      // lifting it in place at whatever angle it fanned to, so the front card
+      // is exactly the case Chromium's own hit-testing already gets right.
+      // This rect-based check stays because it is still correct and costs
+      // nothing, and because it is the only thing that would save an Edit/
+      // Rename click if a button were ever rendered on a non-centred card (it
+      // is not, today — buttons only live on `.card3d.front`). Historically
+      // (before this revert) a fan's selected card could sit anywhere from
+      // -33deg to +33deg, and Chromium reported #scene for a button on the far
+      // half of an angled card, so this check was the only thing standing
+      // between that click and a wrong dive; measured on a 3-card fan back
+      // then, Edit worked at -24deg and 0deg but dived at +24deg without it.
+      const overFrontButton = (() => {
+        if (!state.frontEl) return null;
+        for (const el of state.frontEl.querySelectorAll('button, a')) {
+          const r = el.getBoundingClientRect();
+          if (r.width && e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom) return el;
+        }
+        return null;
+      })();
+      if (overFrontButton) {
+        // The other two delegated click listeners on #stage (rename, edit) resolve
+        // their own `hit` the same pressTarget-first way this one does, and pressTarget
+        // is still the stale #scene from the original pointerdown — that IS the bug.
+        // A plain overFrontButton.click() re-dispatches with clientX/clientY at 0,0, so
+        // their elementFromPoint fallback cannot find the button either and the modal
+        // silently fails to open. Updating pressTarget first makes every listener that
+        // inspects it for this synthetic click agree on the real element.
+        pressTarget = overFrontButton;
+        overFrontButton.click();
+        // The synthetic click above already bubbled to #stage and ran the rename/edit
+        // listeners once. `return` alone does not stop the ORIGINAL event from also
+        // reaching those same listeners afterward — and since pressTarget now correctly
+        // points at the button, they would resolve it again and fire a second time. A
+        // button that only re-seeds a form is harmless to call twice; the first one that
+        // POSTs (Edit's save, a future delete) would not be. stopImmediatePropagation
+        // (not the plain stopPropagation) is required because all three listeners are
+        // bound to the same #stage element, so "propagation to ancestors" isn't the
+        // issue — later same-element listeners are.
+        e.stopImmediatePropagation();
+        return;
+      }
+      if (hit && hit.closest('button, a')) return;
       const card = hit ? hit.closest('.card3d[data-idx]') : null;
       const idx = card ? Number(card.dataset.idx) : cardIndexAtPoint(e.clientX, e.clientY);
       if (idx < 0) return;
@@ -539,11 +1572,14 @@
       const action = H.routeGesture(kind, { level: state.view.level, insideReader: false });
       if (action === 'none') return;
       if (idx !== state.frontIndex) {
-        const target = H.rotationForIndex(idx, state.items.length);
-        state.rotation += H.shortestDelta(state.rotation, target);
-        state.velocity = 0;
-        state.stepTarget = null; // centering on a clicked card overrides a pending arrow step
-        applyDrumTransform(); updateFrontCard();
+        if (state.layout.mode === 'fan') {
+          selectCard(idx);
+        } else {
+          state.rotation += H.shortestDelta(state.rotation, H.rotationForCard(idx, state.layout));
+          state.velocity = 0;
+          state.stepTarget = null; // centering on a clicked card overrides a pending arrow step
+          applyDrumTransform(); updateFrontCard();
+        }
       }
       if (action === 'dive' || action === 'centerThenDive') dive();
     });
@@ -574,6 +1610,17 @@
       else if (action === 'stepNext') stepBy(1);
     });
     els.backBtn.addEventListener('click', () => zoomOut());
+    // Routed through the shipped gesture table rather than calling stepBy
+    // directly, so a tap and an arrow key can never drift apart -- the same
+    // reason pointer drags go through classifyDragAxis/routeDragAxis.
+    function spinFromButton(kind){
+      if (state.transitioning) return;
+      const action = H.routeGesture(kind, { level: state.view.level, insideReader: false });
+      if (action === 'stepPrev') stepBy(-1);
+      else if (action === 'stepNext') stepBy(1);
+    }
+    els.spinPrev.addEventListener('click', () => spinFromButton('arrowLeft'));
+    els.spinNext.addEventListener('click', () => spinFromButton('arrowRight'));
 
     // ---------- edit modal ----------
     const CANONICAL = H.CANONICAL_DISTRICTS;
@@ -610,8 +1657,19 @@
       // untouched, so an untouched control must send nothing. An emptied number
       // field reads as '' and would post intensity: NaN; an unchanged district
       // select would post the placeholder value shown for district-less memories.
+      // Same validation as the classic app's edit modal: Number('') is 0 (hence
+      // the empty check), Number('abc') is NaN which serialises to null and the
+      // daemon rejects, and the min/max attributes do not constrain a
+      // script-submitted form — so a typed 5 would otherwise persist off-scale.
       const intensity = $('#editIntensity').value.trim();
-      if (intensity !== '') body.intensity = Number(intensity);
+      if (intensity !== '') {
+        const n = Number(intensity);
+        if (!Number.isFinite(n) || n < 0 || n > 1) {
+          showToast('Intensity must be a number between 0 and 1.');
+          return;
+        }
+        body.intensity = n;
+      }
       const district = $('#editDistrict').value;
       if (district !== state.editingDistrict) body.district = district;
       const epistemic = $('#editEpistemic').value;
@@ -635,13 +1693,154 @@
         showToast('Update failed — the modal is untouched, fix and retry.');
       }
     }
+
+    // ---------- project rename ----------
+    function openRenameModal(projectId){
+      if (!RENAME_HELPERS) { showToast('Rename helpers unavailable — is the bridge running?'); return; }
+      state.renamingProject = projectId;
+      $('#renameInput').value = projectId;
+      $('#renameHint').textContent = 'Renaming onto an existing project merges into it.';
+      $('#renameModalBg').classList.add('open');
+      $('#renameInput').focus();
+      $('#renameInput').select();
+    }
+
+    // Sequential, not parallel: every write goes through the single-writer
+    // daemon, and a partial run must leave a coherent store the user can
+    // finish by re-running the rename.
+    async function bulkReassign(ids, target, source){
+      setWritesDisabled(true);
+      let moved = 0;
+      try {
+        for (const id of ids) {
+          showToast(`Moving ${moved + 1}/${ids.length} into ${target}…`);
+          let ok = false;
+          try {
+            const res = await fetch(`${BRIDGE}/update`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ memoryId: id, projectId: target }) });
+            const data = await res.json();
+            ok = res.ok && data.ok;
+          } catch { ok = false; }
+          if (!ok) { showToast(`Moved ${moved} of ${ids.length}. Re-run the rename to move the rest.`); return false; }
+          moved++;
+        }
+        // A concurrent delete (SSE) between opening the modal and submitting
+        // can empty `ids` by the time we get here; remapping the tree for a
+        // project that moved zero cards is a no-op renamed as a "success"
+        // (a "Moved 0 cards" toast plus a spurious reconcile), not a real one.
+        if (!ids.length) return false;
+        // Only a complete run may remap the tree: a partial one leaves both
+        // ids real, and rewriting history to a half-existing project would
+        // strand every node that referenced it.
+        H.navRemapProject(state.tree, source, target);
+        // The remap rewrites ids already on the tree without touching its shape or
+        // the cursor, so the minimap's cheap node-count+cursor signature would not
+        // notice — force the next render to rebuild so stale node labels do not
+        // linger under the renamed project's old id.
+        invalidateMinimap();
+        if (state.view.projectId === source) state.view.projectId = target;
+        // Test the rendered card itself, not state.view.centeredId: the two
+        // only agree because updateFrontCard keeps them in sync elsewhere,
+        // and depending on that invariant here instead of the source of
+        // truth is exactly what makes a fixup like this easy to break later.
+        if (state.view.level === 'projects' && centeredItem()?.id === source) {
+          state.view.centeredId = target;
+          // refreshAndReconcile's "before" snapshot reads centeredId from
+          // centeredItem() (the currently-rendered item), not from
+          // state.view.centeredId directly, so the fixup above is invisible
+          // to it unless the rendered item itself agrees. Without this, the
+          // reconcile that follows sees the OLD id, decides it vanished, and
+          // jumps to whatever was positionally adjacent in the old list —
+          // an unrelated project, not the one just renamed.
+          const centered = state.items[state.frontIndex];
+          if (centered) { centered.id = target; if (centered.data) centered.data.id = target; }
+        }
+        showToast(`Moved ${moved} card${moved === 1 ? '' : 's'} from ${source} to ${target}.`);
+        return true;
+      } finally {
+        setWritesDisabled(false);
+      }
+    }
+
+    function setWritesDisabled(disabled){
+      for (const id of ['renameGoBtn', 'editSaveBtn']) { const el = $('#' + id); if (el) el.disabled = disabled; }
+    }
+
+    async function submitRename(){
+      // The Go button being disabled means a rename is already in flight
+      // (sequential, one round-trip per memory — the window can be long).
+      // The modal's own keydown handler calls this directly, bypassing the
+      // disabled attribute, so a second Rename opened over the greyed-out
+      // button and confirmed with Enter would otherwise start a concurrent
+      // bulkReassign against a different source/target pair.
+      if ($('#renameGoBtn').disabled) return;
+      const source = state.renamingProject;
+      const typed = $('#renameInput').value.trim();
+      if (!source || !typed || typed === source) { $('#renameModalBg').classList.remove('open'); return; }
+      const { normalizeProjectId, nearMissOf } = RENAME_HELPERS;
+      if (normalizeProjectId(typed) === normalizeProjectId(H.UNASSIGNED)) { showToast('That name is reserved for unassigned cards.'); return; }
+
+      const others = H.deriveProjects(state.snapshot).filter(p => p.id !== H.UNASSIGNED && p.id !== source);
+      const collision = others.find(o => normalizeProjectId(o.id) === normalizeProjectId(typed));
+      // Every memory in the project, across all its districts. Keyed the same
+      // way the helpers read the snapshot, so a record without its own `id`
+      // field still resolves.
+      const ids = Object.entries(state.snapshot.memories || {})
+        .filter(([, m]) => H.projectOf(m) === source)
+        .map(([key, m]) => String(m.id ?? key));
+
+      let target = typed;
+      if (collision) {
+        if (!confirm(`Project "${collision.id}" already exists (${collision.memoryCount} cards). Move all ${ids.length} cards from "${source}" into it?`)) return;
+        target = collision.id; // the existing spelling is canonical
+      } else {
+        const near = nearMissOf(typed, others.map(o => o.id));
+        if (near && confirm(`Did you mean "${near}"? OK moves all ${ids.length} cards into "${near}"; Cancel keeps "${typed}".`)) target = near;
+      }
+
+      $('#renameModalBg').classList.remove('open');
+      const ok = await bulkReassign(ids, target, source);
+      try {
+        await loadSnapshot();
+        // The daemon can acknowledge a write before it flushes to disk, and
+        // readSnapshot() (GET /memories) reads that file directly -- so this
+        // reload can race the flush and still show these ids under `source`.
+        // Every write above already succeeded, so patch the reload instead of
+        // letting a lagging read undo the remap bulkReassign just did.
+        if (ok) {
+          const movedIds = new Set(ids);
+          for (const [key, m] of Object.entries(state.snapshot.memories || {})) {
+            if (movedIds.has(String(m.id ?? key)) && H.projectOf(m) === source) m.project_id = target;
+          }
+        }
+        refreshAndReconcile();
+      } catch {}
+      if (ok) state.renamingProject = null;
+    }
+
+    $('#renameCancelBtn').addEventListener('click', () => $('#renameModalBg').classList.remove('open'));
+    $('#renameGoBtn').addEventListener('click', submitRename);
+    $('#renameModalBg').addEventListener('click', (e) => { if (e.target.id === 'renameModalBg') $('#renameModalBg').classList.remove('open'); });
+    $('#renameModalBg').addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') { e.stopPropagation(); $('#renameModalBg').classList.remove('open'); return; }
+      if (e.key === 'Enter') { e.stopPropagation(); e.preventDefault(); submitRename(); }
+    });
+    els.stage.addEventListener('click', (e) => {
+      if (dragMoved > 8 || state.transitioning) return;
+      let hit = clickHit(e);
+      if (!hit || !hit.closest('[data-rename]')) {
+        const under = document.elementFromPoint(e.clientX, e.clientY);
+        if (under instanceof Element) hit = under;
+      }
+      const btn = hit ? hit.closest('[data-rename]') : null;
+      if (btn) openRenameModal(btn.dataset.rename);
+    });
+
     els.stage.addEventListener('click', (e) => {
       if (dragMoved > 8 || state.transitioning) return; // a drag-spin that ended over the button, not a click
       // Same retargeting caveat as the card handler above: the pointerdown's
       // target is the real hit; elementFromPoint only as a last resort (the
       // Edit button lives on the flat front card, where it does still work).
-      let hit = (pressTarget && pressTarget.isConnected) ? pressTarget
-        : (e.target instanceof Element ? e.target : null);
+      let hit = clickHit(e);
       if (!hit || !hit.closest('[data-edit]')) {
         const under = document.elementFromPoint(e.clientX, e.clientY);
         if (under instanceof Element) hit = under;
@@ -650,6 +1849,31 @@
       if (!btn) return;
       const m = H.deriveMemories(state.snapshot, state.view.projectId, state.view.districtId).find(x => x.id === btn.dataset.edit);
       if (m) openEditModal(m);
+    });
+
+    // ---------- card flip (Details / Back) ----------
+    // Same delegation pattern as rename/edit above, including the pressTarget
+    // dance: the dive handler's overFrontButton branch already resolves ANY
+    // button under the front card generically and re-dispatches a synthetic
+    // click at (0,0), so this only needs to recognise [data-flip] on the
+    // resolved hit, not reimplement the retargeting. Explicit open/close
+    // (not classList.toggle) so a stray double-fire of the synthetic click
+    // can never leave the card in the wrong face.
+    els.stage.addEventListener('click', (e) => {
+      if (dragMoved > 8 || state.transitioning) return;
+      let hit = clickHit(e);
+      if (!hit || !hit.closest('[data-flip]')) {
+        const under = document.elementFromPoint(e.clientX, e.clientY);
+        if (under instanceof Element) hit = under;
+      }
+      const btn = hit ? hit.closest('[data-flip]') : null;
+      if (!btn) return;
+      // Scoped to .front defensively -- only .card3d.front ever renders a
+      // clickable [data-flip] button in the first place (see the .actions
+      // rules above), but this keeps the handler correct even if that ever
+      // changes rather than relying on CSS alone.
+      const card = btn.closest('.card3d.front');
+      if (card) card.classList.toggle('flipped', btn.dataset.flip === 'open');
     });
     $('#editCancelBtn').addEventListener('click', () => $('#editModalBg').classList.remove('open'));
     $('#editSaveBtn').addEventListener('click', submitEdit);
@@ -664,22 +1888,108 @@
       $('#editModalBg').classList.remove('open');
     });
 
+    // The gesture line is generated, not written twice: it must agree with the
+    // hint bar, and the hint bar is already the single source for that wording.
+    els.helpBtn.addEventListener('click', () => {
+      $('#helpGestures').textContent = H.hintFor(state.view.level, POINTER_KIND);
+      els.helpModalBg.classList.add('open');
+    });
+    $('#helpCloseBtn').addEventListener('click', () => els.helpModalBg.classList.remove('open'));
+    els.helpModalBg.addEventListener('click', (e) => {
+      if (e.target === els.helpModalBg) els.helpModalBg.classList.remove('open');
+    });
+
     // ---------- data ----------
     async function loadSnapshot(){
       const res = await fetch(`${BRIDGE}/memories`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       state.snapshot = await res.json();
     }
+    // ---------- nav persistence ----------
+    // The navigation tree was deliberately in-memory: on a desktop the page
+    // never goes away on its own, so there was nothing to survive. On iOS the
+    // tab's renderer can be jettisoned under memory pressure and silently
+    // reloaded, and every one of those took the whole exploration with it —
+    // reported repeatedly from a real iPhone, never once from a desktop.
+    // Preventing the reload is a separate fight (heartbeat, rebuild
+    // suppression, and windowing still to come); this makes losing it survivable,
+    // which is the part that can be guaranteed.
+    // sessionStorage is the right scope: it survives a reload, INCLUDING a
+    // crash-reload, but not a deliberately opened new tab — so "a fresh tab
+    // starts at the root" stays true, and only an unasked-for reload resumes.
+    const NAV_KEY = 'nd-mem-rolodex-nav';
+    const NAV_VERSION = 1;
+    let persistTimer = null;
+    let navRestored = false;
+    function persistNav(){
+      if (persistTimer !== null) { clearTimeout(persistTimer); persistTimer = null; }
+      try {
+        // The tree references nodes by id (parentId/childIds), never by object
+        // reference, so it is plain acyclic JSON.
+        sessionStorage.setItem(NAV_KEY, JSON.stringify({ v: NAV_VERSION, tree: state.tree, view: currentViewSnapshot() }));
+      } catch { /* private mode or over quota: navigation still works, it just will not survive a reload */ }
+    }
+    function schedulePersist(){
+      // updateChrome runs on every front-card change — many times a second
+      // while a drum spins — so coalesce instead of writing on each one.
+      if (persistTimer === null) persistTimer = setTimeout(persistNav, 500);
+    }
+    // A jettison is preceded by backgrounding far more often than not, and
+    // pagehide is the last event Safari reliably delivers. Flush synchronously
+    // rather than trusting the 500ms timer to have fired.
+    addEventListener('pagehide', persistNav);
+    addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') persistNav(); });
+    function restoreNav(){
+      let saved = null;
+      try { saved = JSON.parse(sessionStorage.getItem(NAV_KEY) || 'null'); } catch { return false; }
+      if (!saved || saved.v !== NAV_VERSION || !saved.view) return false;
+      const t = saved.tree;
+      // Validate rather than trust: a half-written or older-shaped entry must
+      // degrade to a normal cold start, never throw the page into a broken tree.
+      if (!t || !Array.isArray(t.nodes) || !t.nodes.length || typeof t.cursor !== 'number') return false;
+      if (!t.nodes.every(n => n && typeof n.id === 'number' && Array.isArray(n.childIds) && n.view)) return false;
+      if (!t.nodes.some(n => n.id === t.cursor)) return false; // the cursor has to resolve
+      state.tree = t;
+      state.view = saved.view;
+      // Drop any drum built before this point. connectEvents() runs at module
+      // load and its `hello` handler reconciles immediately, so by the time
+      // init() gets here a PROJECTS drum usually already exists — and
+      // currentViewSnapshot would then read a project id off it as the
+      // "centered card" of the memories view being restored. Reconciliation
+      // would not find that id among the memories, fall through to its
+      // neighbour branch, and silently land on card 1. A restore replaces the
+      // view wholesale, so any drum built for the previous one is stale by
+      // definition; clearing it makes the snapshot fall back to the restored
+      // view's own centeredId, which is the only correct source here.
+      state.items = [];
+      state.frontIndex = -1;
+      state.frontEl = null;
+      state.drumMarkup = null;
+      state.drumAnchor = null;
+      // Rotation is deliberately NOT restored: buildDrum recomputes it from
+      // centeredId, and that precondition is the page's oldest invariant.
+      return true;
+    }
+
     async function init(){
       try {
         const health = await (await fetch(`${BRIDGE}/health`)).json();
         await loadSnapshot();
         els.connState.textContent = `Bridge :${health.port}`;
         els.overlay.classList.remove('open');
+        // Only on the FIRST init. Retry re-runs this after the bridge came back,
+        // and by then the live tree is newer than anything on disk.
+        let resumed = false;
+        if (!navRestored) { navRestored = true; resumed = restoreNav(); }
         // Retry runs init() again after the bridge came back, possibly against a
         // store that moved on. Reconciling (rather than rebuilding blind) keeps
-        // the level, history and centered card the user left behind.
+        // the level, history and centered card the user left behind — and does
+        // the same job for a restored session, whose memories may well have
+        // changed while the tab was gone.
         refreshAndReconcile();
+        // Only say so when there was real depth to lose. Resuming at the root is
+        // indistinguishable from a cold start, so announcing it is just noise.
+        if (resumed && depthNow() > 0) showToast('Picked up where you left off.');
       } catch {
         els.connState.textContent = 'Offline';
         els.overlay.classList.add('open');
@@ -709,11 +2019,12 @@
       const hadCentered = hadItems && before.centeredId != null;
       const result = H.reconcileView(before, prevIds, state.snapshot);
       if (result.status === 'invalid') {
-        const restored = H.reconcilePop(state.history, state.snapshot);
+        const restored = H.navReconcileBack(state.tree, state.snapshot);
         state.view = restored ?? { level: 'projects', projectId: null, districtId: null, centeredId: null, rotation: 0, itemIds: [] };
         if (hadItems) showToast(restored ? 'This view emptied — zoomed out to the last valid one.' : 'This view emptied — back to all projects.');
       } else {
         state.view = result.view;
+        H.navSetCursorView(state.tree, result.view);
         if (result.status === 'neighbor' && hadCentered) showToast('The centered card was removed — showing its neighbor.');
       }
       buildDrum();
@@ -736,6 +2047,28 @@
     }
     connectEvents();
     els.retryBtn.addEventListener('click', init);
+    // The drum's own geometry (radius/angles) no longer depends on viewport
+    // width at all — only the memories level's card width does
+    // (`Math.min(560, Math.round(innerWidth * 0.92))`), so a resize still has
+    // to rebuild the drum there. Rebuilding at every level on every resize is
+    // harmless (projects/districts just redo the same 340px layout) and
+    // simpler than gating by level. Debounced: resize fires continuously
+    // while a window is dragged.
+    let resizeTimer = null;
+    function scheduleResizeRebuild(){
+      clearTimeout(resizeTimer);
+      resizeTimer = setTimeout(() => {
+        // A dive/zoom holds `transitioning` for ~1400ms (two 700ms legs), and a drag-spin
+        // holds `dragging` until pointerup. Discarding the rebuild here (the original fix)
+        // meant a phone rotated mid-transition kept stale geometry until the NEXT resize
+        // event happened to land outside a transition — which may never happen if the user
+        // rotates once and then just uses the app. Re-arm instead: keep checking every
+        // 200ms until neither is true, so the rebuild always eventually runs.
+        if (state.transitioning || state.dragging) { scheduleResizeRebuild(); return; }
+        buildDrum();
+      }, 200);
+    }
+    window.addEventListener('resize', scheduleResizeRebuild);
     await init();
     tick();
   </script>

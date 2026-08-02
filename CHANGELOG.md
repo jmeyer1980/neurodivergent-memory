@@ -46,6 +46,22 @@ Running locally on the development branch; not part of a release cut (version st
   pointer-aware scroll routing, and edit routed through `/update`. Pure
   CSS 3D + vanilla JS (`scripts/nd-mem-rolodex.html`), logic unit-tested in
   `scripts/nd-mem-rolodex-helpers.mjs`.
+- **Rolodex navigation aids.** The rolodex view gained a `0^N` coordinate
+  readout (dive depth plus project/district/card path, every segment
+  clickable, the memories→projects wrap counting as an ordinary dive so
+  depth keeps climbing instead of resetting), a collapsible left-rail
+  minimap that draws the session's exploration as a bottom-rooted tree —
+  abandoned branches kept and dimmed, every node a one-hop jump, the
+  collapsed state persisted in `localStorage` — in-app project rename that
+  reuses the classic app's merge/near-miss helpers and remaps the whole
+  exploration tree on success, and a fan layout that spreads drums of four
+  cards or fewer onto a large, shallow arc instead of a degenerate
+  cylinder, rotating (clamped at its ends rather than wrapping) to bring
+  the selected card to full-width center. Clicks now dive at every level,
+  memories included. Internally the history
+  stack became a navigation tree whose active path preserves the previous
+  wall, zoom-out and reconciliation semantics. See
+  `docs/superpowers/specs/2026-07-29-rolodex-navigation-aids-design.md`.
 
 ### Changed
 

@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import net from "node:net";
 import { spawn } from "node:child_process";
+import { stopDaemonOnPort } from "../test-support/daemon.mjs";
 
 function getFreePort() {
   return new Promise((resolve, reject) => {
@@ -57,6 +58,9 @@ test("bridge serves the app helpers module as javascript", async () => {
     assert.match(body, /export function normalizeProjectId/);
   } finally {
     bridge.kill();
+    // Reap AFTER the child dies: a live proxy/bridge respawns a daemon the
+    // instant the one it was using disappears.
+    await stopDaemonOnPort(daemonPort);
   }
 });
 
@@ -134,6 +138,9 @@ test("POST /update with only {memoryId, projectId} moves a memory between projec
     }
   } finally {
     bridge.kill();
+    // Reap AFTER the child dies: a live proxy/bridge respawns a daemon the
+    // instant the one it was using disappears.
+    await stopDaemonOnPort(daemonPort);
     if (daemonPid) { try { process.kill(daemonPid); } catch { /* gone */ } }
   }
 });
@@ -161,6 +168,9 @@ test("POST /update for a nonexistent memory surfaces the daemon's isError result
     daemonPid = (await waitFor(`http://127.0.0.1:${daemonPort}/health`).then((r) => r.json())).pid;
   } finally {
     bridge.kill();
+    // Reap AFTER the child dies: a live proxy/bridge respawns a daemon the
+    // instant the one it was using disappears.
+    await stopDaemonOnPort(daemonPort);
     if (daemonPid) { try { process.kill(daemonPid); } catch { /* gone */ } }
   }
 });

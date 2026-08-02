@@ -20,13 +20,34 @@ const USER_HOME = os.homedir();
 const DEFAULT_MEMORY_PATH = path.join(USER_HOME, '.neurodivergent-memory', 'memories.json');
 const MEMORY_PATH = process.env.ND_MEM_FILE || DEFAULT_MEMORY_PATH;
 const POLL_MS = Number(process.env.ND_MEM_POLL_MS || 1500);
+// An SSE stream that says nothing between memory writes is an idle TCP
+// connection, and phones reap those: wifi power-save and carrier NAT drop them
+// after tens of seconds, where a desktop holds them for many minutes. Measured
+// on this server: 57.5 seconds of complete silence in a 60-second idle window.
+// Every reap costs the page a reconnect, and a reconnect costs it a full
+// snapshot refetch plus a whole drum rebuild — which is why the rolodex
+// "randomly reloaded" on an iPhone and never once on the desktop. A comment
+// frame is ignored by EventSource and keeps the connection warm.
+// 0 or garbage means DISABLE the heartbeat, not "fire as fast as possible".
+// Node coerces a NaN or 0 delay to ~1ms, so a typo in this variable would have
+// spun a timer writing to every open SSE socket thousands of times a second.
+const HEARTBEAT_MS = (() => {
+  const raw = process.env.ND_MEM_BRIDGE_HEARTBEAT_MS;
+  if (raw === undefined || raw === '') return 20000;
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+})();
 
 app.use(cors());
 app.use(express.json({ limit: '2mb' }));
 
 let clients = new Set();
-let lastFingerprint = null;
-let lastMtimeMs = 0;
+// Seeded from the file as it stands at startup, NOT null/0. Seeded empty, the
+// first poll tick 1.5s later always found "a change" and broadcast a
+// memory-change nothing had caused (measured: identical mtime and size either
+// side of it). Every connected page then refetched the whole snapshot and
+// rebuilt its drum for nothing.
+let lastFingerprint = statFingerprint();
 
 function readSnapshot() {
   if (!fs.existsSync(MEMORY_PATH)) return { nextMemoryId: 1, memories: {}, missing: true, path: MEMORY_PATH };
@@ -53,10 +74,14 @@ function pollForChanges() {
   const fingerprint = statFingerprint();
   if (fingerprint === lastFingerprint) return;
   lastFingerprint = fingerprint;
-  let mtimeMs = 0;
-  try { mtimeMs = fs.statSync(MEMORY_PATH).mtimeMs; } catch {}
-  if (mtimeMs === lastMtimeMs && fingerprint !== 'missing') return;
-  lastMtimeMs = mtimeMs;
+  // There was a second guard here comparing mtime alone, and it could only ever
+  // LOSE changes. mtime is already the first component of the fingerprint, so
+  // the guard was redundant on its face — but it ran AFTER lastFingerprint had
+  // been advanced, so a write landing inside the same mtime tick (size-only
+  // delta) was swallowed and then invisible forever: every later poll compared
+  // against the already-updated fingerprint and saw no difference. Most
+  // reachable through bulkReassign, which POSTs its updates in a tight
+  // sequential loop that easily lands two writes in one millisecond.
   broadcast('memory-change', { path: MEMORY_PATH, fingerprint, changedAt: new Date().toISOString() });
 }
 setInterval(pollForChanges, POLL_MS);
@@ -72,7 +97,16 @@ app.get('/events', (req, res) => {
   });
   res.write(`event: hello\ndata: ${JSON.stringify({ path: MEMORY_PATH, pollMs: POLL_MS })}\n\n`);
   clients.add(res);
-  req.on('close', () => clients.delete(res));
+  // See HEARTBEAT_MS. A `:` frame is an SSE comment: it reaches no listener and
+  // costs 15 bytes, but it keeps the socket from going idle long enough to be
+  // reaped on a phone. unref() so a live stream cannot hold the process open.
+  const heartbeat = HEARTBEAT_MS > 0
+    ? setInterval(() => {
+        try { res.write(': keepalive\n\n'); } catch { /* the close handler cleans up */ }
+      }, HEARTBEAT_MS)
+    : null;
+  heartbeat?.unref?.();
+  req.on('close', () => { if (heartbeat) clearInterval(heartbeat); clients.delete(res); });
 });
 
 // Single-writer architecture: the bridge owns NO memory process. Every write
@@ -103,10 +137,48 @@ function warnOnMemoryPathMismatch(daemonMemoryPath, daemonPid) {
   );
 }
 
+/**
+ * The env a daemon WE spawn must inherit so it writes the store this bridge reads.
+ *
+ * ND_MEM_FILE moved only the bridge's read path: ensureDaemon was called with no
+ * env, so the daemon resolved persistence independently from
+ * NEURODIVERGENT_MEMORY_FILE/_DIR and happily wrote somewhere else. A bridge
+ * pointed at a scratch store therefore SERVED the scratch file while /save
+ * landed in the user's real ~/.neurodivergent-memory/memories.json — and
+ * answered ok:true, so the card just never appeared. The repo's own
+ * test/bridge-daemon.test.mjs has to set BOTH variables to keep them aligned,
+ * which is the trap stated out loud.
+ */
+function daemonEnv() {
+  if (!process.env.ND_MEM_FILE) return process.env;
+  return { ...process.env, NEURODIVERGENT_MEMORY_FILE: MEMORY_PATH };
+}
+
+/**
+ * Refuse to write through a daemon serving a different store.
+ *
+ * Passing daemonEnv() fixes the daemon WE start, but a daemon started earlier by
+ * another client may already own the port with a different memoryPath, and the
+ * port bind makes it the singleton. Writing anyway put data in a store the user
+ * is not looking at while reporting success; a warn-once line on stderr is
+ * invisible to a browser. Fail the request instead — a visible error beats a
+ * silent misfile.
+ */
+function assertMemoryPathMatch(daemonMemoryPath, daemonPid) {
+  if (!daemonMemoryPath) return;
+  if (normalizePathForComparison(daemonMemoryPath) === normalizePathForComparison(MEMORY_PATH)) return;
+  throw new Error(
+    `Refusing to write: the daemon on port ${DAEMON_PORT} (pid ${daemonPid}) is serving ${daemonMemoryPath}, `
+    + `but this bridge is reading ${MEMORY_PATH}. The write would land in a store you are not viewing. `
+    + 'Stop that daemon, or start the bridge against the same store.',
+  );
+}
+
 let rpcId = 1;
 async function runMcpTool(toolName, args) {
-  const health = await ensureDaemon({ port: DAEMON_PORT, entryPath: DAEMON_ENTRY, logFile: DAEMON_LOG });
+  const health = await ensureDaemon({ port: DAEMON_PORT, entryPath: DAEMON_ENTRY, logFile: DAEMON_LOG, env: daemonEnv() });
   warnOnMemoryPathMismatch(health.memoryPath, health.pid);
+  assertMemoryPathMatch(health.memoryPath, health.pid);
   const res = await fetch(`http://127.0.0.1:${DAEMON_PORT}/mcp`, {
     method: 'POST',
     headers: {

@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
+import { stopDaemonOnPort } from "../test-support/daemon.mjs";
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -64,6 +65,9 @@ test('bridge serves the rolodex page, its helpers, and still serves the classic 
     assert.equal(classicHelpers.status, 200);
   } finally {
     bridge.kill();
+    // Reap AFTER the child dies: a live proxy/bridge respawns a daemon the
+    // instant the one it was using disappears.
+    await stopDaemonOnPort(daemonPort);
     fs.rmSync(tempDir, { recursive: true, force: true });
   }
 });

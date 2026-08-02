@@ -208,7 +208,22 @@ jobs:
           const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
           const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
 
-          manifest.version = pkg.version;
+          // Azure DevOps manifest versions are 1-4 dot-separated INTEGERS. npm
+          // prerelease versions are not: the RC job stamps e.g. 0.3.9-rc.12.1,
+          // which tfx rejects at package time — and because no step sets
+          // continue-on-error, that failure aborted the whole job, blocking the
+          // npm and Docker RC publishes too, on every push to development. This
+          // gate validated categories and icons but never the one field it had
+          // just rewritten.
+          const npmVersion = pkg.version;
+          const numericVersion = npmVersion.split('-')[0].split('+')[0];
+          if (!/^[0-9]+(\.[0-9]+){0,3}$/.test(numericVersion)) {
+            throw new Error(
+              `Cannot derive an Azure DevOps manifest version from "${npmVersion}": ` +
+              `"${numericVersion}" is not 1-4 dot-separated integers.`
+            );
+          }
+          manifest.version = numericVersion;
           manifest.publisher = process.env.AZDO_MARKETPLACE_PUBLISHER_ID || manifest.publisher;
 
           const allowedCategories = new Set([
@@ -489,7 +504,22 @@ jobs:
           const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
           const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
 
-          manifest.version = pkg.version;
+          // Azure DevOps manifest versions are 1-4 dot-separated INTEGERS. npm
+          // prerelease versions are not: the RC job stamps e.g. 0.3.9-rc.12.1,
+          // which tfx rejects at package time — and because no step sets
+          // continue-on-error, that failure aborted the whole job, blocking the
+          // npm and Docker RC publishes too, on every push to development. This
+          // gate validated categories and icons but never the one field it had
+          // just rewritten.
+          const npmVersion = pkg.version;
+          const numericVersion = npmVersion.split('-')[0].split('+')[0];
+          if (!/^[0-9]+(\.[0-9]+){0,3}$/.test(numericVersion)) {
+            throw new Error(
+              `Cannot derive an Azure DevOps manifest version from "${npmVersion}": ` +
+              `"${numericVersion}" is not 1-4 dot-separated integers.`
+            );
+          }
+          manifest.version = numericVersion;
           manifest.publisher = process.env.AZDO_MARKETPLACE_PUBLISHER_ID || manifest.publisher;
 
           const allowedCategories = new Set([
@@ -561,7 +591,14 @@ jobs:
             exit 0
           fi
 
-          node -e "const fs=require('node:fs');const pkg=JSON.parse(fs.readFileSync('package.json','utf8'));const manifestPath='vss-extension.json';const manifest=JSON.parse(fs.readFileSync(manifestPath,'utf8'));manifest.version=pkg.version;manifest.publisher=process.env.AZDO_MARKETPLACE_PUBLISHER_ID||manifest.publisher;fs.writeFileSync(manifestPath,JSON.stringify(manifest,null,2)+'\\n');if(process.env.GITHUB_OUTPUT){fs.appendFileSync(process.env.GITHUB_OUTPUT,'extension_id='+manifest.id+'\\n');fs.appendFileSync(process.env.GITHUB_OUTPUT,'publisher='+manifest.publisher+'\\n');}"
+          # Read-only. The validation step above already stamped this manifest
+          # with a SANITISED version (npm prerelease tags stripped, since Azure
+          # DevOps versions must be dot-separated integers) and the publisher.
+          # This used to re-stamp manifest.version = pkg.version, which put the
+          # raw prerelease string back and undid that sanitisation on exactly
+          # the artifact tfx then packages. Its only real work is exporting the
+          # two step outputs.
+          node -e "const fs=require('node:fs');const manifest=JSON.parse(fs.readFileSync('vss-extension.json','utf8'));if(process.env.GITHUB_OUTPUT){fs.appendFileSync(process.env.GITHUB_OUTPUT,'extension_id='+manifest.id+'\\n');fs.appendFileSync(process.env.GITHUB_OUTPUT,'publisher='+manifest.publisher+'\\n');}"
 
           npm exec --yes -- tfx-cli extension create --manifest-globs "$manifest_globs" --output-path .
 

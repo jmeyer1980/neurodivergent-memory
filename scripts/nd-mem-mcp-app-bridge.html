@@ -7,19 +7,26 @@
   <link rel="preconnect" href="https://api.fontshare.com">
   <link href="https://api.fontshare.com/v2/css?f[]=satoshi@300,400,500,700,900&f[]=clash-display@400,500,600,700&display=swap" rel="stylesheet">
   <style>
-    :root,[data-theme="light"]{--bg:#f7f6f2;--surface:#f9f8f5;--surface2:#fbfbf9;--offset:#f3f0ec;--border:#d4d1ca;--text:#28251d;--muted:#7a7974;--faint:#bab9b4;--primary:#01696f;--primaryHi:#cedcd8;--radius:18px;--shadow:0 18px 40px rgba(0,0,0,.12);--font-display:'Clash Display','Inter',sans-serif;--font-body:'Satoshi','Inter',sans-serif}
-    [data-theme="dark"]{--bg:#111318;--surface:#1a1d22;--surface2:#20252d;--offset:#27303a;--border:#37404b;--text:#edf2f4;--muted:#a3b0b8;--faint:#6e7a84;--primary:#60d7d2;--primaryHi:rgba(96,215,210,.14);--shadow:0 22px 52px rgba(0,0,0,.32)}
-    *{box-sizing:border-box;margin:0;padding:0} body{font-family:var(--font-body);background:radial-gradient(circle at top left,rgba(96,215,210,.1),transparent 24%),linear-gradient(180deg,var(--bg),#0d0f13);color:var(--text);min-height:100vh} button,input,select,textarea{font:inherit;color:inherit} button{cursor:pointer} a{color:inherit}
-    .app{display:grid;grid-template-columns:300px 1fr 340px;min-height:100vh}.panel{background:rgba(18,22,28,.78);backdrop-filter:blur(20px);border-right:1px solid rgba(255,255,255,.05);min-height:0}.sidebar,.detail{display:flex;flex-direction:column}.main{display:grid;grid-template-rows:auto auto auto 1fr;min-width:0}
-    .header,.sub,.toolbar,.sidehead,.detailhead{padding:20px 24px;border-bottom:1px solid rgba(255,255,255,.05)} .header{display:flex;justify-content:space-between;gap:16px;align-items:flex-start}.brand h1{font-family:var(--font-display);font-size:2rem;letter-spacing:-.03em}.brand p,.sub p,.sidehead p,.detailhead p{color:var(--muted);line-height:1.55}.row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
-    .btn,.pill,input,select,textarea{border:1px solid rgba(255,255,255,.08);border-radius:999px;background:rgba(255,255,255,.04)} .btn{padding:12px 14px;min-height:44px}.btn.primary{background:linear-gradient(180deg,rgba(96,215,210,.24),rgba(96,215,210,.12));border-color:rgba(96,215,210,.28)} .btn:hover{transform:translateY(-1px)} input,select{padding:12px 14px;width:100%;border-radius:14px} textarea{padding:12px 14px;width:100%;border-radius:14px;min-height:120px}
-    .stats{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;padding:0 24px 20px}.stat{padding:16px;border-radius:22px;background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.06)} .stat label{display:block;font-size:.74rem;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin-bottom:6px}.stat strong{font-size:1.3rem}.stat span{display:block;margin-top:4px;color:var(--muted);font-size:.9rem}
-    .carousel-list,.detail-body{overflow:auto;padding:16px}.carousel{padding:16px;border-radius:22px;background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.06);margin-bottom:12px;text-align:left}.carousel.active{border-color:rgba(96,215,210,.34);background:linear-gradient(180deg,rgba(96,215,210,.12),rgba(255,255,255,.03))}.carousel h3{margin-bottom:6px}.chips,.tags{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}.chip{padding:7px 10px;border-radius:999px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08);font-size:.78rem;color:var(--muted)}
-    .ribbon{overflow:auto;padding:16px 24px 24px;display:grid;gap:16px}.deck{border-radius:26px;overflow:hidden;background:linear-gradient(180deg,rgba(255,255,255,.04),rgba(255,255,255,.02));border:1px solid rgba(255,255,255,.06);box-shadow:var(--shadow)} .deckhead{display:flex;justify-content:space-between;align-items:center;padding:16px 18px;border-bottom:1px solid rgba(255,255,255,.06)} .deckhead p{color:var(--muted);font-size:.84rem}
-    .track{display:grid;grid-auto-flow:column;grid-auto-columns:minmax(280px,350px);gap:14px;overflow-x:auto;padding:16px}.card{padding:16px;border-radius:24px;border:1px solid rgba(255,255,255,.08);background:linear-gradient(180deg,rgba(255,255,255,.08),rgba(255,255,255,.03)),radial-gradient(circle at top right,rgba(96,215,210,.18),transparent 38%),rgba(20,25,31,.9);text-align:left;display:flex;flex-direction:column;gap:10px;min-height:270px}.card:hover{border-color:rgba(96,215,210,.3)} .card .id{font-size:.74rem;text-transform:uppercase;letter-spacing:.08em;color:var(--faint)} .card h4{font-size:1rem;line-height:1.25}.card p{color:var(--muted);line-height:1.55}.meta{display:grid;grid-template-columns:repeat(2,1fr);gap:8px}.mini{padding:10px;border-radius:14px;background:rgba(255,255,255,.035);border:1px solid rgba(255,255,255,.05)} .mini label{display:block;font-size:.7rem;color:var(--faint);text-transform:uppercase;letter-spacing:.08em;margin-bottom:4px}.mini span{font-size:.84rem}
-    .detailsec{padding:16px;border-radius:22px;background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.06);margin-bottom:12px}.detailsec h3{margin-bottom:8px}.detailsec p,.detailsec li{color:var(--muted);line-height:1.6}.detailsec ul{list-style:none;display:grid;gap:6px}
-    .modalbg{position:fixed;inset:0;background:rgba(7,10,12,.64);backdrop-filter:blur(10px);display:none;align-items:center;justify-content:center;padding:16px}.modalbg.open{display:flex}.modal{width:min(760px,100%);max-height:88vh;overflow:auto;border-radius:28px;background:linear-gradient(180deg,rgba(27,30,35,.98),rgba(17,19,22,.98));border:1px solid rgba(255,255,255,.08);padding:22px;box-shadow:0 30px 80px rgba(0,0,0,.45)} .modal h2{font-family:var(--font-display);margin-bottom:6px}.modal p{color:var(--muted);margin-bottom:14px}.grid{display:grid;grid-template-columns:repeat(2,1fr);gap:12px}.field label{display:block;margin-bottom:6px;font-size:.74rem;color:var(--muted);text-transform:uppercase;letter-spacing:.08em}.span2{grid-column:span 2}.foot{display:flex;justify-content:space-between;gap:10px;align-items:center;margin-top:14px;padding-top:14px;border-top:1px solid rgba(255,255,255,.07)} .hint{color:var(--faint);font-size:.78rem;line-height:1.5}
-    .toast{position:fixed;right:16px;bottom:16px;display:none;max-width:360px;padding:14px 16px;border-radius:18px;background:rgba(16,20,24,.94);border:1px solid rgba(96,215,210,.24);box-shadow:var(--shadow)} .toast.show{display:block}.live{color:#90f6d8;font-size:.78rem}
+    /* Warm SEPIA rather than a white page — the old light theme read as glare.
+       Kept in step with the rolodex's palette so the two apps stay recognisably
+       one product; see the note there for the reasoning. */
+    :root,[data-theme="light"]{--bg:#ded4c2;--surface:#eae1cf;--surface2:#f0e8d9;--offset:#d5cab5;--border:#b8ab95;--text:#2b2419;--muted:#5d5446;--faint:#7d7362;--primary:#08574f;--primaryHi:#c2d4cf;--radius:18px;--shadow:0 18px 40px rgba(52,42,28,.16);--font-display:'Clash Display','Inter',sans-serif;--font-body:'Satoshi','Inter',sans-serif;--optionBg:#f6f1e6;--optionText:#2b2419;--bgEnd:#cfc2ab;--panel:rgba(234,225,207,.84);--wash:rgba(64,52,36,.055);--wash2:rgba(64,52,36,.075);--washStrong:rgba(64,52,36,.11);--line:rgba(64,52,36,.15);--lineSoft:rgba(64,52,36,.11);--cardBg:rgba(240,232,217,.95);--modalA:rgba(240,233,219,.98);--modalB:rgba(228,219,202,.98);--toastBg:rgba(236,228,213,.96);--scrim:rgba(48,38,24,.5)}
+    [data-theme="dark"]{--bg:#111318;--surface:#1a1d22;--surface2:#20252d;--offset:#27303a;--border:#37404b;--text:#edf2f4;--muted:#a3b0b8;--faint:#6e7a84;--primary:#60d7d2;--primaryHi:rgba(96,215,210,.14);--shadow:0 22px 52px rgba(0,0,0,.32);--optionBg:#1b1f24;--optionText:#edf2f4;--bgEnd:#0d0f13;--panel:rgba(18,22,28,.78);--wash:rgba(255,255,255,.03);--wash2:rgba(255,255,255,.04);--washStrong:rgba(255,255,255,.08);--line:rgba(255,255,255,.06);--lineSoft:rgba(255,255,255,.05);--cardBg:rgba(20,25,31,.9);--modalA:rgba(27,30,35,.98);--modalB:rgba(17,19,22,.98);--toastBg:rgba(16,20,24,.94);--scrim:rgba(7,10,12,.64)}
+    *{box-sizing:border-box;margin:0;padding:0} body{font-family:var(--font-body);background:radial-gradient(circle at top left,rgba(96,215,210,.1),transparent 24%),linear-gradient(180deg,var(--bg),var(--bgEnd));color:var(--text);min-height:100vh} button,input,select,textarea{font:inherit;color:inherit} button{cursor:pointer} a{color:inherit}
+    /* The native <option> list is drawn by the OS on its OWN background, usually
+       white, so `color:inherit` above left every option nearly invisible until
+       hovered — the exact complaint. Options need their own explicit pair. */
+    select option{background-color:var(--optionBg);color:var(--optionText)}
+    .app{display:grid;grid-template-columns:300px 1fr 340px;min-height:100vh}.panel{background:var(--panel);backdrop-filter:blur(20px);border-right:1px solid var(--lineSoft);min-height:0}.sidebar,.detail{display:flex;flex-direction:column}.main{display:grid;grid-template-rows:auto auto auto 1fr;min-width:0}
+    .header,.sub,.toolbar,.sidehead,.detailhead{padding:20px 24px;border-bottom:1px solid var(--lineSoft)} .header{display:flex;justify-content:space-between;gap:16px;align-items:flex-start}.brand h1{font-family:var(--font-display);font-size:2rem;letter-spacing:-.03em}.brand p,.sub p,.sidehead p,.detailhead p{color:var(--muted);line-height:1.55}.row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+    .btn,.pill,input,select,textarea{border:1px solid var(--washStrong);border-radius:999px;background:var(--wash2)} .btn{padding:12px 14px;min-height:44px}.btn.primary{background:linear-gradient(180deg,rgba(96,215,210,.24),rgba(96,215,210,.12));border-color:rgba(96,215,210,.28)} .btn:hover{transform:translateY(-1px)} input,select{padding:12px 14px;width:100%;border-radius:14px} textarea{padding:12px 14px;width:100%;border-radius:14px;min-height:120px}
+    .stats{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;padding:0 24px 20px}.stat{padding:16px;border-radius:22px;background:var(--wash);border:1px solid var(--line)} .stat label{display:block;font-size:.74rem;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin-bottom:6px}.stat strong{font-size:1.3rem}.stat span{display:block;margin-top:4px;color:var(--muted);font-size:.9rem}
+    .carousel-list,.detail-body{overflow:auto;padding:16px}.carousel{padding:16px;border-radius:22px;background:var(--wash);border:1px solid var(--line);margin-bottom:12px;text-align:left}.carousel.active{border-color:rgba(96,215,210,.34);background:linear-gradient(180deg,rgba(96,215,210,.12),var(--wash))}.carousel h3{margin-bottom:6px}.chips,.tags{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}.chip{padding:7px 10px;border-radius:999px;background:var(--wash2);border:1px solid var(--washStrong);font-size:.78rem;color:var(--muted)}
+    .ribbon{overflow:auto;padding:16px 24px 24px;display:grid;gap:16px}.deck{border-radius:26px;overflow:hidden;background:linear-gradient(180deg,var(--wash2),var(--wash));border:1px solid var(--line);box-shadow:var(--shadow)} .deckhead{display:flex;justify-content:space-between;align-items:center;padding:16px 18px;border-bottom:1px solid var(--line)} .deckhead p{color:var(--muted);font-size:.84rem}
+    .track{display:grid;grid-auto-flow:column;grid-auto-columns:minmax(280px,350px);gap:14px;overflow-x:auto;padding:16px}.card{padding:16px;border-radius:24px;border:1px solid var(--washStrong);background:linear-gradient(180deg,var(--washStrong),var(--wash)),radial-gradient(circle at top right,rgba(96,215,210,.18),transparent 38%),var(--cardBg);text-align:left;display:flex;flex-direction:column;gap:10px;min-height:270px}.card:hover{border-color:rgba(96,215,210,.3)} .card .id{font-size:.74rem;text-transform:uppercase;letter-spacing:.08em;color:var(--faint)} .card h4{font-size:1rem;line-height:1.25}.card p{color:var(--muted);line-height:1.55}.meta{display:grid;grid-template-columns:repeat(2,1fr);gap:8px}.mini{padding:10px;border-radius:14px;background:var(--wash);border:1px solid var(--lineSoft)} .mini label{display:block;font-size:.7rem;color:var(--faint);text-transform:uppercase;letter-spacing:.08em;margin-bottom:4px}.mini span{font-size:.84rem}
+    .detailsec{padding:16px;border-radius:22px;background:var(--wash);border:1px solid var(--line);margin-bottom:12px}.detailsec h3{margin-bottom:8px}.detailsec p,.detailsec li{color:var(--muted);line-height:1.6}.detailsec ul{list-style:none;display:grid;gap:6px}
+    .modalbg{position:fixed;inset:0;background:var(--scrim);backdrop-filter:blur(10px);display:none;align-items:center;justify-content:center;padding:16px}.modalbg.open{display:flex}.modal{width:min(760px,100%);max-height:88vh;overflow:auto;border-radius:28px;background:linear-gradient(180deg,var(--modalA),var(--modalB));border:1px solid var(--washStrong);padding:22px;box-shadow:0 30px 80px rgba(0,0,0,.45)} .modal h2{font-family:var(--font-display);margin-bottom:6px}.modal p{color:var(--muted);margin-bottom:14px}.grid{display:grid;grid-template-columns:repeat(2,1fr);gap:12px}.field label{display:block;margin-bottom:6px;font-size:.74rem;color:var(--muted);text-transform:uppercase;letter-spacing:.08em}.span2{grid-column:span 2}.foot{display:flex;justify-content:space-between;gap:10px;align-items:center;margin-top:14px;padding-top:14px;border-top:1px solid var(--line)} .hint{color:var(--faint);font-size:.78rem;line-height:1.5}
+    .toast{position:fixed;right:16px;bottom:16px;display:none;max-width:360px;padding:14px 16px;border-radius:18px;background:var(--toastBg);border:1px solid rgba(96,215,210,.24);box-shadow:var(--shadow)} .toast.show{display:block}.live{color:#90f6d8;font-size:.78rem}
     @media (max-width:1180px){.app{grid-template-columns:1fr}.stats{grid-template-columns:repeat(2,1fr)}} @media (max-width:720px){.stats,.grid{grid-template-columns:1fr}.span2{grid-column:span 1}.track{grid-auto-columns:minmax(250px,88vw)}}
   </style>
 </head>
@@ -68,7 +75,10 @@
         <div class="field"><label>District</label><select id="districtInput"><option>logical_analysis</option><option>emotional_processing</option><option>practical_execution</option><option>creative_synthesis</option><option>vigilant_monitoring</option></select></div>
         <div class="field"><label>Project</label><select id="carouselInput"></select></div>
         <div class="field"><label>Visibility</label><select id="visibilityInput"><option>private</option><option>shared</option><option>global</option></select></div>
-        <div class="field"><label>Intensity</label><input id="intensityInput" type="number" min="0" max="10" value="5" /></div>
+        <!-- 0-1, matching the store's contract and this page's own edit modal.
+             This said min=0 max=10 value=5 and posted it raw, so every default
+             save stored an intensity of 5 into a 0-1 field. -->
+        <div class="field"><label>Intensity (0–1)</label><input id="intensityInput" type="number" min="0" max="1" step="0.1" value="0.5" /></div>
         <div class="field span2"><label>Content</label><textarea id="contentInput"></textarea></div>
         <div class="field span2"><label>Tags</label><input id="tagsInput" placeholder="topic:..., scope:concept, kind:insight, layer:research, persistence:durable" /></div>
       </div>
@@ -146,7 +156,7 @@
     function renderCarousels(){ els.carouselList.innerHTML = carousels().map(c=>`<button class="carousel ${c.id===state.activeCarousel?'active':''}" data-carousel="${esc(c.id)}"><h3>${esc(c.name)}</h3><p>${esc(c.description)}</p><div class="chips"><span class="chip">${esc(c.scope)}</span><span class="chip">${c.items.length} cards</span><span class="chip">${c.decks.filter(d=>d.items.length).length} districts</span></div></button>`).join(''); document.querySelectorAll('[data-carousel]').forEach(el=>el.onclick=()=>{ state.activeCarousel=el.dataset.carousel; state.deckFilter='all'; render(); }); }
     function renderDeckFilter(){ const c=activeCarousel(); const names = c ? c.decks.map(d=>d.name) : []; els.deckFilter.innerHTML = ['all', ...names].map(v=>`<option value="${esc(v)}">${v==='all'?'All districts':esc(v)}</option>`).join(''); els.deckFilter.value = state.deckFilter; }
     function renderRibbon(){ const decks=filteredDecks(); if(!decks.length){ els.ribbon.innerHTML = `<div class="deck"><div class="deckhead"><div><h3>No matching cards</h3><p>Change search, scope, or district filters.</p></div></div></div>`; return; } const cname = activeCarousel() ? activeCarousel().name : ''; els.ribbon.innerHTML = decks.map(deck=>`<section class="deck"><div class="deckhead"><div><h3>${esc(deck.name)}</h3><p>${deck.items.length} cards in ${esc(cname)}</p></div><div class="chips">${deck.items.slice(0,4).map((_,i)=>`<span class="chip">${i===0?'active':'card'}</span>`).join('')}</div></div><div class="track">${deck.items.map(m=>`<button class="card" data-memory="${esc(m.id)}"><div class="id">${esc(m.id)}</div><h4>${esc(m.name)}</h4><p>${esc(m.content)}</p><div class="meta"><div class="mini"><label>District</label><span>${esc(m.district)}</span></div><div class="mini"><label>Archetype</label><span>${esc(m.archetype||'—')}</span></div><div class="mini"><label>Intensity</label><span>${esc(m.intensity??'—')}</span></div><div class="mini"><label>Connections</label><span>${(m.connections||[]).length}</span></div></div><div class="tags">${(m.tags||[]).slice(0,4).map(tag=>`<span class="chip">${esc(tag)}</span>`).join('')}</div></button>`).join('')}</div></section>`).join(''); document.querySelectorAll('[data-memory]').forEach(el=>el.onclick=()=>{ state.activeMemoryId=el.dataset.memory; renderDetail(); }); }
-    function renderDetail(){ const m = memories().find(x=>x.id===state.activeMemoryId) || memories()[0]; if(!m){ els.detailBody.innerHTML=''; return; } state.activeMemoryId=m.id; const related=(m.connections||[]).map(id=>state.snapshot.memories[id]).filter(Boolean); els.detailBody.innerHTML = `<div class="detailsec"><h3>${esc(m.name)}</h3><p>${esc(m.content)}</p><div class="tags">${[m.scope,m.carouselId,m.deck].map(v=>`<span class="chip">${esc(v)}</span>`).join('')}</div></div><div class="detailsec"><h3>Metadata</h3><ul><li>ID: ${esc(m.id)}</li><li>Project: ${esc(m.carouselId)}</li><li>District: ${esc(m.district)}</li><li>Archetype: ${esc(m.archetype||'—')}</li><li>Created: ${fmt(m.created)}</li><li>Last accessed: ${fmt(m.last_accessed || m.lastaccessed || m.created)}</li><li>Access count: ${m.access_count ?? m.accesscount ?? 0}</li></ul></div><div class="detailsec"><h3>Tags</h3><div class="tags">${(m.tags||[]).map(t=>`<span class="chip">${esc(t)}</span>`).join('')}</div></div><div class="detailsec"><h3>Connections</h3><ul>${related.length?related.map(r=>`<li>${esc(r.id)} — ${esc(r.name)}</li>`).join(''):'<li>No linked memories yet.</li>'}</ul></div><div class="detailsec"><h3>MCP write path</h3><ul><li>Browser app fetches snapshot from the local bridge.</li><li>The bridge polls ${esc(state.memoryPath) || 'your user memories.json'}.</li><li>New cards POST to /save and route to stdio MCP.</li><li>When memories.json changes, SSE triggers a UI refresh.</li></ul></div>`; }
+    function renderDetail(){ const m = memories().find(x=>x.id===state.activeMemoryId) || memories()[0]; if(!m){ els.detailBody.innerHTML=''; return; } state.activeMemoryId=m.id; const related=(m.connections||[]).map(id=>state.snapshot.memories[id]).filter(Boolean); els.detailBody.innerHTML = `<div class="detailsec"><h3>${esc(m.name)}</h3><p>${esc(m.content)}</p><div class="tags">${[m.scope,m.carouselId,m.deck].map(v=>`<span class="chip">${esc(v)}</span>`).join('')}</div></div><div class="detailsec"><h3>Metadata</h3><ul><li>ID: ${esc(m.id)}</li><li>Project: ${esc(m.carouselId)}</li><li>District: ${esc(m.district)}</li><li>Archetype: ${esc(m.archetype||'—')}</li><li>Created: ${fmt(m.created)}</li><li>Last accessed: ${fmt(m.last_accessed || m.lastaccessed || m.created)}</li><li>Access count: ${esc(m.access_count ?? m.accesscount ?? 0)}</li></ul></div><div class="detailsec"><h3>Tags</h3><div class="tags">${(m.tags||[]).map(t=>`<span class="chip">${esc(t)}</span>`).join('')}</div></div><div class="detailsec"><h3>Connections</h3><ul>${related.length?related.map(r=>`<li>${esc(r.id)} — ${esc(r.name)}</li>`).join(''):'<li>No linked memories yet.</li>'}</ul></div><div class="detailsec"><h3>MCP write path</h3><ul><li>Browser app fetches snapshot from the local bridge.</li><li>The bridge polls ${esc(state.memoryPath) || 'your user memories.json'}.</li><li>New cards POST to /save and route to stdio MCP.</li><li>When memories.json changes, SSE triggers a UI refresh.</li></ul></div>`; }
     function populateModalSelects(){ const projects = carousels().filter(c=>c.id!==UNASSIGNED).map(c=>c.id); els.carouselInput.innerHTML = projects.map(id=>`<option value="${esc(id)}">${esc(id)}</option>`).join(''); if(state.activeCarousel && state.activeCarousel!==UNASSIGNED) els.carouselInput.value = state.activeCarousel; }
     function render(){ renderCarousels(); renderDeckFilter(); renderStats(); renderRibbon(); renderDetail(); populateModalSelects(); els.memoryPathText.textContent = state.memoryPath || 'loading…'; els.bridgeState.textContent = state.bridgeState; els.pollState.textContent = state.pollMs ? `Polling ${state.pollMs}ms` : 'Bridge offline';
       const ac = activeCarousel(); els.renameProjectBtn.style.display = (ac && ac.id!==UNASSIGNED) ? '' : 'none'; }
@@ -204,12 +214,22 @@
         content: title + '. ' + content,
         district: $('#districtInput').value,
         visibility,
-        intensity: Number($('#intensityInput').value || 5),
+        // `value || 5` also meant a deliberate 0 became 5, since '0' is falsy.
+        // Read it, then fall back only when the field is genuinely empty.
+        intensity: intensityFrom('#intensityInput', 0.5),
         projectId,
         tags
       };
-      const res = await fetch(`${BRIDGE}/save`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
-      const data = await res.json();
+      let res, data;
+      try {
+        res = await fetch(`${BRIDGE}/save`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
+        data = await res.json();
+      } catch (err) {
+        // Without this the rejection escaped an async onclick: no toast, modal
+        // still open, and the user believing the card was saved.
+        showToast('Could not reach the MCP bridge — the card was not saved.');
+        return;
+      }
       if(!res.ok || !data.ok){ showToast('Save failed through MCP bridge.'); return; }
       state.bridgeState = 'Save routed to MCP. Waiting for file change refresh…';
       render();
@@ -217,11 +237,25 @@
       showToast('Save sent to MCP bridge.');
     }
 
+    /** A number field's value, or the fallback when it is genuinely empty. Never coerces '' to 0. */
+    function intensityFrom(selector, fallback){
+      const raw = $(selector).value.trim();
+      if (raw === '') return fallback;
+      const n = Number(raw);
+      return Number.isFinite(n) ? n : fallback;
+    }
+
     function openEditModal(m){
       if(!m){ showToast('Select a card first.'); return; }
       state.editingId = m.id;
       $('#editContent').value = m.content || '';
       $('#editDistrict').value = m.district || 'practical_execution';
+      // Remember what the select was SEEDED with, not m.district. A memory with
+      // no district is displayed as practical_execution, and posting that value
+      // back unchanged silently refiled it -- so any edit to a district-less
+      // memory (fixing a typo in the content) permanently recategorised it.
+      // Only a real change differs from this.
+      state.editingDistrict = $('#editDistrict').value;
       $('#editProject').value = (m.project_id ?? '');
       $('#editVisibility').value = m.visibility || 'private';
       $('#editIntensity').value = (m.intensity ?? 0.5);
@@ -238,18 +272,41 @@
       if(!content){ showToast('Content cannot be empty.'); return; }
       const project = $('#editProject').value.trim();
       const epistemic = $('#editEpistemic').value;
+      const district = $('#editDistrict').value;
+      const rawIntensity = $('#editIntensity').value.trim();
       const body = {
         memoryId,
         content,
-        district: $('#editDistrict').value,
         visibility: $('#editVisibility').value,
-        intensity: Number($('#editIntensity').value),
         projectId: project === '' ? null : project,
         tags: $('#editTags').value.split(',').map(s=>s.trim()).filter(Boolean)
       };
+      // Send district only if the user actually changed it — see openEditModal.
+      if (district !== state.editingDistrict) body.district = district;
+      // Send intensity only if the field is non-empty: Number('') is 0, so
+      // clearing the field to mean "leave it alone" used to overwrite the
+      // stored value with 0.
+      // Validate rather than forward blindly. Number('abc') is NaN, which
+      // JSON.stringify turns into null and the daemon's schema rejects; an
+      // in-range check also catches a typed 5, which the min/max attributes do
+      // not block because this form is submitted by script, not by the browser.
+      if (rawIntensity !== '') {
+        const n = Number(rawIntensity);
+        if (!Number.isFinite(n) || n < 0 || n > 1) {
+          showToast('Intensity must be a number between 0 and 1.');
+          return;
+        }
+        body.intensity = n;
+      }
       if(epistemic) body.epistemicStatus = epistemic;
-      const res = await fetch(`${BRIDGE}/update`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
-      const data = await res.json();
+      let res, data;
+      try {
+        res = await fetch(`${BRIDGE}/update`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
+        data = await res.json();
+      } catch (err) {
+        showToast('Could not reach the MCP bridge — nothing was updated.');
+        return;
+      }
       if(!res.ok || !data.ok){ showToast('Update failed through MCP bridge.'); return; }
       state.bridgeState = 'Update routed to MCP. Waiting for file change refresh…';
       render();
@@ -277,7 +334,21 @@
           moved++;
         }
         state.activeCarousel = target;
-        try { await loadSnapshot(); } catch { /* SSE will refresh; success toast still shows */ }
+        // Reloading immediately raced the daemon's flush: the writes are
+        // acknowledged over HTTP before memories.json is rewritten, so a
+        // snapshot fetched right away could still describe the OLD project and
+        // the view would sit on stale grouping until the bridge's next 1.5s
+        // poll happened to notice. Re-read until the rename is actually
+        // visible, bounded so a genuinely failed flush still falls through to
+        // the SSE refresh rather than hanging the modal.
+        const deadline = Date.now() + 3000;
+        while (Date.now() < deadline) {
+          try { await loadSnapshot(); } catch { break; /* SSE will refresh */ }
+          const landed = Object.values(state.snapshot?.memories || {})
+            .some(m => projectOf(m) === target);
+          if (landed) break;
+          await new Promise(r => setTimeout(r, 150));
+        }
         showToast(`Moved ${moved} card${moved===1?'':'s'} from ${source} to ${target}.`);
       } finally {
         setWriteButtonsDisabled(false);

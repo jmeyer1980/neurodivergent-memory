@@ -1435,7 +1435,34 @@ class NeurodivergentMemory {
     }, 100);
   }
 
+  /**
+   * A temp path unique to this write.
+   *
+   * Every writer used the single fixed `PERSISTENCE_FILE + ".tmp"`. Two
+   * processes writing the same store — two daemons on different
+   * NEURODIVERGENT_MEMORY_DAEMON_PORT values (the singleton is a per-PORT bind,
+   * so nothing stops that), or a standalone process beside a daemon — would
+   * then open the SAME temp path, interleave their bytes, and rename the
+   * mixture over the live snapshot. The next load hits the corrupt-snapshot
+   * catch, starts empty, and the following flush destroys the store: the
+   * mechanism of this project's overwrite incident.
+   *
+   * Unique names make concurrent flushes last-writer-wins-but-INTACT, which is
+   * survivable, instead of corrupting. sync-memories.ts already did this; the
+   * primary writers did not.
+   */
+  private tempSnapshotPath(): string {
+    const unique = `${process.pid}.${crypto.randomBytes(6).toString("hex")}`;
+    return `${PERSISTENCE_FILE}.${unique}.tmp`;
+  }
+
   private async saveToDiskAsync(): Promise<void> {
+    // Name the temp file BEFORE taking the lock. It needs nothing the lock
+    // protects, and computing it after acquire() put a statement between the
+    // acquire and the try/finally — so a throw there (crypto.randomBytes can
+    // fail if the entropy source does) would strand the lock and block every
+    // other writer until someone deleted the lock file by hand.
+    const tmp = this.tempSnapshotPath();
     // Acquire cross-process lock if coordination mode is enabled.
     await this.coordinationLock?.acquire();
     try {
@@ -1443,20 +1470,33 @@ class NeurodivergentMemory {
       const snapshot = this.createSnapshot();
       // Write to a temp file first, then rename for an atomic swap so a partial
       // write can never corrupt the live snapshot.
-      const tmp = PERSISTENCE_FILE + ".tmp";
       await fs.promises.writeFile(tmp, JSON.stringify(snapshot, null, 2), "utf-8");
       await fs.promises.rename(tmp, PERSISTENCE_FILE);
     } finally {
+      // A failed write must not strand its temp file: the names are unique now,
+      // so an abandoned one would accumulate rather than be reused.
+      await fs.promises.rm(tmp, { force: true }).catch(() => { /* already renamed */ });
       this.coordinationLock?.release();
     }
   }
 
   private saveToDiskSync(): void {
-    fs.mkdirSync(PERSISTENCE_DIR, { recursive: true });
-    const snapshot = this.createSnapshot();
-    const tmp = PERSISTENCE_FILE + ".tmp";
-    fs.writeFileSync(tmp, JSON.stringify(snapshot, null, 2), "utf-8");
-    fs.renameSync(tmp, PERSISTENCE_FILE);
+    // Startup WAL compaction. Takes the SAME lock as the async path: without
+    // it, two processes starting up together raced each other's snapshot write
+    // while filesystem-lock mode was on, defeating the lock in the one case it
+    // was added for.
+    // Named before the lock, for the reason given in saveToDiskAsync.
+    const tmp = this.tempSnapshotPath();
+    this.coordinationLock?.acquireSync();
+    try {
+      fs.mkdirSync(PERSISTENCE_DIR, { recursive: true });
+      const snapshot = this.createSnapshot();
+      fs.writeFileSync(tmp, JSON.stringify(snapshot, null, 2), "utf-8");
+      fs.renameSync(tmp, PERSISTENCE_FILE);
+    } finally {
+      try { fs.rmSync(tmp, { force: true }); } catch { /* already renamed */ }
+      this.coordinationLock?.release();
+    }
   }
 
   private createSnapshot(): MemorySnapshot {

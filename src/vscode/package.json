@@ -1,0 +1,4 @@
+{
+  "type": "commonjs",
+  "//": "The VS Code extension host require()s an extension's entry point, so this subtree must emit CommonJS. Under module:Node16 tsc picks the emit format per file from the nearest package.json, so this marker makes the ordinary `npm run build` emit require() here while the rest of src/ stays ESM under the root \"type\": \"module\". Without it the VSIX shipped an entry starting `import * as vscode from 'vscode'`, which threw \"Cannot use import statement outside a module\" at activation and killed every command."
+}

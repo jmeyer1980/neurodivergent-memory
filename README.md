@@ -738,7 +738,7 @@ Configuration (all optional):
 | Env var | Default | Purpose |
 |---|---|---|
 | `ND_MEM_BRIDGE_PORT` | `3737` | Port the web app/API is served on |
-| `ND_MEM_FILE` | auto-discovered | Memory snapshot file the bridge reads for its own `/health`/`/memories` responses |
+| `ND_MEM_FILE` | auto-discovered | Memory store the bridge serves. It governs reads *and* writes: a daemon the bridge starts inherits this path, and if a daemon started by another client is already serving a different store, `/save` and `/update` fail rather than writing where you are not looking |
 | `ND_MEM_POLL_MS` | `1500` | How often the bridge polls the snapshot file for external changes |
 
 ### Rolodex view
@@ -746,13 +746,48 @@ Configuration (all optional):
 `http://localhost:3737/rolodex` is an alternative, navigation-first UI: 3D
 rolodex carousels nested three deep. Spin through projects, dive into one to
 spin its districts, dive again to read memories card by card — the front card
-is the reader (scroll inside it to read, outside it to spin). Diving past the
-memories level wraps back to project selection; zooming out (right-click,
-Esc/Backspace, the ⤺ button, Ctrl+scroll-down, or pinch in) walks back through
-the exact views you came from, and bounces off the wall when you reach the
-first view of the session. Editing the front card routes through the same
-bridge `/update` endpoint as the classic app; creating memories and project
-rename/merge stay in the classic view.
+is the reader (scroll inside it to read, outside it to spin). Clicking a
+centered card dives at every level, memories included; wheel-inside-the-reader
+still scrolls its text, and a text-selection drag still suppresses its own
+click instead of triggering a dive. Diving past the memories level wraps back
+to project selection; zooming out (right-click, Esc/Backspace, the ⤺ button,
+Ctrl+scroll-down, or pinch in) walks back through the exact views you came
+from, and bounces off the wall when you reach the first view of the session.
+Editing the front card routes through the same bridge `/update` endpoint as
+the classic app; creating memories stays in the classic view.
+
+Navigation aids:
+
+- **Coordinate** — the top-left readout is `0^N > project > district > card`,
+  where `N` counts every dive you have made this session; the wrap from
+  memories back to projects counts as an ordinary dive too, so depth keeps
+  climbing rather than resetting. Every segment is clickable and jumps back
+  to that view in one animation; the leading `0^N` badge returns you to
+  where you started. A segment describing the view you are already in
+  renders disabled instead of offering a pointless jump.
+- **Exploration map** — a collapsible left rail draws the session as a tree
+  growing upward from the floor. Branches you abandoned are kept, dimmed;
+  the path you are on glows. Any node — live or abandoned — is a one-hop
+  jump. Its `Map` chip collapses the rail, and that choice is remembered
+  across reloads (`localStorage`); until you set a preference, the rail
+  starts collapsed on narrow screens (below roughly 760px wide) and open
+  otherwise, so it never sits on top of the drum on a phone or a portrait
+  tablet. The rail is width-capped and scrolls, keeping the newest column
+  in view.
+- **Small drums rotate on a wide, shallow arc** — a drum of four cards or
+  fewer spreads over a large-radius, shallow arc, so several cards read at
+  once; five or more keeps the plain rotating cylinder, which still wraps
+  past its ends. Selecting a card rotates the drum to bring it to
+  center — stopping at the ends rather than wrapping, since a fan has no
+  card past them — so the selected card is always flat, full width, and
+  centered on screen. On a screen too narrow for the whole arc, fewer
+  cards are in view at once, but rotating still reaches every one of
+  them; nothing is unreachable.
+- **Rename projects in place** — the front project card has a `Rename…`
+  button with the same merge and "did you mean" behavior as the classic
+  app; it imports the classic app's helpers rather than reimplementing
+  them, so the two UIs can never disagree. A rename rewrites the id across
+  the whole exploration map, so your trail survives it.
 
 ## Agent Workflow Setup
 

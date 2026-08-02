@@ -27,6 +27,33 @@ function resolveSessionIdleMs(): number {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_SESSION_IDLE_MS;
 }
 
+/**
+ * How long a daemon with NO sessions and NO traffic stays alive before exiting.
+ *
+ * Daemons are spawned detached and unref'd so they outlive the client that
+ * started them — deliberately, so the next client reuses one instead of paying
+ * a cold start. Nothing ever stopped them, though, and the port bind only makes
+ * ONE daemon a singleton per port. Every test that spawns a proxy on its own
+ * ephemeral port therefore left a daemon behind: killing the proxy child never
+ * touches the detached grandchild. Measured on the author's machine before this
+ * landed: 268 live daemons holding 1.4 GB, 139 of them from a single day's test
+ * runs, all on ephemeral ports with exactly one on the real 3838.
+ *
+ * Exiting when genuinely idle costs nothing — ensureDaemon respawns on the next
+ * request, which is the same cold start a first-ever client pays. Set to 0 to
+ * disable (a long-lived shared deployment might reasonably want that).
+ */
+const DEFAULT_DAEMON_IDLE_EXIT_MS = 30 * 60 * 1000;
+
+function resolveDaemonIdleExitMs(): number {
+  const raw = process.env.NEURODIVERGENT_MEMORY_DAEMON_IDLE_EXIT_MS;
+  if (raw === undefined) return DEFAULT_DAEMON_IDLE_EXIT_MS;
+  const parsed = Number.parseInt(raw, 10);
+  // 0 (or junk) disables the exit rather than defaulting it back on: an
+  // operator who set it meant to change it.
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+}
+
 function readJsonBody(req: http.IncomingMessage): Promise<unknown> {
   return new Promise((resolve, reject) => {
     let data = "";
@@ -91,8 +118,25 @@ export function attachDaemonRoutes(httpServer: http.Server, options: DaemonRoute
   }, Math.min(idleMs, 60_000));
   sweepInterval.unref();
 
+  // Idle self-exit. See DEFAULT_DAEMON_IDLE_EXIT_MS: without this, every
+  // detached daemon lives until the machine reboots.
+  const idleExitMs = resolveDaemonIdleExitMs();
+  let lastRequestAt = Date.now();
+  if (idleExitMs > 0) {
+    const exitInterval = setInterval(() => {
+      // Sessions are the authority, not the clock: a client holding an open
+      // session is not idle however long it has been quiet, and the session
+      // sweep above already reaps sessions that genuinely went away.
+      if (sessions.size > 0) return;
+      if (Date.now() - lastRequestAt < idleExitMs) return;
+      process.exit(0);
+    }, Math.min(idleExitMs, 60_000));
+    exitInterval.unref();
+  }
+
   httpServer.removeAllListeners("request");
   httpServer.on("request", (req, res) => {
+    lastRequestAt = Date.now();
     void handleRequest(req, res);
   });
 
