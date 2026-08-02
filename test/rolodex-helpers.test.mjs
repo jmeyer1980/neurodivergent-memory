@@ -715,3 +715,17 @@ test('createDefaultsFor never inherits the unassigned sentinel as a real project
     { projectId: null, district: null },
   );
 });
+
+test('createDefaultsFor never inherits the uncategorized sentinel as a real district', () => {
+  // 'uncategorized' is a display bucket for memories with no district, not a
+  // district id -- storing it would create a literal district named after the
+  // placeholder. Just like UNASSIGNED, it should fall back to null.
+  assert.deepEqual(
+    createDefaultsFor({ level: 'memories', projectId: 'alpha', districtId: UNCATEGORIZED }, null),
+    { projectId: 'alpha', district: null },
+  );
+  assert.deepEqual(
+    createDefaultsFor({ level: 'districts', projectId: 'alpha', districtId: null }, { kind: 'district', id: UNCATEGORIZED }),
+    { projectId: 'alpha', district: null },
+  );
+});
