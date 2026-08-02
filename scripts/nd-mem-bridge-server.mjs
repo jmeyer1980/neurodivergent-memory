@@ -127,10 +127,48 @@ function warnOnMemoryPathMismatch(daemonMemoryPath, daemonPid) {
   );
 }
 
+/**
+ * The env a daemon WE spawn must inherit so it writes the store this bridge reads.
+ *
+ * ND_MEM_FILE moved only the bridge's read path: ensureDaemon was called with no
+ * env, so the daemon resolved persistence independently from
+ * NEURODIVERGENT_MEMORY_FILE/_DIR and happily wrote somewhere else. A bridge
+ * pointed at a scratch store therefore SERVED the scratch file while /save
+ * landed in the user's real ~/.neurodivergent-memory/memories.json — and
+ * answered ok:true, so the card just never appeared. The repo's own
+ * test/bridge-daemon.test.mjs has to set BOTH variables to keep them aligned,
+ * which is the trap stated out loud.
+ */
+function daemonEnv() {
+  if (!process.env.ND_MEM_FILE) return process.env;
+  return { ...process.env, NEURODIVERGENT_MEMORY_FILE: MEMORY_PATH };
+}
+
+/**
+ * Refuse to write through a daemon serving a different store.
+ *
+ * Passing daemonEnv() fixes the daemon WE start, but a daemon started earlier by
+ * another client may already own the port with a different memoryPath, and the
+ * port bind makes it the singleton. Writing anyway put data in a store the user
+ * is not looking at while reporting success; a warn-once line on stderr is
+ * invisible to a browser. Fail the request instead — a visible error beats a
+ * silent misfile.
+ */
+function assertMemoryPathMatch(daemonMemoryPath, daemonPid) {
+  if (!daemonMemoryPath) return;
+  if (normalizePathForComparison(daemonMemoryPath) === normalizePathForComparison(MEMORY_PATH)) return;
+  throw new Error(
+    `Refusing to write: the daemon on port ${DAEMON_PORT} (pid ${daemonPid}) is serving ${daemonMemoryPath}, `
+    + `but this bridge is reading ${MEMORY_PATH}. The write would land in a store you are not viewing. `
+    + 'Stop that daemon, or start the bridge against the same store.',
+  );
+}
+
 let rpcId = 1;
 async function runMcpTool(toolName, args) {
-  const health = await ensureDaemon({ port: DAEMON_PORT, entryPath: DAEMON_ENTRY, logFile: DAEMON_LOG });
+  const health = await ensureDaemon({ port: DAEMON_PORT, entryPath: DAEMON_ENTRY, logFile: DAEMON_LOG, env: daemonEnv() });
   warnOnMemoryPathMismatch(health.memoryPath, health.pid);
+  assertMemoryPathMatch(health.memoryPath, health.pid);
   const res = await fetch(`http://127.0.0.1:${DAEMON_PORT}/mcp`, {
     method: 'POST',
     headers: {

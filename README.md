@@ -738,7 +738,7 @@ Configuration (all optional):
 | Env var | Default | Purpose |
 |---|---|---|
 | `ND_MEM_BRIDGE_PORT` | `3737` | Port the web app/API is served on |
-| `ND_MEM_FILE` | auto-discovered | Memory snapshot file the bridge reads for its own `/health`/`/memories` responses |
+| `ND_MEM_FILE` | auto-discovered | Memory store the bridge serves. It governs reads *and* writes: a daemon the bridge starts inherits this path, and if a daemon started by another client is already serving a different store, `/save` and `/update` fail rather than writing where you are not looking |
 | `ND_MEM_POLL_MS` | `1500` | How often the bridge polls the snapshot file for external changes |
 
 ### Rolodex view
