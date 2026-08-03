@@ -9,6 +9,7 @@ import * as readline from 'readline';
 import { ensureDaemon } from '../build/core/ensure-daemon.js';
 import { resolveDaemonPort } from '../build/core/run-mode.js';
 import { parseSearchResults } from './nd-mem-rolodex-helpers.mjs';
+import { findPortOwners, describePortConflict, installLifecycle, resolvePort } from './nd-mem-bridge-lifecycle.mjs';
 
 // Resolved from this file's own location, not process.cwd() — the bridge must
 // find its assets the same way regardless of the directory it's launched from.
@@ -16,7 +17,16 @@ const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.join(SCRIPT_DIR, '..');
 
 const app = express();
-const PORT = Number(process.env.ND_MEM_BRIDGE_PORT || 3737);
+// Validated here rather than left to app.listen(), which throws
+// ERR_SOCKET_BAD_PORT complaining about "options.port" — not a thing anyone
+// set. Name the setting the user actually got wrong.
+let PORT;
+try {
+  PORT = resolvePort(process.env.ND_MEM_BRIDGE_PORT, 3737);
+} catch (error) {
+  console.error(`Bridge: FATAL — ${error.message}`);
+  process.exit(1);
+}
 const USER_HOME = os.homedir();
 const DEFAULT_MEMORY_PATH = path.join(USER_HOME, '.neurodivergent-memory', 'memories.json');
 const MEMORY_PATH = process.env.ND_MEM_FILE || DEFAULT_MEMORY_PATH;
@@ -85,7 +95,7 @@ function pollForChanges() {
   // sequential loop that easily lands two writes in one millisecond.
   broadcast('memory-change', { path: MEMORY_PATH, fingerprint, changedAt: new Date().toISOString() });
 }
-setInterval(pollForChanges, POLL_MS);
+const pollTimer = setInterval(pollForChanges, POLL_MS);
 
 app.get('/health', (_req, res) => res.json({ ok: true, port: PORT, memoryPath: MEMORY_PATH, pollMs: POLL_MS }));
 app.get('/memories', (_req, res) => { try { res.json(readSnapshot()); } catch (error) { res.status(500).json({ error: String(error), path: MEMORY_PATH }); } });
@@ -367,7 +377,54 @@ function maybeOpenBridgeUI() {
   });
 }
 
-app.listen(PORT, () => {
+// server.address(), NOT the callback, is the proof that we own the port.
+//
+// On Windows the listen callback fires even when the bind LOSES: node binds
+// dual-stack, the IPv6 bind fails, and EADDRINUSE arrives a tick after the
+// callback has already run. Measured against a real held 3737 on 2026-08-03 —
+// address() is null in the callback, yet the banner printed {"ok":true} and
+// maybeOpenBridgeUI() opened a browser onto the OLD bridge, quietly confirming
+// the wrong conclusion. Anything that announces success has to ask the socket.
+const server = app.listen(PORT, () => {
+  if (server.address() === null) return; // the 'error' handler below has this
   console.log(JSON.stringify({ ok: true, port: PORT, memoryPath: MEMORY_PATH, pollMs: POLL_MS }));
   maybeOpenBridgeUI();
 });
+
+// Without this, a bridge that loses the bind race stays alive forever, doing
+// nothing, looking healthy to `ps`. That is how a five-day-old bridge kept
+// serving a route set the user's page had already moved past, and why
+// restarting appeared not to help. Exit, and say who has the port.
+server.on('error', async (error) => {
+  // Nothing is listening, so the only thing keeping this process alive is the
+  // poll timer. Clearing it lets the process end on its own once stderr has
+  // drained, rather than process.exit() cutting the message off mid-write —
+  // on Windows a pipe write from console.error is asynchronous, and truncating
+  // the one message this whole issue exists to print would be a poor joke.
+  clearInterval(pollTimer);
+  process.exitCode = 1;
+  // Unconditional, not incidental: on the measured EADDRINUSE path address() is
+  // already null and there is no handle to release, but this handler fires for
+  // ANY listen error, and one that arrived with the handle still live would
+  // otherwise leave a process that reported failure and then ran forever. The
+  // callback keeps ERR_SERVER_NOT_RUNNING from surfacing as an 'error' event.
+  server.close(() => {});
+
+  if (error.code !== 'EADDRINUSE') {
+    console.error('Bridge: FATAL — listen failed:', error);
+    return;
+  }
+  try {
+    const owners = await findPortOwners(PORT);
+    console.error(describePortConflict(PORT, owners));
+  } catch (lookupError) {
+    // The report must survive a failure inside the reporting. Ownership is a
+    // nicety; "this port is taken and I am not running" is the message.
+    console.error(describePortConflict(PORT, []));
+    console.error('Bridge: (port owner lookup failed:', lookupError.message, ')');
+  }
+});
+
+// The daemon is deliberately NOT stopped here — it is shared, and outliving the
+// bridge is its job. See the note in nd-mem-bridge-lifecycle.mjs.
+installLifecycle({ server, timers: [pollTimer], clients });

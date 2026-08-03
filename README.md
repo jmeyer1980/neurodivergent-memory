@@ -717,7 +717,7 @@ For visually browsing, creating, editing, and reorganizing memories outside of a
 Start it (works from any directory once dependencies are installed):
 
 ```bash
-node scripts/nd-mem-bridge-server.mjs
+npm run bridge
 ```
 
 Then open **`http://localhost:3737/`** in a browser — or let the bridge open it for you:
@@ -732,6 +732,24 @@ With no flag, an interactive terminal asks `Open bridge UI at http://localhost:3
 > **Important:** Open the URL above, not the `.html` file directly. Loading `nd-mem-mcp-app-bridge.html` via `file://` (double-clicking it, or "Open File" in a browser) silently breaks the page's helper-module import — the page still loads, but project rename/merge fails with a misleading "helpers not loaded" error even though the bridge is running.
 
 The web app polls the memory snapshot for external changes and pushes live updates over server-sent events, and supports renaming a project across all its memories, merging into an existing project on a name collision, and a "did you mean" prompt for near-miss project names.
+
+Stop it with `Ctrl+C`, or from anywhere:
+
+```bash
+npm run bridge:stop
+```
+
+`bridge:stop` finds the process by **port ownership**, not by a pid you wrote
+down — the pid you remember is not necessarily the one holding the port. It
+refuses to kill a process that does not answer `/health` the way the bridge
+does (pass `--force` to override), and reports success when nothing is running.
+
+If the port is already taken, the bridge now **exits instead of starting**, and
+names the process holding it. It used to stay alive without listening, which
+looked healthy to every check while serving nothing — closing a terminal on
+Windows orphans the child rather than killing it, so a months-old bridge could
+still own port 3737 and answer `/health` from a version of the code that
+predates the routes your page is asking for.
 
 Configuration (all optional):
 
