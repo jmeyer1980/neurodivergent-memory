@@ -1094,15 +1094,53 @@ test('stepping during a search lands on hits, the short way round', async ({ pag
   // not slack: Playwright's headless WebKit throttles requestAnimationFrame hard
   // enough that a single one-card step measured ~9 seconds to converge, against
   // well under one on desktop Chromium.
-  const settleDrum = async () => {
-    await page.evaluate(() => { (window as any).__lastDrumTransform = null; });
-    await page.waitForFunction(() => {
+  //
+  // Issue #173. The old detector called the drum settled on the first pair of
+  // identical samples, starting from a cold reset — so BOTH could be read
+  // before the drum had moved at all, leaving the front card reading as
+  // unchanged and collapsing `advances` to [0, ...].
+  //
+  // Measured on this engine (probe, 2026-08-03): the immediate read always
+  // still shows the pre-click transform, and the next distinct one lands at
+  // ~316ms — against a 300ms poll. A SIXTEEN MILLISECOND margin decided
+  // whether the old code settled prematurely, which is why it failed ~1 run in
+  // 3 on the reporting machine and 0 in 17 here. Nothing about the test
+  // changed between those; the machine did.
+  //
+  // Two conditions are needed to call a step finished, and the old code
+  // checked neither: the drum must have MOVED off its pre-click transform, and
+  // it must then have STOPPED. Stillness cannot be a fixed number of samples —
+  // the same step measured 8.4s here and 33.8s in the report, so on a slow
+  // machine two adjacent 300ms polls land inside one rAF frame mid-ease and
+  // look identical. The bar is therefore calibrated from the run itself: the
+  // drum is settled once it has held still for comfortably longer than the
+  // largest gap between changes observed during THIS step.
+  //
+  // Deliberately requires movement, so a step that never moves times out
+  // rather than passing. That is correct here — every step in this spec is
+  // asserted to advance — and a loud timeout beats silently reading the card
+  // being left instead of the one arrived at.
+  const drumTransform = () => page.evaluate(
+    () => (document.querySelector('#drum') as HTMLElement).style.transform);
+
+  const settleDrum = async (before: string) => {
+    await page.evaluate(() => { (window as any).__drumSettle = null; });
+    await page.waitForFunction((pre) => {
       const t = (document.querySelector('#drum') as HTMLElement).style.transform;
       const w = window as any;
-      if (w.__lastDrumTransform === t) return true;
-      w.__lastDrumTransform = t;
-      return false;
-    }, null, { timeout: 20_000, polling: 300 });
+      const now = Date.now();
+      if (!w.__drumSettle) w.__drumSettle = { last: t, lastChangeAt: now, maxGap: 0, moved: t !== pre };
+      const s = w.__drumSettle;
+      if (t !== s.last) {
+        s.maxGap = Math.max(s.maxGap, now - s.lastChangeAt);
+        s.last = t;
+        s.lastChangeAt = now;
+        if (t !== pre) s.moved = true;
+        return false;
+      }
+      if (!s.moved) return false;
+      return now - s.lastChangeAt > Math.max(1000, s.maxGap * 2.5);
+    }, before, { timeout: 45_000, polling: 300 });
   };
 
   let prev = await read();
@@ -1114,8 +1152,9 @@ test('stepping during a search lands on hits, the short way round', async ({ pag
   // and every extra step costs the WebKit run another ~9 seconds.
   const advances: number[] = [];
   for (let step = 1; step <= 2; step++) {
+    const beforeTransform = await drumTransform();
     await page.locator('#spinNext').click();
-    await settleDrum();
+    await settleDrum(beforeTransform);
     const now = await read();
 
     expect(now.hit, `step ${step} should land on a match, not simply the next card along`).toBe(true);
