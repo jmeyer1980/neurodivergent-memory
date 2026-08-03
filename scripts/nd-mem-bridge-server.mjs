@@ -8,6 +8,7 @@ import { execFile } from 'child_process';
 import * as readline from 'readline';
 import { ensureDaemon } from '../build/core/ensure-daemon.js';
 import { resolveDaemonPort } from '../build/core/run-mode.js';
+import { parseSearchResults } from './nd-mem-rolodex-helpers.mjs';
 
 // Resolved from this file's own location, not process.cwd() — the bridge must
 // find its assets the same way regardless of the directory it's launched from.
@@ -88,6 +89,54 @@ setInterval(pollForChanges, POLL_MS);
 
 app.get('/health', (_req, res) => res.json({ ok: true, port: PORT, memoryPath: MEMORY_PATH, pollMs: POLL_MS }));
 app.get('/memories', (_req, res) => { try { res.json(readSnapshot()); } catch (error) { res.status(500).json({ error: String(error), path: MEMORY_PATH }); } });
+
+// READ ONLY. Ranks through the daemon so the UI sees exactly what an agent
+// would -- same BM25, same tie-breaks -- rather than a second, divergent
+// client-side filter. Only the id and score are parsed out of the tool's prose;
+// everything else the UI needs it already has in the snapshot.
+//
+// SEARCH_MEMORIES RETURNS THE WHOLE STORE. Its min_score defaults to 0, and
+// BM25 scores a document containing none of the query terms exactly 0 (every
+// term hits a `continue`, and the Robertson IDF variant it uses is always
+// positive, so a score is never negative). `0 >= 0` passes the threshold, and
+// there is no result cap anywhere in the tool -- so an unfiltered response ranks
+// the one real match first and then lists every other memory at 0.000. The
+// rolodex dims misses instead of filtering them, which meant EVERY card was lit
+// and search discriminated nothing. Dropping the zeroes is the whole feature.
+//
+// Filtered here rather than by passing a small epsilon as min_score: the tool's
+// schema documents `minimum: 0`, so an epsilon would be quietly outside the
+// contract, and this is the only place the reason can be written down. The one
+// cost is honest and tiny -- scores arrive through prose at three decimals, so a
+// genuine match normalising below 0.0005 of the top hit reads as 0.000 and is
+// dropped with the non-matches. That takes a single very common query term plus
+// an extreme document-length spread, and a card missing from the lit set is a
+// far smaller failure than every card being in it.
+app.get('/search', async (req, res) => {
+  const query = String(req.query.q ?? '').trim();
+  if (!query) { res.json({ ok: true, query: '', total: 0, hits: [] }); return; }
+  try {
+    const args = { query };
+    if (req.query.district) args.district = String(req.query.district);
+    if (req.query.project_id) args.project_id = String(req.query.project_id);
+    // Number('abc') is NaN, which serialises to null and reaches the tool as a
+    // malformed argument; an unparseable threshold means "no threshold given".
+    if (req.query.min_score !== undefined && req.query.min_score !== '') {
+      const minScore = Number(req.query.min_score);
+      if (Number.isFinite(minScore)) args.min_score = minScore;
+    }
+    if (req.query.tags) args.tags = String(req.query.tags).split(',').map(s => s.trim()).filter(Boolean);
+
+    const { result } = await runMcpTool('search_memories', args);
+    const text = result?.result?.content?.map(c => c?.text).filter(Boolean).join('\n') ?? '';
+    // See the block comment above: score 0 means "matched none of the query
+    // terms", not "matched weakly". total counts what actually survives.
+    const hits = parseSearchResults(text).filter(h => h.score > 0);
+    res.json({ ok: true, query, total: hits.length, hits });
+  } catch (error) {
+    res.status(500).json({ ok: false, error: String(error), query });
+  }
+});
 app.get('/events', (req, res) => {
   res.writeHead(200, {
     'Content-Type': 'text/event-stream',

@@ -735,3 +735,399 @@ test('spinning to another card resets the flip to the front', async ({ page }) =
   expect(back!.readerShown, 'the re-selected card should show its text again').toBe(true);
   expect(back!.metaShown, "the re-selected card should not still show its earlier-opened meta pane").toBe(false);
 });
+
+// The rolodex could read, navigate, rename and edit -- but not create. The
+// classic app has had a New Card form all along.
+test('the + button opens a create modal pre-filled from where you are standing', async ({ page }) => {
+  test.slow();
+  // At the wall: nothing inherited.
+  await page.locator('#createBtn').click();
+  await expect(page.locator('#editModalBg')).toHaveClass(/open/);
+  expect(await page.locator('#editModalTitle').textContent()).toMatch(/new memory/i);
+  expect(await page.locator('#editProject').inputValue()).toBe('');
+  await page.locator('#editCancelBtn').click();
+
+  // At memories depth: project AND district inherited.
+  expect(await diveToMemories(page)).toBe('memories');
+  const where = await page.evaluate(() => {
+    const segs = [...document.querySelectorAll('#crumb .seg')];
+    return { project: (segs[1]?.getAttribute('title') ?? segs[1]?.textContent ?? '').trim(),
+             district: (segs[2]?.getAttribute('title') ?? segs[2]?.textContent ?? '').trim() };
+  });
+  await page.locator('#createBtn').click();
+  await expect(page.locator('#editModalBg')).toHaveClass(/open/);
+  expect(await page.locator('#editProject').inputValue()).toBe(where.project);
+  expect(await page.locator('#editDistrict').inputValue()).toBe(where.district);
+  await page.locator('#editCancelBtn').click();
+});
+
+// Creation in context: the pressed card supplies the defaults.
+test('long-pressing a district card creates with project and district pre-filled', async ({ page }) => {
+  test.slow();
+  // Dive once to reach districts.
+  const box = page.viewportSize()!;
+  await page.mouse.click(box.width / 2, box.height / 2);
+  await page.waitForTimeout(1700);
+  expect(await page.evaluate(() => (document.querySelector('#stage') as HTMLElement).dataset.level)).toBe('districts');
+
+  // settleLayout, not a flat wait: the neighbouring Rename test's own comment
+  // spells out why measuring a card's rect mid-rebuild is a trap -- the press
+  // lands where the card WAS. This test measures a rect too, so it needs the
+  // same guarantee.
+  await settleLayout(page);
+
+  // Capture WHICH card is being pressed in the same evaluate that measures it,
+  // so the assertions below can name it. A district card's <h2> is its id.
+  const front = await page.evaluate(() => {
+    const f = document.querySelector('#drum .card3d.front') as HTMLElement | null;
+    if (!f) return null;
+    const r = f.getBoundingClientRect();
+    const segs = [...document.querySelectorAll('#crumb .seg')];
+    return {
+      x: r.x + r.width / 2,
+      y: r.y + r.height / 2,
+      districtId: (f.querySelector('h2')?.textContent ?? '').trim(),
+      projectId: (segs[1]?.getAttribute('title') ?? segs[1]?.textContent ?? '').trim(),
+    };
+  });
+  expect(front, 'a front district card should exist to press').not.toBeNull();
+  expect(front!.districtId, 'the pressed card should name a district').not.toBe('');
+
+  await page.mouse.move(front!.x, front!.y);
+  await page.mouse.down();
+  await page.waitForTimeout(750); // past LONG_PRESS_MS
+  await page.mouse.up();
+  await page.waitForTimeout(300);
+
+  await expect(page.locator('#editModalBg')).toHaveClass(/open/);
+  // Assert the INHERITED values, not merely "not empty". `not.toBe('')` was
+  // satisfied by openCreateModal's own `|| 'practical_execution'` fallback, so
+  // it passed identically whether the pressed card's context was inherited or
+  // dropped on the floor -- and #editProject was never read at all, which is
+  // half of what the test's name promises.
+  expect(await page.locator('#editDistrict').inputValue(),
+    'the modal should inherit the district of the card that was pressed').toBe(front!.districtId);
+  expect(await page.locator('#editProject').inputValue(),
+    'the modal should inherit the project being stood in').toBe(front!.projectId);
+  // The press must not ALSO dive -- the click it would otherwise produce is
+  // suppressed, so we are still at districts.
+  expect(await page.evaluate(() => (document.querySelector('#stage') as HTMLElement).dataset.level)).toBe('districts');
+});
+
+// A slow, deliberate click on a real control is still an ordinary click -- the
+// long-press gesture must not steal it. Rename… lives on the project card
+// (the wall level), the one control that sits inside a create-eligible level.
+test("long-pressing a project card's Rename control opens rename, not create", async ({ page }) => {
+  test.slow();
+  // Already at the wall (projects level) on load. settleLayout first: the
+  // debounced buildDrum rebuild (see its own comment above) can still be
+  // in flight right after load, and measuring the button's rect mid-settle
+  // is exactly the trap that comment warns about -- the press would land
+  // on wherever the card was BEFORE the rebuild finished, not the button.
+  await settleLayout(page);
+  const renameBtn = await page.evaluate(() => {
+    const btn = document.querySelector('#drum .card3d.front [data-rename]') as HTMLElement | null;
+    if (!btn) return null;
+    const r = btn.getBoundingClientRect();
+    return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
+  });
+  expect(renameBtn, 'the front project card should have a Rename control to press').not.toBeNull();
+
+  await page.mouse.move(renameBtn!.x, renameBtn!.y);
+  await page.mouse.down();
+  await page.waitForTimeout(750); // past LONG_PRESS_MS
+  await page.mouse.up();
+  await page.waitForTimeout(300);
+
+  await expect(page.locator('#renameModalBg')).toHaveClass(/open/);
+  await expect(page.locator('#editModalBg')).not.toHaveClass(/open/);
+});
+
+// The gesture arms on the level read at pointerdown but resolves the pressed
+// card 500ms later, while a dive holds `transitioning` for ~1400ms and flips
+// state.view a third of the way through it. A press begun inside that window
+// armed at districts (where a long press means "create") and fired at memories
+// (where routeGesture forbids it), opening a create modal over a memory card.
+test('a long press begun during a dive does not create at the level it arrives in', async ({ page }) => {
+  test.slow();
+  const box = page.viewportSize()!;
+  await settleLayout(page);
+  await page.mouse.click(box.width / 2, box.height / 2); // wall -> districts
+  await page.waitForTimeout(1700);
+  expect(await page.evaluate(() => (document.querySelector('#stage') as HTMLElement).dataset.level)).toBe('districts');
+
+  await settleLayout(page);
+  await page.mouse.click(box.width / 2, box.height / 2); // districts -> memories, now in flight
+  await page.waitForTimeout(300); // inside the 200-700ms window, before state.view flips
+  await page.mouse.move(box.width / 2, box.height / 2);
+  await page.mouse.down();
+  await page.waitForTimeout(750); // past LONG_PRESS_MS, so it would fire after the flip
+  await page.mouse.up();
+  await page.waitForTimeout(1200); // let the rest of the dive land
+
+  expect(await page.evaluate(() => (document.querySelector('#stage') as HTMLElement).dataset.level),
+    'the dive should have completed normally').toBe('memories');
+  await expect(page.locator('#editModalBg'),
+    'a press armed mid-dive must not open a create modal in the level it lands in').not.toHaveClass(/open/);
+});
+
+// Search DIMS rather than filtering or reordering: a 3D ring's one advantage
+// over a list is that "my card was over there" stays true.
+test('search dims non-matches without moving a single card', async ({ page }) => {
+  test.slow();
+  expect(await diveToMemories(page)).toBe('memories');
+
+  const before = await page.evaluate(() => [...document.querySelectorAll('#drum .card3d')]
+    .map(c => { const r = c.getBoundingClientRect(); return { idx: (c as HTMLElement).dataset.idx, x: Math.round(r.x), y: Math.round(r.y) }; }));
+
+  // Query a word certain to appear in this store's own memories.
+  await page.locator('#searchInput').fill('memory');
+  await page.waitForTimeout(1200); // 250ms debounce + daemon round trip
+
+  const after = await page.evaluate(() => [...document.querySelectorAll('#drum .card3d')]
+    .map(c => { const r = c.getBoundingClientRect(); return { idx: (c as HTMLElement).dataset.idx, x: Math.round(r.x), y: Math.round(r.y) }; }));
+  expect(after, 'search must not move any card').toEqual(before);
+
+  const dimmed = await page.evaluate(() =>
+    document.querySelectorAll('#drum .card3d.search-dim').length);
+  const lit = await page.evaluate(() =>
+    document.querySelectorAll('#drum .card3d.search-hit').length);
+  expect(lit + dimmed, 'every rendered card should be classified once a search is active')
+    .toBe(after.length);
+  expect(lit, 'the query should match at least one memory in this store').toBeGreaterThan(0);
+  // THE assertion this test was missing. `lit + dimmed === total` and `lit > 0`
+  // are both satisfied by lit === total, dimmed === 0 -- which is exactly what
+  // shipped: search_memories returns the whole store at min_score 0, so every
+  // card was lit and a query dimmed nothing. Without this line the feature can
+  // be completely inert and the suite stays green.
+  expect(dimmed, 'a query that matches SOME memories must dim the rest — if nothing dims, search is inert')
+    .toBeGreaterThan(0);
+
+  // Clearing restores everything.
+  await page.locator('#searchInput').fill('');
+  await page.waitForTimeout(600);
+  expect(await page.evaluate(() => document.querySelectorAll('#drum .card3d.search-dim').length)).toBe(0);
+});
+
+// The same query means something at every depth: one call, held once,
+// re-interpreted one level deeper each time you dive.
+test('a search at the wall survives a dive and lights the districts inside', async ({ page }) => {
+  test.slow();
+  await page.locator('#searchInput').fill('memory');
+  await page.waitForTimeout(1200);
+  const wall = await page.evaluate(() => ({
+    lit: document.querySelectorAll('#drum .card3d.search-hit').length,
+    dim: document.querySelectorAll('#drum .card3d.search-dim').length,
+  }));
+  expect(wall.lit, 'at least one project should contain a match').toBeGreaterThan(0);
+  // Counted SEPARATELY from here down. The old version summed hits and dims,
+  // which passes just as happily when isLit returns the same answer for every
+  // card -- either all lit (what actually shipped) or all dim.
+  expect(wall.dim, 'some projects must contain no match at all — otherwise the query discriminates nothing')
+    .toBeGreaterThan(0);
+
+  // Dive into the centred card, which the search left in place.
+  const box = page.viewportSize()!;
+  await page.mouse.click(box.width / 2, box.height / 2);
+  await page.waitForTimeout(1700);
+
+  expect(await page.locator('#searchInput').inputValue(), 'the query must survive the dive').toBe('memory');
+  const inside = await page.evaluate(() => ({
+    lit: document.querySelectorAll('#drum .card3d.search-hit').length,
+    dim: document.querySelectorAll('#drum .card3d.search-dim').length,
+    rendered: document.querySelectorAll('#drum .card3d').length,
+  }));
+  // The named property: the SAME query, re-read one level deeper, lights the
+  // districts that contain the match. isLit's district branch returning false
+  // for everything fails here; summing the two classes did not.
+  expect(inside.lit, 'the districts holding the match should light without re-typing').toBeGreaterThan(0);
+  expect(inside.lit + inside.dim, 'every card at the deeper level should be classified').toBe(inside.rendered);
+  // Deliberately no `inside.dim > 0`: a project can honestly have a match in
+  // every one of its (typically four) districts, so an all-lit district ring is
+  // a legitimate answer. The dim assertion that guards against a degenerate
+  // "everything lights" belongs at the wall above, where twenty projects give it
+  // real margin.
+});
+
+// stepBy's search branch: while a query is active, stepping goes hit-to-hit
+// rather than one card at a time. It is the largest deviation in this feature
+// from the plan's prescribed code, and it shipped untested -- and inert, because
+// with every card lit nextLitIndex just returns from + 1 and the branch is
+// indistinguishable from ordinary stepping.
+//
+// Run at the WALL, deliberately. The two viewports do not dive into the same
+// bucket (diveToMemories clicks the viewport centre, and the stage is inset by
+// the chrome and hud, which are proportionally much taller on a phone), and on
+// mobile-safari it lands in a three-card bucket -- which stepBy renders as a
+// FAN, and the fan branch returns before the search branch is ever reached. The
+// twenty-project wall is a cylinder on both engines and needs no navigation.
+test('stepping during a search lands on hits, the short way round', async ({ page }) => {
+  test.slow();
+  await settleLayout(page);
+  // Few enough projects hold a "rolodex" memory that ordinary stepping would
+  // almost certainly land in the dark -- which is the whole point. 'memory'
+  // lights most of the wall and would let plain stepping pass by luck.
+  await page.locator('#searchInput').fill('rolodex');
+  await page.waitForTimeout(1500); // 250ms debounce + daemon round trip
+
+  const read = () => page.evaluate(() => {
+    const f = document.querySelector('#drum .card3d.front');
+    const m = /card (\d+) of (\d+)/.exec(document.querySelector('#position')?.textContent ?? '');
+    return {
+      card: m ? Number(m[1]) : NaN,
+      count: m ? Number(m[2]) : NaN,
+      rotation: Number(/rotateY\(([-\d.]+)deg\)/.exec((document.querySelector('#drum') as HTMLElement).style.transform)?.[1] ?? NaN),
+      hit: !!f?.classList.contains('search-hit'),
+      dim: !!f?.classList.contains('search-dim'),
+      lit: document.querySelectorAll('#drum .card3d.search-hit').length,
+      dark: document.querySelectorAll('#drum .card3d.search-dim').length,
+    };
+  });
+
+  // A step eases toward its goal a frame at a time, so read the drum only once
+  // its transform has stopped moving; a flat wait sampled mid-ease and reported
+  // the card being left rather than the one arrived at. The generous budget is
+  // not slack: Playwright's headless WebKit throttles requestAnimationFrame hard
+  // enough that a single one-card step measured ~9 seconds to converge, against
+  // well under one on desktop Chromium.
+  const settleDrum = async () => {
+    await page.evaluate(() => { (window as any).__lastDrumTransform = null; });
+    await page.waitForFunction(() => {
+      const t = (document.querySelector('#drum') as HTMLElement).style.transform;
+      const w = window as any;
+      if (w.__lastDrumTransform === t) return true;
+      w.__lastDrumTransform = t;
+      return false;
+    }, null, { timeout: 20_000, polling: 300 });
+  };
+
+  let prev = await read();
+  expect(prev.lit, 'the query should light at least one project').toBeGreaterThan(0);
+  expect(prev.dark, 'this test is only meaningful if the query leaves some cards dark').toBeGreaterThan(0);
+
+  // Two steps, not more: with only a couple of lit projects on the wall the
+  // second already proves both halves (a long skip, then the short hop back),
+  // and every extra step costs the WebKit run another ~9 seconds.
+  const advances: number[] = [];
+  for (let step = 1; step <= 2; step++) {
+    await page.locator('#spinNext').click();
+    await settleDrum();
+    const now = await read();
+
+    expect(now.hit, `step ${step} should land on a match, not simply the next card along`).toBe(true);
+    expect(now.dim, `step ${step} must not leave a dimmed card centred`).toBe(false);
+    // The deviation this branch exists for: the goal is computed relative to the
+    // CURRENT rotation via shortestDelta, so a drum that has accumulated real
+    // turns still takes the short way to a distant hit. Handing rotationForCard's
+    // absolute small-range angle straight to stepTarget would spin whole laps.
+    expect(Number.isFinite(now.rotation), 'the drum transform should carry a readable rotation').toBe(true);
+    expect(Math.abs(now.rotation - prev.rotation),
+      `step ${step} took the long way round the drum`).toBeLessThanOrEqual(180.5);
+
+    advances.push(((now.card - prev.card) % now.count + now.count) % now.count);
+    prev = now;
+  }
+
+  // The assertion ordinary stepping cannot satisfy: at least one of those steps
+  // moved by MORE than one card, i.e. it skipped over dark ones. Without it, a
+  // wall where the hits happen to sit next to each other would pass on hits
+  // alone.
+  expect(advances.some(d => d > 1),
+    `every step advanced by exactly one card (${advances.join(', ')}) — stepping did not skip the dark cards`).toBe(true);
+});
+
+// window's contextmenu handler predates the search box and only exempted
+// modal text fields from its "right-click zooms out" behaviour -- #searchInput
+// is a text field that lives outside any modal, so a right-click (or an iOS
+// long-press) on it must keep the native menu instead of navigating away
+// mid-query.
+test('right-clicking the search input does not navigate the drum', async ({ page }) => {
+  test.slow();
+  expect(await diveToMemories(page)).toBe('memories');
+  await page.locator('#searchInput').fill('memory');
+  await page.waitForTimeout(1200);
+
+  await page.locator('#searchInput').click({ button: 'right' });
+  await page.waitForTimeout(1700); // zoomOut's transitionTo takes two ~700ms halves if it fires
+
+  expect(await page.evaluate(() => (document.querySelector('#stage') as HTMLElement).dataset.level),
+    'a right-click in the search box must not zoom the drum out').toBe('memories');
+  expect(await page.locator('#searchInput').inputValue(), 'the query must survive a right-click').toBe('memory');
+});
+
+// A failed search and a search that matched nothing both arrive as an empty hit
+// set and both render as "everything dimmed". Without a check on the response,
+// a dead daemon or a store the bridge refuses to serve looked exactly like an
+// honest miss -- silently, and with the coordinate still hidden behind the query.
+test('a failing search says so instead of looking like no matches', async ({ page }) => {
+  test.slow();
+  // Shaped like the route's real failure: HTTP 500 carrying ok:false, which is
+  // why res.ok alone would not have caught it.
+  await page.route('**/search?*', (route) => route.fulfill({
+    status: 500,
+    contentType: 'application/json',
+    body: JSON.stringify({ ok: false, error: 'daemon unreachable', query: 'memory' }),
+  }));
+
+  await page.locator('#searchInput').fill('memory');
+  await page.waitForTimeout(1200); // 250ms debounce + the round trip
+
+  await expect(page.locator('#toast')).toHaveClass(/show/);
+  expect(await page.locator('#toast').textContent()).toMatch(/search failed/i);
+  // And it must not silently classify the drum off an empty result set.
+  expect(await page.evaluate(() => document.querySelectorAll('#drum .card3d.search-dim').length),
+    'a failed search must not dim the whole drum as though nothing matched').toBe(0);
+});
+
+// A bridge process is long-lived; the page is served fresh from disk on every
+// request. A bridge that was started before /search landed answers with
+// Express's own default 404 -- an HTML page, not our {ok, hits} contract --
+// which is a *reachable*, stale bridge, not an unreachable one. Mirrors
+// Express's real default body so the regression this pins is the one that
+// actually shipped, not a stand-in for it.
+//
+// The toast must not promise that restarting fixes it, either: a bridge that
+// fails to bind its port can linger alive instead of exiting, so a user who
+// restarts still has the same stale process answering on the port -- a real
+// field case, not a hypothetical. Point at the bridge being out of date, not
+// at an action that may not work.
+test('a stale bridge (404 on /search) says so, not "could not reach"', async ({ page }) => {
+  test.slow();
+  await page.route('**/search?*', (route) => route.fulfill({
+    status: 404,
+    contentType: 'text/html; charset=utf-8',
+    body: '<!DOCTYPE html>\n<html lang="en">\n<head><title>Error</title></head>\n<body><pre>Cannot GET /search</pre></body></html>',
+  }));
+
+  await page.locator('#searchInput').fill('memory');
+  await page.waitForTimeout(1200); // 250ms debounce + the round trip
+
+  await expect(page.locator('#toast')).toHaveClass(/show/);
+  const toastText = await page.locator('#toast').textContent();
+  expect(toastText, 'a stale bridge must name itself, not read as unreachable').not.toMatch(/could not reach/i);
+  expect(toastText, 'a 404 on /search means an old bridge process, not a dead one').toMatch(/bridge/i);
+  expect(toastText, 'a restart may not clear a bridge that lingered holding the port -- do not promise it fixes this')
+    .not.toMatch(/restart it/i);
+  expect(toastText, 'point at the bridge being out of date, since that survives a failed restart attempt')
+    .toMatch(/out of date/i);
+  // A stale-route response is not evidence the store stopped matching --
+  // the previous classification (none yet, here) must stand, not be wiped.
+  expect(await page.evaluate(() => document.querySelectorAll('#drum .card3d.search-dim').length),
+    'a stale-bridge 404 must not dim the whole drum as though nothing matched').toBe(0);
+});
+
+// The genuinely unreachable case -- nothing answered at all -- must keep its
+// own wording rather than being folded into the stale-bridge or generic
+// failure messages now that all three are told apart.
+test('a search with no bridge listening says it could not reach it', async ({ page }) => {
+  test.slow();
+  await page.route('**/search?*', (route) => route.abort('connectionrefused'));
+
+  await page.locator('#searchInput').fill('memory');
+  await page.waitForTimeout(1200); // 250ms debounce + the round trip
+
+  await expect(page.locator('#toast')).toHaveClass(/show/);
+  expect(await page.locator('#toast').textContent()).toMatch(/could not reach the bridge/i);
+  expect(await page.evaluate(() => document.querySelectorAll('#drum .card3d.search-dim').length),
+    'an unreachable bridge must not dim the whole drum as though nothing matched').toBe(0);
+});

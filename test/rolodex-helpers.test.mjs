@@ -10,8 +10,11 @@ import {
   LEVELS, nextLevel, createHistory, pushView, popView, atWall,
   itemIdsForView, reconcileView, reconcilePop,
   routeGesture, DRAG_AXIS_THRESHOLD_PX, classifyDragAxis, routeDragAxis,
+  createDefaultsFor, districtOptions,
   hintFor,
   truncateNodeLabel, MINIMAP_COL,
+  parseSearchResults,
+  isLit, nextLitIndex,
 } from '../scripts/nd-mem-rolodex-helpers.mjs';
 
 // Fixture: alpha has 3 memories in 2 districts, beta has 2 (one custom district),
@@ -665,4 +668,269 @@ test('layoutNavTree columns leave room for a truncated label', () => {
   // If the pitch ever drops back below that, labels from adjacent columns
   // collide and the map becomes less readable than the bare dots it replaced.
   assert.ok(MINIMAP_COL >= 67, `MINIMAP_COL is ${MINIMAP_COL}, too tight for a 10-char label`);
+});
+
+test('createDefaultsFor inherits nothing at the projects level', () => {
+  assert.deepEqual(
+    createDefaultsFor({ level: 'projects', projectId: null, districtId: null }, null),
+    { projectId: null, district: null },
+  );
+});
+
+test('createDefaultsFor inherits the project at the districts level', () => {
+  assert.deepEqual(
+    createDefaultsFor({ level: 'districts', projectId: 'alpha', districtId: null }, null),
+    { projectId: 'alpha', district: null },
+  );
+});
+
+test('createDefaultsFor inherits project and district at the memories level', () => {
+  assert.deepEqual(
+    createDefaultsFor({ level: 'memories', projectId: 'alpha', districtId: 'logical_analysis' }, null),
+    { projectId: 'alpha', district: 'logical_analysis' },
+  );
+});
+
+test('createDefaultsFor takes a long-pressed project card over the current view', () => {
+  assert.deepEqual(
+    createDefaultsFor({ level: 'projects', projectId: null, districtId: null }, { kind: 'project', id: 'beta' }),
+    { projectId: 'beta', district: null },
+  );
+});
+
+test('createDefaultsFor takes a long-pressed district card with its parent project', () => {
+  assert.deepEqual(
+    createDefaultsFor({ level: 'districts', projectId: 'alpha', districtId: null }, { kind: 'district', id: 'vigilant_monitoring' }),
+    { projectId: 'alpha', district: 'vigilant_monitoring' },
+  );
+});
+
+test('createDefaultsFor never inherits the unassigned sentinel as a real project', () => {
+  // '(no project)' is a display bucket, not a project id -- storing it would
+  // create a literal project named after the placeholder.
+  assert.deepEqual(
+    createDefaultsFor({ level: 'districts', projectId: UNASSIGNED, districtId: null }, null),
+    { projectId: null, district: null },
+  );
+  assert.deepEqual(
+    createDefaultsFor({ level: 'projects', projectId: null, districtId: null }, { kind: 'project', id: UNASSIGNED }),
+    { projectId: null, district: null },
+  );
+});
+
+test('createDefaultsFor never inherits the uncategorized sentinel as a real district', () => {
+  // 'uncategorized' is a display bucket for memories with no district, not a
+  // district id -- storing it would create a literal district named after the
+  // placeholder. Just like UNASSIGNED, it should fall back to null.
+  assert.deepEqual(
+    createDefaultsFor({ level: 'memories', projectId: 'alpha', districtId: UNCATEGORIZED }, null),
+    { projectId: 'alpha', district: null },
+  );
+  assert.deepEqual(
+    createDefaultsFor({ level: 'districts', projectId: 'alpha', districtId: null }, { kind: 'district', id: UNCATEGORIZED }),
+    { projectId: 'alpha', district: null },
+  );
+});
+
+test('districtOptions always contains the district the select is about to be set to', () => {
+  // The invariant: whatever createDefaultsFor (or a memory being edited) hands
+  // the modal, the <select> must have an <option> for it. Miss that and the
+  // browser reports selectedIndex -1 and renders the field BLANK -- which is
+  // what create mode did for every non-canonical district, and then posted the
+  // resulting empty string as the new memory's district.
+  assert.deepEqual(districtOptions('logical_analysis'), CANONICAL_DISTRICTS);
+  assert.deepEqual(districtOptions(null), CANONICAL_DISTRICTS);
+  assert.deepEqual(districtOptions(''), CANONICAL_DISTRICTS);
+  // 'weird_custom' is in the fixture snapshot precisely because register_district
+  // is a supported tool and deriveDistricts renders a card for it.
+  assert.deepEqual(districtOptions('weird_custom'), ['weird_custom', ...CANONICAL_DISTRICTS]);
+  assert.equal(districtOptions('weird_custom')[0], 'weird_custom', 'the stray district leads, as in the edit modal');
+  for (const d of ['weird_custom', 'progressiongraph_debug', ...CANONICAL_DISTRICTS]) {
+    assert.ok(districtOptions(d).includes(d), `a select built from districtOptions(${d}) could not hold ${d}`);
+  }
+  // Never mutates the shared canonical list.
+  districtOptions('weird_custom');
+  assert.deepEqual(CANONICAL_DISTRICTS,
+    ['logical_analysis', 'emotional_processing', 'practical_execution', 'vigilant_monitoring', 'creative_synthesis']);
+});
+
+test('routeGesture maps a long press to create, except on memory cards', () => {
+  // A memory card is a reading surface; there the gesture belongs to selection.
+  assert.equal(routeGesture('longPress', { level: 'projects', insideReader: false }), 'create');
+  assert.equal(routeGesture('longPress', { level: 'districts', insideReader: false }), 'create');
+  assert.equal(routeGesture('longPress', { level: 'memories', insideReader: false }), 'none');
+});
+
+const SEARCH_TEXT = [
+  '🔍 Found 2 memories (ranked by BM25 relevance):',
+  '• [0.873] memory_123 — Some title (scholar)',
+  '  first eighty characters of content…',
+  '• [0.412] memory_9 — Another title (merchant)',
+  '  more content here',
+].join('\n');
+
+test('parseSearchResults recovers id and score, in rank order', () => {
+  assert.deepEqual(parseSearchResults(SEARCH_TEXT), [
+    { id: 'memory_123', score: 0.873 },
+    { id: 'memory_9', score: 0.412 },
+  ]);
+});
+
+test('parseSearchResults returns nothing for a no-results response', () => {
+  assert.deepEqual(parseSearchResults('🔍 No memories found matching query: "zzz"'), []);
+});
+
+test('parseSearchResults ignores the did-you-mean suffix', () => {
+  const text = SEARCH_TEXT + '\nDid you mean project_id: alpha?';
+  assert.deepEqual(parseSearchResults(text).map(h => h.id), ['memory_123', 'memory_9']);
+});
+
+test('parseSearchResults ignores the partial-matches block, which also uses bullets', () => {
+  // Partial matches are formatted "• candidate (similarity=0.9, field=..., memories=memory_5, ...)".
+  // Those bullets carry no [score] prefix and must not be read as hits.
+  const text = SEARCH_TEXT +
+    '\n\nPartial matches:\n• alpah (similarity=0.833, field=project_id, memories=memory_5, projects=alpha)';
+  assert.deepEqual(parseSearchResults(text).map(h => h.id), ['memory_123', 'memory_9']);
+});
+
+test('parseSearchResults tolerates junk without throwing', () => {
+  assert.deepEqual(parseSearchResults(''), []);
+  assert.deepEqual(parseSearchResults(null), []);
+  assert.deepEqual(parseSearchResults('completely unrelated text'), []);
+});
+
+test('parseSearchResults preserves text order, not score order', () => {
+  // Hits appear in text order: 0.412, then 0.873. If the implementation
+  // silently added a score sort, this would become [0.873, 0.412]. The test
+  // must catch that. This guards against regressions that would silently
+  // discard the daemon's ranking work.
+  const textWithReversedScores = [
+    '🔍 Found 2 memories (ranked by BM25 relevance):',
+    '• [0.412] memory_9 — First hit by rank, lower score',
+    '  content snippet',
+    '• [0.873] memory_123 — Second hit by rank, higher score',
+    '  more content',
+  ].join('\n');
+  assert.deepEqual(parseSearchResults(textWithReversedScores), [
+    { id: 'memory_9', score: 0.412 },
+    { id: 'memory_123', score: 0.873 },
+  ]);
+});
+
+const WALL = { level: 'projects', projectId: null, districtId: null };
+const IN_ALPHA = { level: 'districts', projectId: 'alpha', districtId: null };
+
+test('isLit lights a memory whose own id matched', () => {
+  const hits = new Map([['mem_1', 0.9]]);
+  assert.equal(isLit({ id: 'mem_1', kind: 'memory' }, hits, SNAP, WALL), true);
+  assert.equal(isLit({ id: 'mem_2', kind: 'memory' }, hits, SNAP, WALL), false);
+});
+
+test('isLit lights a project containing a hit', () => {
+  // mem_1 is project alpha, district practical_execution (see SNAP).
+  const hits = new Map([['mem_1', 0.9]]);
+  assert.equal(isLit({ id: 'alpha', kind: 'project' }, hits, SNAP, WALL), true);
+  assert.equal(isLit({ id: 'beta', kind: 'project' }, hits, SNAP, WALL), false);
+});
+
+test('isLit scopes a district to the project you are standing in', () => {
+  // THE POINT OF THE view ARGUMENT. District names are shared across projects,
+  // not globally unique buckets: SNAP has practical_execution memories under
+  // alpha. Standing inside beta, alpha's hit must NOT light beta's
+  // same-named district card.
+  const hitInAlpha = new Map([['mem_1', 0.9]]);
+  assert.equal(
+    isLit({ id: 'practical_execution', kind: 'district' }, hitInAlpha, SNAP, IN_ALPHA), true);
+  assert.equal(
+    isLit({ id: 'practical_execution', kind: 'district' }, hitInAlpha, SNAP,
+      { level: 'districts', projectId: 'beta', districtId: null }), false);
+  assert.equal(
+    isLit({ id: 'vigilant_monitoring', kind: 'district' }, hitInAlpha, SNAP, IN_ALPHA), false);
+});
+
+test('isLit scopes correctly when standing in the UNASSIGNED (no-project) bucket', () => {
+  // Not one of the brief's verbatim tests -- added during self-review to pin
+  // down a case the brief explicitly flagged as worth checking: view.projectId
+  // can be the UNASSIGNED sentinel ('(no project)'), not just a real project
+  // id, when you have drilled into that display bucket's districts. mem_5 (see
+  // SNAP) has no project_id and no district, so projectOf/districtOf both
+  // normalize it to UNASSIGNED/UNCATEGORIZED -- the same normalization
+  // isLit's scope check relies on, which is why this is not a bug: comparing
+  // projectOf(m) to the UNASSIGNED sentinel works exactly like comparing it to
+  // a real project id.
+  const IN_UNASSIGNED = { level: 'districts', projectId: UNASSIGNED, districtId: null };
+  const hitOnUnassigned = new Map([['mem_5', 0.9]]);
+  assert.equal(
+    isLit({ id: UNCATEGORIZED, kind: 'district' }, hitOnUnassigned, SNAP, IN_UNASSIGNED), true);
+
+  // The assertion above cannot, by itself, prove the scope comparison runs at
+  // all: mem_5's project already normalizes to UNASSIGNED, so it passes
+  // whether or not the scope check exists. To actually exercise the scope
+  // comparison we need a memory whose district ALSO normalizes to
+  // UNCATEGORIZED but whose project is real and not UNASSIGNED -- SNAP has no
+  // such memory (every SNAP memory with an empty district also has an empty
+  // project_id), so building one here, locally, rather than editing the
+  // shared SNAP fixture that other tests depend on.
+  const withElsewhereUncategorized = {
+    ...SNAP,
+    memories: {
+      ...SNAP.memories,
+      // mem_7: real project ('beta', not alpha, not UNASSIGNED), no district
+      // -> districtOf normalizes it to UNCATEGORIZED. This is the one shape
+      // that can distinguish "scoped" from "unscoped": without the project
+      // check, this memory's UNCATEGORIZED district would incorrectly light
+      // the UNASSIGNED bucket's uncategorized card too.
+      mem_7: { id: 'mem_7', name: 'Beta loose', content: 'loose body', district: '', project_id: 'beta', tags: [], created: '2026-07-07T10:00:00Z' },
+    },
+  };
+  const hitElsewhere = new Map([['mem_7', 0.9]]);
+  assert.equal(
+    isLit({ id: UNCATEGORIZED, kind: 'district' }, hitElsewhere, withElsewhereUncategorized, IN_UNASSIGNED), false);
+});
+
+test('isLit lights nothing when there are no hits', () => {
+  const none = new Map();
+  assert.equal(isLit({ id: 'mem_1', kind: 'memory' }, none, SNAP, WALL), false);
+  assert.equal(isLit({ id: 'alpha', kind: 'project' }, none, SNAP, WALL), false);
+});
+
+test('nextLitIndex walks to the next lit card and wraps', () => {
+  const items = [
+    { id: 'mem_1', kind: 'memory' },
+    { id: 'mem_2', kind: 'memory' },
+    { id: 'mem_3', kind: 'memory' },
+  ];
+  const hits = new Map([['mem_3', 0.5]]);
+  assert.equal(nextLitIndex(items, hits, SNAP, WALL, 0, 1), 2);
+  // From the only lit card, forward wraps back to itself.
+  assert.equal(nextLitIndex(items, hits, SNAP, WALL, 2, 1), 2);
+  assert.equal(nextLitIndex(items, hits, SNAP, WALL, 0, -1), 2);
+});
+
+test('nextLitIndex falls back to ordinary stepping when nothing is lit', () => {
+  const items = [
+    { id: 'mem_1', kind: 'memory' },
+    { id: 'mem_2', kind: 'memory' },
+  ];
+  const none = new Map();
+  assert.equal(nextLitIndex(items, none, SNAP, WALL, 0, 1), 1);
+  assert.equal(nextLitIndex(items, none, SNAP, WALL, 1, 1), 0);
+  assert.equal(nextLitIndex(items, none, SNAP, WALL, 0, -1), 1);
+});
+
+test('nextLitIndex falls back to ordinary stepping when hits exist but none land in this drum', () => {
+  // Distinct code path from the test above: there hits.size === 0 takes the
+  // early return before the sweep ever starts. Here hits is non-empty, so the
+  // sweep runs a full lap checking every item, finds nothing lit (mem_99 isn't
+  // among these three cards at all), and only THEN falls through to the same
+  // plain-stepping answer. Without this, the loop-exhausted fallback line
+  // could be deleted or broken and no test would notice.
+  const items = [
+    { id: 'mem_1', kind: 'memory' },
+    { id: 'mem_2', kind: 'memory' },
+    { id: 'mem_3', kind: 'memory' },
+  ];
+  const hits = new Map([['mem_99', 0.9]]);
+  assert.equal(nextLitIndex(items, hits, SNAP, WALL, 0, 1), 1);
+  assert.equal(nextLitIndex(items, hits, SNAP, WALL, 0, -1), 2);
 });

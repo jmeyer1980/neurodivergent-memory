@@ -329,6 +329,11 @@ export function routeGesture(kind, ctx) {
     case 'clickOther': return 'centerThenDive';
     case 'arrowLeft': return 'stepPrev';
     case 'arrowRight': return 'stepNext';
+    // Long-press creates, carrying the pressed card's context. Not at the
+    // memories level: there the card is a reading surface and the press belongs
+    // to text selection. Right-click is unavailable -- `rightClick` above
+    // already means zoomOut -- so this is the only free gesture.
+    case 'longPress': return level === 'memories' ? 'none' : 'create';
     default: return 'none';
   }
 }
@@ -540,6 +545,49 @@ export function truncateNodeLabel(label, max = NODE_LABEL_MAX) {
   return `${s.slice(0, head)}…${tail ? s.slice(-tail) : ''}`;
 }
 
+// What a new memory inherits from where you are standing. The deeper you are,
+// the more context it takes -- which is exactly what the coordinate already
+// means. A long-pressed card outranks the current view, because pressing a
+// specific card is a more explicit statement of intent than standing near it.
+//
+// UNASSIGNED and UNCATEGORIZED are DISPLAY buckets for memories with no project
+// or district respectively, not real project/district ids. Inheriting them would
+// create literal entities named after the placeholders, which is wrong.
+export function createDefaultsFor(view, pressedCard = null) {
+  const realProject = (id) => (id && id !== UNASSIGNED ? String(id) : null);
+  const realDistrict = (id) => (id && id !== UNCATEGORIZED ? String(id) : null);
+
+  if (pressedCard && pressedCard.kind === 'project') {
+    return { projectId: realProject(pressedCard.id), district: null };
+  }
+  if (pressedCard && pressedCard.kind === 'district') {
+    return { projectId: realProject(view.projectId), district: realDistrict(pressedCard.id) };
+  }
+  if (view.level === 'memories') {
+    return { projectId: realProject(view.projectId), district: realDistrict(view.districtId) };
+  }
+  if (view.level === 'districts') {
+    return { projectId: realProject(view.projectId), district: null };
+  }
+  return { projectId: null, district: null };
+}
+
+// What the edit modal's district <select> should be populated with, so that
+// assigning `district` to it always finds an <option>.
+//
+// register_district is a supported tool and deriveDistricts renders a card for
+// whatever district the data actually contains, so a legacy or custom district
+// reaches the modal routinely -- and a <select> asked for a value it has no
+// option for silently goes to selectedIndex -1, i.e. renders BLANK. Edit mode
+// prepended the stray value; create mode did not, so long-pressing a custom
+// district card opened a modal with an empty District field and then posted
+// district: ''. One function now, because the defect was precisely that the
+// rule lived in one of the two places that needed it.
+export function districtOptions(district) {
+  if (!district || CANONICAL_DISTRICTS.includes(district)) return CANONICAL_DISTRICTS;
+  return [district, ...CANONICAL_DISTRICTS];
+}
+
 // Columns are deliberately much wider than a node (r=5, so 10px across): at 26px a
 // fork read as a jog in a trunk rather than a branch. Rows are tighter than columns
 // so a deep chain does not stretch the tree into a thread.
@@ -627,4 +675,75 @@ export const HINTS = {
 export function hintFor(level, pointerKind) {
   const table = HINTS[pointerKind] ?? HINTS.fine;
   return table[level] ?? table.default;
+}
+
+// search_memories answers in PROSE, for a reader:
+//   • [0.873] memory_123 — Some title (scholar)
+//     first eighty characters of content…
+// There is no structured search API and the BM25 index is private to
+// server-main.ts, so the bridge recovers the two tokens it cannot get locally --
+// the id and its score -- and hydrates everything else from the snapshot it
+// already reads. Deliberately anchored on the "[score] id" shape: the partial-
+// matches block below the results uses bullets too, but carries no score, so
+// requiring the bracket keeps those out.
+//
+// This regex is the whole fragile seam in the search feature. Its failure mode
+// is SILENT -- zero hits, not an error -- which is why a contract test runs the
+// real tool and asserts this still parses it.
+const SEARCH_HIT_RE = /^\s*[•*-]\s*\[(\d+(?:\.\d+)?)\]\s*(\S+)\s+—/;
+
+export function parseSearchResults(text) {
+  if (typeof text !== 'string' || text === '') return [];
+  const hits = [];
+  for (const line of text.split('\n')) {
+    const m = SEARCH_HIT_RE.exec(line);
+    if (!m) continue;
+    const score = Number(m[1]);
+    if (!Number.isFinite(score)) continue;
+    hits.push({ id: m[2], score });
+  }
+  return hits;
+}
+
+// ---------- search lighting ----------
+
+// One rule at every level: a card is lit if IT, or anything inside it, matched.
+// That is what turns a search into a drill-down -- query at the wall, see which
+// projects light, dive into a lit one, see which districts light -- instead of
+// needing a separate results view.
+export function isLit(item, hits, snapshot, view = {}) {
+  if (!hits || hits.size === 0 || !item) return false;
+  if (item.kind === 'memory') return hits.has(item.id);
+  const memories = Object.values(snapshot?.memories ?? {});
+  if (item.kind === 'project') {
+    return memories.some(m => hits.has(m.id) && projectOf(m) === item.id);
+  }
+  if (item.kind === 'district') {
+    // Scoped to the project being viewed. District names are shared across
+    // projects, not globally unique buckets -- without this, standing inside
+    // project beta would light its practical_execution card because something
+    // in ALPHA's practical_execution matched.
+    const scope = view.projectId;
+    return memories.some(m => hits.has(m.id)
+      && districtOf(m) === item.id
+      && (scope == null || projectOf(m) === scope));
+  }
+  return false;
+}
+
+// Stepping skips dark cards while a search is active, so a 364-memory bucket
+// stays fast. With nothing lit at this level, fall back to ordinary stepping
+// rather than refusing to move -- a search that matches nothing here must not
+// strand the drum.
+export function nextLitIndex(items, hits, snapshot, view, from, direction) {
+  const count = items.length;
+  if (!count) return from;
+  const step = direction >= 0 ? 1 : -1;
+  const plain = ((from + step) % count + count) % count;
+  if (!hits || hits.size === 0) return plain;
+  for (let i = 1; i <= count; i++) {
+    const idx = ((from + step * i) % count + count) % count;
+    if (isLit(items[idx], hits, snapshot, view)) return idx;
+  }
+  return plain;
 }

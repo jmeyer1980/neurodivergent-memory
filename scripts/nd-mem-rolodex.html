@@ -66,6 +66,35 @@
     #crumb .seg:disabled:hover{background:none}
     #crumb .sep{color:var(--faint);padding:0 1px}
     #position{flex:0 0 auto;font-size:.78rem;color:var(--muted);white-space:nowrap}
+    /* Shares the band's row, sized to match the surrounding pills. The
+       coordinate (#crumb) does NOT free any space when a query is active --
+       see #locus.searching below, which keeps its box on purpose -- so this
+       is purely "one more thing sharing the row", not "the row grows". */
+    #searchInput{flex:1 1 12rem;min-width:0;padding:4px 10px;border-radius:999px;
+      border:1px solid var(--surfaceBorder);background:var(--wash);color:var(--text);
+      font:inherit;font-size:.82rem;user-select:text}
+    #searchInput::placeholder{color:var(--faint)}
+    /* 16px, not the .82rem (~13px) above, on a coarse (touch) pointer only:
+       below 16px, iOS Safari zooms the visual viewport on focus, which would
+       visibly move every card -- the exact invariant this feature exists to
+       defend, and one Playwright's WebKit cannot reproduce (no CDP, so this
+       needed reasoning from the platform behaviour, not a failing test).
+       Scoped to touch rather than applied everywhere: a mouse pointer never
+       triggers that zoom, so the desktop band keeps its tighter, pill-matching
+       size instead of an oversized input nobody there needs. */
+    @media (pointer: coarse){
+      #searchInput{font-size:16px}
+    }
+    /* visibility, not display:none, when a query is active: #crumb wraps to
+       two lines at real coordinate depths on a narrow viewport (see the
+       #chrome comment above), so REMOVING it from flow would shrink #locus,
+       which would shrink the measured --chromeH #stage insets by, moving
+       every card up the instant a query starts -- caught by the "search must
+       not move a single card" test on mobile-safari at the memories depth.
+       Keeping its box (just painted transparent) holds #chrome's height
+       steady either way; nothing here frees up room for #searchInput, which
+       is sized independently above. */
+    #locus.searching #crumb{visibility:hidden}
     /* Inset below the chrome rather than sitting under it. #chrome is fixed, so
        for as long as #stage started at the viewport top the bar simply COVERED
        the card — harmless while the coordinate was one ellipsised pill, and not
@@ -105,6 +134,15 @@
     #stage[data-level="memories"]{--cardH:min(500px, 88%)}
     .card3d{position:absolute;inset:0;display:flex;flex-direction:column;gap:10px;padding:18px;border-radius:24px;border:1px solid var(--surfaceBorder);background:var(--cardWash),radial-gradient(circle at top right,rgba(var(--tint),.16),transparent 38%),var(--cardBase);box-shadow:0 18px 40px rgba(0,0,0,.35);backface-visibility:hidden;transition:opacity .3s,box-shadow .3s,border-color .3s,transform .25s ease;opacity:.55}
     .card3d.front{opacity:1;border-color:rgba(var(--tint),.4);box-shadow:0 24px 60px rgba(0,0,0,.5),0 0 30px rgba(var(--tint),.12)}
+    /* Dim the misses; light the hits. Composes with the existing card states
+       rather than replacing them -- .flipped and the ::after affordance below
+       are untouched. Declared AFTER .card3d.front on purpose: equal
+       specificity (two classes each) means source order decides, and the
+       front card's own opacity/border-color rule above would otherwise always
+       win, silently hiding the classification on exactly the one card being
+       looked at. */
+    .card3d.search-dim{opacity:.25}
+    .card3d.search-hit{border-color:var(--primary)}
     /* A sign, not a control. Chromium cannot hit-test a 3D-rotated card —
        pointer events AND elementFromPoint both return #scene — which is why
        every real button lives on .card3d.front only. A pseudo-element adds no
@@ -128,7 +166,19 @@
       background:var(--wash);font-size:.72rem;line-height:1.3;letter-spacing:.02em;
       color:var(--muted);pointer-events:none}
     .card3d{cursor:pointer}
-    @media (hover:hover){.card3d:not(.front):hover{opacity:.75}}
+    /* iOS shows a selection callout on a long press. The gesture means "create"
+       on project and district cards, so suppress it there -- but NEVER on
+       .reader-scroll, whose user-select:text is deliberate and is how a memory
+       is read and copied. */
+    #stage:not([data-level="memories"]) .card3d{-webkit-touch-callout:none}
+    /* :not(.search-dim) rather than a specificity fight. This rule is two
+       classes plus a pseudo-class and would beat .card3d.search-dim outright,
+       so hovering a miss used to un-dim it -- and hovering is exactly what a
+       mouse does while scanning the ring for the lit cards, which made the
+       answer disappear at the moment it was being read. Search dims; hover
+       feedback keeps every card the query did not already answer "no" for, and
+       a dimmed card is still cursor:pointer and still clickable. */
+    @media (hover:hover){.card3d:not(.front):not(.search-dim):hover{opacity:.75}}
     .card3d .kicker{font-size:.7rem;text-transform:uppercase;letter-spacing:.1em;color:var(--faint)}
     .card3d h2{font-family:var(--font-display);font-size:1.15rem;line-height:1.2}
     .card3d p{color:var(--muted);line-height:1.5;font-size:.9rem;overflow:hidden}
@@ -350,11 +400,12 @@
     </div>
     <div class="cluster">
       <span class="pill" id="connState">Connecting…</span>
+      <button class="pill" id="createBtn" title="New memory" aria-label="New memory">+</button>
       <button class="pill" id="helpBtn" title="What is this?" aria-label="What is this?">?</button>
       <button class="pill" id="themeBtn" title="Toggle theme">◐</button>
       <a class="pill" href="/">Classic view</a>
     </div>
-    <div id="locus"><span id="crumb"></span><span id="position">—</span></div>
+    <div id="locus"><input id="searchInput" type="search" aria-label="Search memories" placeholder="Search memories…" autocomplete="off" spellcheck="false" /><span id="crumb"></span><span id="position">—</span></div>
   </div>
   <div id="stage" data-level="projects"><div id="scene"><div id="drum"></div></div></div>
   <div id="spin">
@@ -366,7 +417,7 @@
   <div id="overlay"><div class="box"><h2>Bridge offline</h2><p id="overlayMsg">Could not reach the bridge. Start it with <code>node scripts/nd-mem-bridge-server.mjs</code> and retry.</p><button class="btn primary" id="retryBtn">Retry</button></div></div>
   <div class="modalbg" id="editModalBg">
     <div class="modal">
-      <h2>Edit memory</h2>
+      <h2 id="editModalTitle">Edit memory</h2>
       <div class="grid">
         <div class="field span2"><label>Content</label><textarea id="editContent"></textarea></div>
         <div class="field"><label>District</label><select id="editDistrict"></select></div>
@@ -415,7 +466,7 @@
     const NODE_LABEL_PX = 58; // 10 monospace chars at .6rem; see truncateNodeLabel
 
     const $ = s => document.querySelector(s);
-    const els = { stage: $('#stage'), scene: $('#scene'), drum: $('#drum'), crumb: $('#crumb'), position: $('#position'), connState: $('#connState'), backBtn: $('#backBtn'), overlay: $('#overlay'), overlayMsg: $('#overlayMsg'), retryBtn: $('#retryBtn'), toast: $('#toast'), hudHint: $('#hudHint'), minimap: $('#minimap'), mapBody: $('#mapBody'), mapToggle: $('#mapToggle'), spin: $('#spin'), spinPrev: $('#spinPrev'), spinNext: $('#spinNext'), helpBtn: $('#helpBtn'), helpModalBg: $('#helpModalBg') };
+    const els = { stage: $('#stage'), scene: $('#scene'), drum: $('#drum'), crumb: $('#crumb'), position: $('#position'), connState: $('#connState'), backBtn: $('#backBtn'), overlay: $('#overlay'), overlayMsg: $('#overlayMsg'), retryBtn: $('#retryBtn'), toast: $('#toast'), hudHint: $('#hudHint'), minimap: $('#minimap'), mapBody: $('#mapBody'), mapToggle: $('#mapToggle'), spin: $('#spin'), spinPrev: $('#spinPrev'), spinNext: $('#spinNext'), helpBtn: $('#helpBtn'), helpModalBg: $('#helpModalBg'), createBtn: $('#createBtn'), searchInput: $('#searchInput'), locus: $('#locus') };
 
     // Three hand-tuned offsets (64/108/56) each encoded a guess at how tall
     // #chrome renders at that breakpoint. The band would have needed a fourth.
@@ -458,7 +509,9 @@
       lastBounceAt: 0,
       editingId: null,
       editingDistrict: null, // district the edit modal was seeded with, to detect a real change
+      modalMode: null,       // 'edit' or 'create' -- which mode the edit modal is currently wearing
       renamingProject: null,
+      search: { query: '', hits: new Map() },
     };
 
     function esc(v){ return String(v ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
@@ -750,6 +803,7 @@
       fillReader(next, state.items[idx]?.data?.content ?? '');
       state.view.centeredId = centeredItem()?.id ?? null;
       updateChrome();
+      renderSearchState();
     }
 
     function depthNow(){ return H.navDepth(state.tree); }
@@ -894,6 +948,23 @@
       // A fan has ends: stepping past one is a no-op rather than a wrap
       // (selectCard's own clamp), and selectCard drives the rotation there.
       if (state.layout.mode === 'fan') { selectCard(state.frontIndex + n); return; }
+      // While a search is active, step hit-to-hit: a 364-memory bucket is not
+      // worth spinning through one dark card at a time.
+      if (state.search.hits.size) {
+        const target = H.nextLitIndex(state.items, state.search.hits, state.snapshot, state.view, state.frontIndex, n > 0 ? 1 : -1);
+        if (target === state.frontIndex) return;
+        // Relative to the CURRENT rotation, not the target's raw angle: this
+        // drum accumulates real turns as it spins (see the identical
+        // `state.rotation + H.shortestDelta(...)` a few lines below), so handing
+        // rotationForCard's absolute small-range angle straight to stepTarget
+        // would send a heavily-spun drum the long way around -- laps of empty
+        // rotation to reach a card it could have turned to directly.
+        const goal = state.rotation + H.shortestDelta(state.rotation, H.rotationForCard(target, state.layout));
+        state.velocity = 0;
+        if (REDUCED) { state.stepTarget = null; state.rotation = goal; applyDrumTransform(); }
+        else state.stepTarget = goal;
+        return;
+      }
       const raw = state.frontIndex + n;
       const idx = ((raw % count) + count) % count;
       if (idx === state.frontIndex) return;
@@ -1226,12 +1297,23 @@
     let pinchStart = 0, dragMoved = 0;
     let pressTarget = null;        // pointerdown's target: the browser's real 3D hit-test
     let dragOrigin = { x: 0, y: 0 };
+    // Long-press: 500ms with the pointer essentially still. Cancelled by any
+    // real movement, a second pointer, or release -- so it can never fire in the
+    // middle of a spin, a pinch, or a reader drag.
+    const LONG_PRESS_MS = 500;
+    const LONG_PRESS_SLOP_PX = 10;
+    let longPressTimer = null;
+    function cancelLongPress(){ if (longPressTimer) { clearTimeout(longPressTimer); longPressTimer = null; } }
     els.stage.addEventListener('pointerdown', (e) => {
       // Capture so a drag that wanders over the fixed chrome bar (or off the
       // window) keeps delivering pointermove/pointerup to the stage. Without it
       // the release is never seen and state.dragging stays stuck true.
       try { els.stage.setPointerCapture(e.pointerId); } catch {}
       pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      // A second pointer means a pinch, not a long-press: pointers.size === 1
+      // already gates arming below, but an existing timer from the first
+      // pointer must still die or it would fire mid-pinch.
+      if (pointers.size > 1) cancelLongPress();
       if (pointers.size === 2) {
         const [a, b] = [...pointers.values()];
         pinchStart = Math.hypot(a.x - b.x, a.y - b.y);
@@ -1247,6 +1329,45 @@
         // — events and elementFromPoint both report #scene — and resolve
         // geometrically in cardIndexAtPoint instead.
         pressTarget = e.target instanceof Element ? e.target : null;
+        cancelLongPress();
+        // A slow, careful click on a real control (Rename…, today's only
+        // create-eligible-level example) is an ordinary click, not a long
+        // press -- holding still is what a deliberate click looks like, unlike
+        // the movement/second-pointer/release cancellations above, which all
+        // require the user to have done something else. Two checks, matching
+        // the click handler's own two-layer pattern below: pressTarget's
+        // closest('button, a') is the cheap DOM-hit-test check ('button, a'
+        // is the same selector the click handler uses, and routeGesture's doc
+        // comment on "Controls inside a card" already names the convention),
+        // then frontControlAt as the geometric fallback that is actually
+        // load-bearing here -- measured directly that WebKit's hit-test for a
+        // point over the front card's OWN button can return a completely
+        // unrelated side card's div instead (see frontControlAt's comment),
+        // which makes pressTarget alone unreliable for exactly this check.
+        const onControl = !!pressTarget?.closest('button, a') || !!frontControlAt(e.clientX, e.clientY);
+        // Not while a dive/zoom is in flight. The gesture arms on the level read
+        // HERE but resolves the pressed card 500ms later, and transitionTo flips
+        // state.view a third of the way through its ~1400ms run (ZOOM_MS = 700).
+        // A press begun 200-700ms into a dive therefore armed at `districts` and
+        // fired at `memories` -- opening a create modal at exactly the level
+        // routeGesture exists to forbid it at. Every other gesture path on this
+        // page is already gated on this flag.
+        if (pointers.size === 1 && !onControl && !state.transitioning
+            && H.routeGesture('longPress', { level: state.view.level, insideReader: false }) === 'create') {
+          const px = e.clientX, py = e.clientY;
+          longPressTimer = setTimeout(() => {
+            longPressTimer = null;
+            // Resolve through the geometric hit-test: Chromium cannot hit-test a
+            // rotated side card, so e.target alone would resolve to #scene.
+            const idx = cardIndexAtPoint(px, py);
+            const item = idx >= 0 ? state.items[idx] : null;
+            if (!item) return;
+            // Suppress the click that release would otherwise produce, so the
+            // press does not also dive into the card it just created from.
+            dragMoved = 999;
+            openCreateModal({ kind: item.kind, id: item.id });
+          }, LONG_PRESS_MS);
+        }
         // A horizontal drag spins at every level, reader included (spec: hdrag ->
         // spin). Only a mouse is exempt inside the reader, where press-and-drag
         // is how text gets selected.
@@ -1323,6 +1444,7 @@
       if (pointers.size === 1) {
         dragMoved = Math.max(dragMoved, Math.abs(e.clientX - dragOrigin.x) + Math.abs(e.clientY - dragOrigin.y));
       }
+      if (longPressTimer && (Math.abs(e.clientX - dragOrigin.x) > LONG_PRESS_SLOP_PX || Math.abs(e.clientY - dragOrigin.y) > LONG_PRESS_SLOP_PX)) cancelLongPress();
       if (readerDrag && pointers.size === 1) {
         const ndx = e.clientX - dragOrigin.x, ndy = e.clientY - dragOrigin.y;
         if (readerDrag.axis === 'undecided') {
@@ -1387,6 +1509,7 @@
       }
     });
     function releasePointer(e){
+      cancelLongPress();
       pointers.delete(e.pointerId);
       if (pointers.size < 2) pinchStart = 0;
       if (!pointers.size) { state.dragging = false; endReaderDrag(); }
@@ -1484,6 +1607,35 @@
       return best;
     }
     /**
+     * The front card's own real control (button/link) at a point, found by
+     * bounding-box containment rather than DOM hit-testing.
+     *
+     * This has to be geometric, not `e.target`/elementFromPoint-based: on
+     * WebKit, elementsFromPoint at a point over the FRONT card's own button
+     * can return an entirely unrelated SIDE card's plain div ahead of that
+     * button in the hit-test order -- measured directly (a project card's
+     * Rename… button at (292,317) resolved via pointerdown's e.target to a
+     * different card's data-idx="10" div, not the button at all, purely
+     * because that side card's flat, unrotated bounding box happens to
+     * overlap the same screen pixel). `pressTarget`, being `e.target`,
+     * inherits that unreliability. A real element's own rect, checked
+     * directly, sidesteps the hit-test entirely -- the same reasoning
+     * `cardIndexAtPoint` above already relies on for resolving WHICH card,
+     * extended here to resolving WHICH CONTROL.
+     *
+     * Originally inline in the click handler below (as `overFrontButton`);
+     * factored out because the long-press arming guard needs the identical
+     * check at pointerdown time.
+     */
+    function frontControlAt(x, y) {
+      if (!state.frontEl) return null;
+      for (const el of state.frontEl.querySelectorAll('button, a')) {
+        const r = el.getBoundingClientRect();
+        if (r.width && x >= r.left && x <= r.right && y >= r.top && y <= r.bottom) return el;
+      }
+      return null;
+    }
+    /**
      * The element a click should be attributed to.
      *
      * pressTarget is pointerdown's target, kept because pointer capture
@@ -1534,14 +1686,9 @@
       // half of an angled card, so this check was the only thing standing
       // between that click and a wrong dive; measured on a 3-card fan back
       // then, Edit worked at -24deg and 0deg but dived at +24deg without it.
-      const overFrontButton = (() => {
-        if (!state.frontEl) return null;
-        for (const el of state.frontEl.querySelectorAll('button, a')) {
-          const r = el.getBoundingClientRect();
-          if (r.width && e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom) return el;
-        }
-        return null;
-      })();
+      // (Factored out as frontControlAt, above -- the long-press guard needs
+      // the identical geometric check at pointerdown time.)
+      const overFrontButton = frontControlAt(e.clientX, e.clientY);
       if (overFrontButton) {
         // The other two delegated click listeners on #stage (rename, edit) resolve
         // their own `hit` the same pressTarget-first way this one does, and pressTarget
@@ -1584,6 +1731,13 @@
       if (action === 'dive' || action === 'centerThenDive') dive();
     });
     window.addEventListener('contextmenu', (e) => {
+      // Every text field keeps its native menu, not just the ones inside a
+      // modal -- #searchInput lives on the chrome bar itself, outside any
+      // modal, and without this a right-click (or an iOS long-press) on it
+      // suppressed the menu AND navigated the drum up a level mid-query.
+      // Same guard shape as the keydown handler below.
+      const t = e.target instanceof Element ? e.target : null;
+      if (t && t.closest('input, textarea, select')) return;
       if (document.querySelector('.modalbg.open')) return; // modal text fields keep the native menu
       e.preventDefault();
       if (!state.transitioning) zoomOut();
@@ -1622,12 +1776,129 @@
     els.spinPrev.addEventListener('click', () => spinFromButton('arrowLeft'));
     els.spinNext.addEventListener('click', () => spinFromButton('arrowRight'));
 
+    // ---------- search ----------
+    // Applied to the rendered window only, and re-applied after any rebuild.
+    function renderSearchState(){
+      const { hits } = state.search;
+      els.drum.querySelectorAll('.card3d[data-idx]').forEach((el) => {
+        const item = state.items[Number(el.dataset.idx)];
+        if (!item || !hits.size) { el.classList.remove('search-dim', 'search-hit'); return; }
+        const lit = H.isLit(item, hits, state.snapshot, state.view);
+        el.classList.toggle('search-hit', lit);
+        el.classList.toggle('search-dim', !lit);
+      });
+    }
+    // 250ms debounce, and a later query always wins: /search is a daemon round
+    // trip, so a call per keystroke would both lag and land out of order.
+    let searchTimer = null;
+    let searchSeq = 0;
+    async function runSearch(query){
+      const seq = ++searchSeq;
+      if (!query) { state.search = { query: '', hits: new Map() }; renderSearchState(); return; }
+      // A failed search and a search that matched nothing both arrive as an
+      // empty hit set, and both would render as "every card dimmed" if we let
+      // them -- so a dead daemon, a stale bridge, or a store that refuses to
+      // serve all need to say so instead of looking like an honest miss.
+      // res.ok/status is checked *before* the body is ever parsed, because the
+      // three failures below are told apart by how the response failed, not by
+      // what (if anything) is inside it:
+      //   1. the fetch itself threw -- nothing answered on that port at all.
+      //   2. HTTP 404 -- the bridge answered, but has no /search route. This
+      //      process is long-lived while the page is served fresh each load,
+      //      so in practice this means the bridge predates the page and is
+      //      running stale code. Do not promise a restart fixes it: a bridge
+      //      that fails to bind its port can linger alive instead of exiting,
+      //      so a plain restart can leave the same stale process answering --
+      //      point at the bridge's version being wrong, not at a fix.
+      //   3. any other non-ok status, or a 2xx response whose body isn't the
+      //      {ok, hits} contract our own route promises (including a body
+      //      that fails to parse as JSON at all) -- the bridge is current and
+      //      reachable but the search itself failed.
+      // Every branch below leaves the previous hit classification standing
+      // rather than clearing it: an error is not evidence the store stopped
+      // matching, and wiping the drum to "unclassified" would look exactly
+      // like no search being active, silently undoing the point of the toast.
+      let res;
+      try {
+        res = await fetch(`${BRIDGE}/search?q=${encodeURIComponent(query)}`);
+      } catch {
+        if (seq !== searchSeq) return; // superseded
+        showToast('Search could not reach the bridge.');
+        return;
+      }
+      if (seq !== searchSeq) return; // superseded
+      if (res.status === 404) { showToast('Search needs a newer bridge — the one answering is out of date.'); return; }
+      if (!res.ok) { showToast('Search failed — the drum is unchanged.'); return; }
+      let data;
+      try {
+        data = await res.json();
+      } catch {
+        if (seq !== searchSeq) return; // superseded
+        showToast('Search failed — the drum is unchanged.');
+        return;
+      }
+      if (seq !== searchSeq) return; // superseded
+      if (!data.ok) { showToast('Search failed — the drum is unchanged.'); return; }
+      state.search = { query, hits: new Map((data.hits || []).map(h => [h.id, h.score])) };
+      renderSearchState();
+    }
+    els.searchInput.addEventListener('input', () => {
+      const q = els.searchInput.value.trim();
+      els.locus.classList.toggle('searching', q !== '');
+      clearTimeout(searchTimer);
+      searchTimer = setTimeout(() => runSearch(q), 250);
+    });
+    els.searchInput.addEventListener('keydown', (e) => {
+      // Escape clears the query, never a modal or a zoom-out. Verified against
+      // the real listeners, not assumed: opening any modal moves focus off this
+      // input (confirmed by driving it), so this handler only ever runs while
+      // #searchInput itself has focus. Nothing behaves differently just because
+      // a modal happens to be open elsewhere in the DOM -- the window-level
+      // handler's own `t.closest('input, textarea, select')` bail-out is what
+      // already keeps THIS Escape from reaching its zoomOut/modal-close logic,
+      // the same guard that protects every other text field on the page.
+      // stopPropagation is defensive, matching the modal-scoped Escape
+      // handlers' own convention, though the bail-out above means it is not
+      // load-bearing here the way it is for them.
+      if (e.key === 'Escape') { e.stopPropagation(); els.searchInput.value = ''; els.locus.classList.remove('searching'); clearTimeout(searchTimer); runSearch(''); }
+    });
+
     // ---------- edit modal ----------
-    const CANONICAL = H.CANONICAL_DISTRICTS;
+    // One modal, two modes. A second modal would drift from this one exactly as
+    // the classic app's copy already drifted from it -- that divergence was a
+    // code-review finding, not a hypothetical.
+    function openCreateModal(pressedCard = null){
+      const defaults = H.createDefaultsFor(state.view, pressedCard);
+      state.modalMode = 'create';
+      state.editingId = null;
+      $('#editModalTitle').textContent = 'New memory';
+      $('#editSaveBtn').textContent = 'Create';
+      // Through the same helper openEditModal uses. Populated from the canonical
+      // five alone, the assignment below found no matching <option> for a custom or
+      // legacy district, left the select at selectedIndex -1, and the user saw
+      // an EMPTY District field -- and because create mode always sends the
+      // select's value, it then posted district: ''. (Distinct from the
+      // UNCATEGORIZED sentinel, which createDefaultsFor resolves to null first.)
+      $('#editDistrict').innerHTML = H.districtOptions(defaults.district).map(d => `<option value="${esc(d)}">${esc(d)}</option>`).join('');
+      $('#editContent').value = '';
+      $('#editDistrict').value = defaults.district || 'practical_execution';
+      // Seeded the same way openEditModal does, so submitEdit's "only send a
+      // district the user actually chose" guard behaves identically in both modes.
+      state.editingDistrict = $('#editDistrict').value;
+      $('#editProject').value = defaults.projectId ?? '';
+      $('#editVisibility').value = 'private';
+      $('#editIntensity').value = '0.5';
+      $('#editEpistemic').value = '';
+      $('#editTags').value = '';
+      $('#editModalBg').classList.add('open');
+      $('#editContent').focus();
+    }
     function openEditModal(m){
       state.editingId = m.id;
-      const districts = CANONICAL.includes(m.district) || !m.district ? CANONICAL : [m.district, ...CANONICAL];
-      $('#editDistrict').innerHTML = districts.map(d => `<option value="${esc(d)}">${esc(d)}</option>`).join('');
+      state.modalMode = 'edit';
+      $('#editModalTitle').textContent = 'Edit memory';
+      $('#editSaveBtn').textContent = 'Save changes';
+      $('#editDistrict').innerHTML = H.districtOptions(m.district).map(d => `<option value="${esc(d)}">${esc(d)}</option>`).join('');
       $('#editContent').value = m.content || '';
       $('#editDistrict').value = m.district || 'practical_execution';
       $('#editProject').value = m.project_id ?? '';
@@ -1643,39 +1914,66 @@
       $('#editContent').focus(); // must follow .open — a display:none field cannot take focus
     }
     async function submitEdit(){
+      const creating = state.modalMode === 'create';
       const content = $('#editContent').value.trim();
       if (!content) { showToast('Content cannot be empty.'); return; }
       const project = $('#editProject').value.trim();
+      const district = $('#editDistrict').value;
+      const rawIntensity = $('#editIntensity').value.trim();
+      const epistemic = $('#editEpistemic').value;
+
       const body = {
-        memoryId: state.editingId,
         content,
         visibility: $('#editVisibility').value,
         projectId: project === '' ? null : project,
         tags: $('#editTags').value.split(',').map(s => s.trim()).filter(Boolean),
       };
+      if (!creating) body.memoryId = state.editingId;
       // The bridge forwards only the keys present, leaving everything else
-      // untouched, so an untouched control must send nothing. An emptied number
-      // field reads as '' and would post intensity: NaN; an unchanged district
-      // select would post the placeholder value shown for district-less memories.
+      // untouched, so an untouched control must send nothing. Editing sends a
+      // district only when the user actually changed it, so an untouched select
+      // cannot silently refile a district-less memory. Creating must always
+      // send one -- there is nothing to preserve.
+      if (creating || district !== state.editingDistrict) body.district = district;
+      // An emptied number field reads as '' and would post intensity: NaN.
       // Same validation as the classic app's edit modal: Number('') is 0 (hence
       // the empty check), Number('abc') is NaN which serialises to null and the
       // daemon rejects, and the min/max attributes do not constrain a
       // script-submitted form — so a typed 5 would otherwise persist off-scale.
-      const intensity = $('#editIntensity').value.trim();
-      if (intensity !== '') {
-        const n = Number(intensity);
-        if (!Number.isFinite(n) || n < 0 || n > 1) {
-          showToast('Intensity must be a number between 0 and 1.');
-          return;
-        }
+      if (rawIntensity !== '') {
+        const n = Number(rawIntensity);
+        if (!Number.isFinite(n) || n < 0 || n > 1) { showToast('Intensity must be a number between 0 and 1.'); return; }
         body.intensity = n;
       }
-      const district = $('#editDistrict').value;
-      if (district !== state.editingDistrict) body.district = district;
-      const epistemic = $('#editEpistemic').value;
       if (epistemic) body.epistemicStatus = epistemic;
+
+      const route = creating ? '/save' : '/update';
+
+      // Create and edit deliberately diverge below this point. Edit mode keeps
+      // its pre-existing shape byte-for-byte (single combined failure message,
+      // no catch-vs-rejection distinction) so an in-flight, unsaved edit still
+      // gets the "the modal is untouched, fix and retry" reassurance it always
+      // has. Create mode has no pre-existing behaviour to preserve, so it tells
+      // network failure and a rejected create apart instead.
+      if (creating) {
+        let res, data;
+        try {
+          res = await fetch(`${BRIDGE}${route}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+          data = await res.json();
+        } catch {
+          showToast('Could not reach the bridge — nothing was saved.');
+          return;
+        }
+        if (!res.ok || !data.ok) { showToast('Create failed.'); return; }
+        $('#editModalBg').classList.remove('open');
+        showToast('Memory created.');
+        // See the matching comment in the edit branch below for why this runs
+        // last and why its own failure is swallowed.
+        try { await loadSnapshot(); refreshAndReconcile(); } catch {}
+        return;
+      }
       try {
-        const res = await fetch(`${BRIDGE}/update`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+        const res = await fetch(`${BRIDGE}${route}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
         const data = await res.json();
         if (!res.ok || !data.ok) throw new Error('update failed');
         $('#editModalBg').classList.remove('open');
@@ -1875,6 +2173,7 @@
       const card = btn.closest('.card3d.front');
       if (card) card.classList.toggle('flipped', btn.dataset.flip === 'open');
     });
+    els.createBtn.addEventListener('click', () => openCreateModal());
     $('#editCancelBtn').addEventListener('click', () => $('#editModalBg').classList.remove('open'));
     $('#editSaveBtn').addEventListener('click', submitEdit);
     $('#editModalBg').addEventListener('click', (e) => { if (e.target.id === 'editModalBg') $('#editModalBg').classList.remove('open'); });
