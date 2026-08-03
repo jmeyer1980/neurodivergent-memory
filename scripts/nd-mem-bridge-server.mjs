@@ -4,12 +4,17 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { execFile } from 'child_process';
+import { execFile, spawnSync } from 'child_process';
 import * as readline from 'readline';
 import { ensureDaemon } from '../build/core/ensure-daemon.js';
 import { resolveDaemonPort } from '../build/core/run-mode.js';
 import { parseSearchResults } from './nd-mem-rolodex-helpers.mjs';
 import { findPortOwners, describePortConflict, installLifecycle, resolvePort } from './nd-mem-bridge-lifecycle.mjs';
+import { installKeybinds, describeKeys, isBuildStale, RESTART_EXIT_CODE } from './nd-mem-bridge-keys.mjs';
+
+// npm is a .cmd shim on Windows, and spawnSync without a shell will not find a
+// bare `npm` there.
+const NPM_CMD = process.platform === 'win32' ? 'npm.cmd' : 'npm';
 
 // Resolved from this file's own location, not process.cwd() — the bridge must
 // find its assets the same way regardless of the directory it's launched from.
@@ -353,16 +358,22 @@ function openInBrowser(url) {
   });
 }
 
-function maybeOpenBridgeUI() {
-  if (NEVER_OPEN) return;
-  if (!AUTO_OPEN && !process.stdin.isTTY) return;
+// `done` fires once stdin is free again. The Y/n prompt owns stdin while it is
+// open, so the keybinds cannot be installed until it has closed — both would
+// consume the same 'data' events, and the answer would be eaten by whichever
+// listener got there first.
+function maybeOpenBridgeUI(done = () => {}) {
+  if (NEVER_OPEN) { done(); return; }
+  if (!AUTO_OPEN && !process.stdin.isTTY) { done(); return; }
   if (!fs.existsSync(HTML_PATH)) {
     console.error('Bridge: not opening browser — scripts/nd-mem-mcp-app-bridge.html is missing.');
+    done();
     return;
   }
   const url = `http://localhost:${PORT}/`;
   if (AUTO_OPEN) {
     openInBrowser(url);
+    done();
     return;
   }
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
@@ -374,6 +385,7 @@ function maybeOpenBridgeUI() {
     } else {
       console.log('Skipped opening bridge UI.');
     }
+    done();
   });
 }
 
@@ -388,7 +400,7 @@ function maybeOpenBridgeUI() {
 const server = app.listen(PORT, () => {
   if (server.address() === null) return; // the 'error' handler below has this
   console.log(JSON.stringify({ ok: true, port: PORT, memoryPath: MEMORY_PATH, pollMs: POLL_MS }));
-  maybeOpenBridgeUI();
+  maybeOpenBridgeUI(startKeybinds);
 });
 
 // Without this, a bridge that loses the bind race stays alive forever, doing
@@ -427,4 +439,77 @@ server.on('error', async (error) => {
 
 // The daemon is deliberately NOT stopped here — it is shared, and outliving the
 // bridge is its job. See the note in nd-mem-bridge-lifecycle.mjs.
-installLifecycle({ server, timers: [pollTimer], clients });
+const lifecycle = installLifecycle({ server, timers: [pollTimer], clients });
+
+// --- terminal keybinds (issue #175) --------------------------------------
+
+const STARTED_AT = Date.now();
+const SUPERVISED = process.env.ND_MEM_BRIDGE_SUPERVISED === '1';
+let keys = { installed: false, dispose() {} };
+
+// Raw mode must be handed back before this process ends, or the user's shell
+// stops echoing what they type. Registered here rather than inside the
+// shutdown path so it also covers an exit nothing planned for.
+process.on('exit', () => keys.dispose());
+
+function stopFromKey() {
+  console.error('Bridge: S — stopping.');
+  keys.dispose();
+  lifecycle.shutdown('S');
+}
+
+function restartFromKey() {
+  if (!SUPERVISED) {
+    console.error(
+      'Bridge: R needs the supervisor — a process cannot replace itself. '
+      + 'Start with `npm run bridge` (or `node scripts/nd-mem-bridge.mjs`) and R will work.',
+    );
+    return;
+  }
+  // BUILD BEFORE SHUTTING ANYTHING DOWN. If tsc fails, the bridge that is
+  // already up stays up — shutting down first and then discovering the build
+  // is broken leaves the user with nothing running and a compile error.
+  // spawnSync blocks the event loop, so requests stall for the length of the
+  // compile; that is the honest cost of doing it on this thread, and it only
+  // happens on a restart the user asked for.
+  if (isBuildStale(path.join(REPO_ROOT, 'src'), path.join(REPO_ROOT, 'build'))) {
+    console.error('Bridge: R — src/ is newer than build/, compiling first…');
+    const built = spawnSync(NPM_CMD, ['run', 'build'], { cwd: REPO_ROOT, stdio: 'inherit' });
+    if (built.status !== 0) {
+      console.error('Bridge: build FAILED — staying up on the code already running. Fix it and press R again.');
+      return;
+    }
+  }
+  console.error('Bridge: R — restarting.');
+  keys.dispose();
+  // The supervisor is watching for this code and will launch a fresh process,
+  // which is the only way new code gets loaded.
+  lifecycle.shutdown('R', RESTART_EXIT_CODE);
+}
+
+function statusFromKey() {
+  const uptime = Math.round((Date.now() - STARTED_AT) / 1000);
+  console.error(JSON.stringify({
+    port: PORT,
+    memoryPath: MEMORY_PATH,
+    sseClients: clients.size,
+    uptimeSeconds: uptime,
+    supervised: SUPERVISED,
+    pid: process.pid,
+  }, null, 2));
+}
+
+function startKeybinds() {
+  keys = installKeybinds({
+    input: process.stdin,
+    output: process.stderr,
+    // Drive the keys over a plain pipe — no pseudo-terminal needed. This is
+    // how the restart loop is tested end to end.
+    force: process.env.ND_MEM_BRIDGE_KEYS === '1',
+    onStop: stopFromKey,
+    onRestart: restartFromKey,
+    onOpen: () => openInBrowser(`http://localhost:${PORT}/`),
+    onStatus: statusFromKey,
+  });
+  if (keys.installed) console.error(describeKeys());
+}

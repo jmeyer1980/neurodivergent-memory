@@ -236,6 +236,29 @@ test("shutdown closes the server and exits 0", () => {
   assert.deepEqual(exits, [0]);
 });
 
+test("shutdown exits with the code it was given, which is how restart reaches the supervisor", () => {
+  const { server, emitter, exits } = fakeShutdownRig();
+  const { shutdown } = installLifecycle({
+    server, emitter, timers: [], clients: new Set(),
+    onExit: (code) => exits.push(code), log: () => {},
+  });
+  shutdown("R", 75);
+  assert.deepEqual(exits, [75]);
+});
+
+test("a restart that was asked for still happens when close hangs", async () => {
+  // Forcing a plain stop is a failure and exits 1, but forcing a RESTART must
+  // still restart — otherwise one stuck SSE socket turns R into a stop.
+  const emitter = new EventEmitter();
+  const exits = [];
+  installLifecycle({
+    server: { close() {} }, emitter, timers: [], clients: new Set(),
+    onExit: (code) => exits.push(code), log: () => {}, forceExitMs: 20,
+  }).shutdown("R", 75);
+  await sleep(60);
+  assert.deepEqual(exits, [75]);
+});
+
 test("a second signal does not run the teardown twice", () => {
   const { server, emitter, exits, closed } = fakeShutdownRig();
   installLifecycle({
