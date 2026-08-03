@@ -78,8 +78,11 @@ for (const vp of [
   test(`chrome bar keeps every control on screen: ${vp.name}`, async ({ page }) => {
     await page.setViewportSize({ width: vp.width, height: vp.height });
     // Worst realistic content, not whatever the root view happens to show.
+    // Issue #172 grew #position with a search-match suffix, which does not
+    // shrink (flex:0 0 auto; white-space:nowrap) -- so the worst case now
+    // includes it: a search matching every card at the biggest level.
     await page.evaluate(() => {
-      document.querySelector('#position')!.textContent = 'card 124 of 124';
+      document.querySelector('#position')!.textContent = 'card 124 of 124 · 124 results';
       document.querySelector('#connState')!.textContent = 'Bridge :3799';
     });
     const bar = await chromeBar(page);
@@ -909,6 +912,107 @@ test('search dims non-matches without moving a single card', async ({ page }) =>
   expect(await page.evaluate(() => document.querySelectorAll('#drum .card3d.search-dim').length)).toBe(0);
 });
 
+// #crumb keeps its box (visibility:hidden, not display:none) while searching
+// so hiding the coordinate never shrinks #locus -- but #position's
+// search-match suffix (issue #172) can squeeze #crumb into an extra wrapped
+// line while hidden, so its box height is PINNED for the duration of a
+// search rather than left to reflow. A pin computed once, at the moment the
+// search starts, and never revisited would go stale the instant anything
+// changes how many lines #crumb's CURRENT content needs at the CURRENT
+// width -- which a phone rotation does directly (same coordinate, different
+// width). Landscape (~737-852px) is the sharpest case: it misses the 560px
+// media query, so it is already this app's most fragile viewport, and
+// rotating mid-search is an ordinary thing to do while reading.
+//
+// Deliberately NOT a raw before/after card-rect comparison like the test
+// above: at the memories level cardW is `Math.min(560, innerWidth * 0.92)`,
+// so a WIDTH-changing resize legitimately resizes every card regardless of
+// whether the chromeH pin is stale -- a rect comparison here would be
+// confounded by that legitimate resize and could pass or fail for the wrong
+// reason. Asserting on #chrome's own measured height isolates exactly the
+// mechanism the pin exists to hold steady, independent of card geometry.
+test('a search survives a phone rotation without leaving a stale chrome height behind', async ({ page }) => {
+  test.slow();
+  expect(await diveToMemories(page)).toBe('memories');
+
+  await page.setViewportSize({ width: 393, height: 852 }); // portrait
+  await settleLayout(page);
+  await page.locator('#searchInput').fill('memory');
+  await page.waitForTimeout(1200); // 250ms debounce + daemon round trip
+
+  // Rotate to landscape WHILE the search is still active -- the scenario the
+  // pin has to survive.
+  await page.setViewportSize({ width: 852, height: 393 }); // landscape
+  await settleLayout(page); // waits out scheduleResizeRebuild's 200ms debounce too
+
+  const chromeHeightWhileSearching = await page.evaluate(() =>
+    Math.round(document.querySelector('#chrome')!.getBoundingClientRect().height));
+
+  // Ground truth: clear the query at this SAME (landscape) width. #crumb
+  // becomes visible and un-pinned, laying out naturally for the SAME
+  // coordinate at the SAME width -- exactly what the pin is supposed to
+  // have matched all along, whether or not a rotation happened in between.
+  await page.locator('#searchInput').fill('');
+  await page.waitForTimeout(600);
+  const chromeHeightGroundTruth = await page.evaluate(() =>
+    Math.round(document.querySelector('#chrome')!.getBoundingClientRect().height));
+
+  expect(chromeHeightWhileSearching,
+    'the chrome height pinned mid-search at the OLD (portrait) width must match the TRUE height at the NEW (landscape) width -- a stale pin here silently shoves every card down or up')
+    .toBe(chromeHeightGroundTruth);
+});
+
+// Verifies the OTHER half of the pin's "recomputed on every call" claim: a
+// mid-search DIVE, not just a resize, can also change how many lines
+// #crumb's (hidden) coordinate needs -- diving adds segments, at a FIXED
+// width. Reuses the same real navigation path verified in "the position
+// readout reports the match count..." above: 'rolodex' lights '(no
+// project)' at the wall (one hit-to-hit step from the default centred
+// project), and its districts level lights exactly 'logical_analysis'.
+test('a search survives a mid-search dive without leaving a stale chrome height behind', async ({ page }) => {
+  test.slow();
+  await page.setViewportSize({ width: 393, height: 852 });
+  await settleLayout(page);
+
+  await page.locator('#searchInput').fill('rolodex');
+  await page.waitForTimeout(1200); // 250ms debounce + daemon round trip
+
+  await page.locator('#spinPrev').click();
+  await page.waitForFunction(() =>
+    document.querySelector('#position')?.textContent === 'card 20 of 20 · 2 results',
+    null, { timeout: 20_000, polling: 300 });
+
+  // Dive via Enter, not a centre click -- see the single-hit-level test
+  // above for why a click's geometry can race the drum's own easing.
+  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+  await page.keyboard.press('Enter'); // projects -> districts, centred on the only lit one
+  await page.waitForTimeout(1700);
+  expect(await page.evaluate(() => (document.querySelector('#stage') as HTMLElement).dataset.level))
+    .toBe('districts');
+
+  await page.keyboard.press('Enter'); // districts -> memories: the deepest, longest coordinate
+  await page.waitForTimeout(1700);
+  expect(await page.evaluate(() => (document.querySelector('#stage') as HTMLElement).dataset.level))
+    .toBe('memories');
+  expect(await page.locator('#searchInput').inputValue(), 'the query must survive both dives').toBe('rolodex');
+
+  const chromeHeightWhileSearching = await page.evaluate(() =>
+    Math.round(document.querySelector('#chrome')!.getBoundingClientRect().height));
+
+  // Ground truth: clear the query at this SAME (post-dive, memories-level)
+  // coordinate and width. If the pin were only recomputed when the SEARCH
+  // ITSELF changes (as the original fix did), it would still be carrying
+  // the wall-level coordinate's height two dives later.
+  await page.locator('#searchInput').fill('');
+  await page.waitForTimeout(600);
+  const chromeHeightGroundTruth = await page.evaluate(() =>
+    Math.round(document.querySelector('#chrome')!.getBoundingClientRect().height));
+
+  expect(chromeHeightWhileSearching,
+    'the chrome height pinned before the two dives must match the TRUE height for the deeper coordinate they landed on')
+    .toBe(chromeHeightGroundTruth);
+});
+
 // The same query means something at every depth: one call, held once,
 // re-interpreted one level deeper each time you dive.
 test('a search at the wall survives a dive and lights the districts inside', async ({ page }) => {
@@ -1034,6 +1138,94 @@ test('stepping during a search lands on hits, the short way round', async ({ pag
   // alone.
   expect(advances.some(d => d > 1),
     `every step advanced by exactly one card (${advances.join(', ')}) — stepping did not skip the dark cards`).toBe(true);
+});
+
+// Issue #172: with exactly one lit card at a level, the step arrow is a
+// correct, deliberately-tested no-op (nextLitIndex resolves to the card you
+// are already standing on) -- but nothing on screen said so, so a working
+// control read as broken. The #position readout's search suffix is the fix.
+// This test is anchored on real data, verified against this store with a
+// probe script before being written here:
+//   'rolodex' lights exactly 2 of the 20 projects -- 'neurodivergent-memory'
+//   (index 0, the wall's default centered card on a cold load) and the
+//   '(no project)' bucket (index 19, its circular neighbor -- so one
+//   hit-to-hit step reaches it directly). Diving into '(no project)' lands on
+//   its districts level, where the SAME query lights exactly one district,
+//   'logical_analysis', which a fresh dive centers on by default (index 0)
+//   -- the single-hit case the issue is about.
+test('the position readout reports the match count, staying honest through a single-hit level', async ({ page }) => {
+  test.slow();
+  await settleLayout(page);
+
+  await page.locator('#searchInput').fill('rolodex');
+  await page.waitForTimeout(1200); // 250ms debounce + daemon round trip
+
+  const wallText = await page.locator('#position').textContent();
+  expect(wallText, 'the wall should report the 2-project match count')
+    .toMatch(/^card 1 of 20 · 2 results$/);
+
+  // Hit-to-hit stepping (pre-existing, unrelated behaviour) hops from index 0
+  // directly to its only other lit neighbor, index 19.
+  await page.locator('#spinPrev').click();
+  // Poll for the exact expected reading rather than a fixed wait: headless
+  // WebKit's rAF throttling can leave the drum mid-ease for several real
+  // seconds (the neighboring "stepping during a search" test above measured
+  // ~9s for one step), so a flat timeout races it on that engine.
+  await page.waitForFunction(() =>
+    document.querySelector('#position')?.textContent === 'card 20 of 20 · 2 results',
+    null, { timeout: 20_000, polling: 300 });
+  expect(await page.locator('#position').textContent(),
+    'stepping to the other lit project must not change the reported count')
+    .toBe('card 20 of 20 · 2 results');
+
+  // Dive via Enter rather than a centre click: state.frontIndex (and this
+  // readout) flips to the new card the instant the eased rotation crosses the
+  // card boundary, well before the CSS transform finishes visually easing to
+  // its target -- clicking in that window hit-tests against the still-mid-
+  // flight rotation and can land on a different card entirely (observed on
+  // WebKit). dive() reads the front card from state.frontIndex directly, so
+  // it is correct the moment the readout above is, with no such race.
+  // #spinPrev now holds focus, and Enter on a button activates IT instead of
+  // reaching the global dive handler, so focus must move off it first.
+  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+  await page.keyboard.press('Enter');
+  await page.waitForTimeout(1700); // two ~700ms zoom halves, plus slack
+  expect(await page.evaluate(() => (document.querySelector('#stage') as HTMLElement).dataset.level))
+    .toBe('districts');
+  expect(await page.locator('#searchInput').inputValue(), 'the query must survive the dive').toBe('rolodex');
+
+  const districtsText = await page.locator('#position').textContent();
+  expect(districtsText, 'a level with exactly one lit card must say so, singular, not "1 results"')
+    .toMatch(/^card 1 of \d+ · 1 result$/);
+
+  // THE property this test exists to pin: the arrow really is a no-op here,
+  // and the readout must keep explaining that rather than going stale or
+  // blank once the (silent, correct, out-of-scope) no-op fires.
+  const before = await page.evaluate(() => (document.querySelector('#drum') as HTMLElement).style.transform);
+  await page.locator('#spinNext').click();
+  await page.waitForTimeout(600);
+  const after = await page.evaluate(() => (document.querySelector('#drum') as HTMLElement).style.transform);
+  expect(after, 'the single lit card is a correct, deliberate no-op — not something this issue changes')
+    .toBe(before);
+  expect(await page.locator('#position').textContent(),
+    'the count must still read "1 result" after the dead-arrow press, not vanish')
+    .toMatch(/^card 1 of \d+ · 1 result$/);
+});
+
+test('the match count disappears the moment the query is cleared', async ({ page }) => {
+  test.slow();
+  await settleLayout(page);
+  await page.locator('#searchInput').fill('rolodex');
+  await page.waitForTimeout(1200);
+  expect(await page.locator('#position').textContent(), 'a precondition: the count must be showing first')
+    .toMatch(/ · 2 results$/);
+
+  await page.locator('#searchInput').fill('');
+  await page.waitForTimeout(600);
+  const cleared = await page.locator('#position').textContent();
+  expect(cleared, 'clearing the query must drop the suffix entirely, not freeze it or show "0 results"')
+    .not.toContain('result');
+  expect(cleared).toMatch(/^card \d+ of 20$/);
 });
 
 // window's contextmenu handler predates the search box and only exempted

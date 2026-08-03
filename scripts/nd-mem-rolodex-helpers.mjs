@@ -707,27 +707,51 @@ export function parseSearchResults(text) {
 
 // ---------- search lighting ----------
 
+// The ONE place the "which containers hold a hit" rule is expressed. isLit
+// and countLit both go through this (isLit lazily, per call, when it isn't
+// handed a precomputed index; countLit and nextLitIndex build one index up
+// front and reuse it across every item) so the district-scoping rule below
+// cannot drift between a "check one card" path and a "count/scan many cards"
+// path -- there is only one path.
+//
+// Single pass over ALL memories, regardless of how many items are being
+// tested against the result: this is what makes countLit/nextLitIndex
+// O(memories + items) instead of O(items * memories).
+function buildLitIndex(hits, snapshot, view) {
+  const projects = new Set();
+  const districts = new Set();
+  if (!hits || hits.size === 0) return { projects, districts };
+  const memories = Object.values(snapshot?.memories ?? {});
+  // Scoped to the project being viewed. District names are shared across
+  // projects, not globally unique buckets -- without this, standing inside
+  // project beta would light its practical_execution card because something
+  // in ALPHA's practical_execution matched.
+  const scope = view.projectId;
+  for (const m of memories) {
+    if (!hits.has(m.id)) continue;
+    projects.add(projectOf(m));
+    if (scope == null || projectOf(m) === scope) districts.add(districtOf(m));
+  }
+  return { projects, districts };
+}
+
 // One rule at every level: a card is lit if IT, or anything inside it, matched.
 // That is what turns a search into a drill-down -- query at the wall, see which
 // projects light, dive into a lit one, see which districts light -- instead of
 // needing a separate results view.
-export function isLit(item, hits, snapshot, view = {}) {
+//
+// `index`, if given, must come from buildLitIndex(hits, snapshot, view) for
+// this same (hits, snapshot, view) -- callers that test many items against
+// the same search state (countLit, nextLitIndex) build it once and pass it
+// in so the O(memories) pass only happens once, not once per item. Callers
+// that check a single card (e.g. rendering one card's lit state) can omit it
+// and let isLit build its own, at the same per-call cost isLit always had.
+export function isLit(item, hits, snapshot, view = {}, index = null) {
   if (!hits || hits.size === 0 || !item) return false;
   if (item.kind === 'memory') return hits.has(item.id);
-  const memories = Object.values(snapshot?.memories ?? {});
-  if (item.kind === 'project') {
-    return memories.some(m => hits.has(m.id) && projectOf(m) === item.id);
-  }
-  if (item.kind === 'district') {
-    // Scoped to the project being viewed. District names are shared across
-    // projects, not globally unique buckets -- without this, standing inside
-    // project beta would light its practical_execution card because something
-    // in ALPHA's practical_execution matched.
-    const scope = view.projectId;
-    return memories.some(m => hits.has(m.id)
-      && districtOf(m) === item.id
-      && (scope == null || projectOf(m) === scope));
-  }
+  const { projects, districts } = index ?? buildLitIndex(hits, snapshot, view);
+  if (item.kind === 'project') return projects.has(item.id);
+  if (item.kind === 'district') return districts.has(item.id);
   return false;
 }
 
@@ -741,9 +765,58 @@ export function nextLitIndex(items, hits, snapshot, view, from, direction) {
   const step = direction >= 0 ? 1 : -1;
   const plain = ((from + step) % count + count) % count;
   if (!hits || hits.size === 0) return plain;
+  const index = buildLitIndex(hits, snapshot, view);
   for (let i = 1; i <= count; i++) {
     const idx = ((from + step * i) % count + count) % count;
-    if (isLit(items[idx], hits, snapshot, view)) return idx;
+    if (isLit(items[idx], hits, snapshot, view, index)) return idx;
   }
   return plain;
+}
+
+// ---------- position readout (issue #172) ----------
+// With exactly one lit card, nextLitIndex above correctly resolves to the card
+// you're already standing on and stepBy is a deliberate, tested no-op -- but
+// the app never SAID "there is 1 match and you are on it", so a correct arrow
+// read as a broken one. These two feed the #position readout's search suffix
+// that fixes that.
+
+// How many items AT THE CURRENT LEVEL are lit. Always call with `items` from
+// state.items, never derive this by counting rendered .search-hit elements --
+// the drum only renders a windowed slice of the level (a scalability fix took
+// it from ~3.1k DOM nodes to ~710), so counting the DOM silently undercounts
+// any level bigger than that window.
+export function countLit(items, hits, snapshot, view = {}) {
+  if (!hits || hits.size === 0 || !items || !items.length) return 0;
+  // Built once, not once per item -- see buildLitIndex's comment. Without
+  // this, countLit is O(items * memories): at 1,768 memories and ~20 items a
+  // level, that is ~35,000 isLit-internal iterations plus twenty Object.values
+  // allocations per updateChrome() call, and updateChrome runs on every
+  // front-card change while a search is active.
+  const index = buildLitIndex(hits, snapshot, view);
+  let n = 0;
+  for (const item of items) {
+    if (isLit(item, hits, snapshot, view, index)) n++;
+  }
+  return n;
+}
+
+// The suffix appended to "card N of M" -- e.g. " · 3 results" or " · 1
+// result" -- or '' when `active` is false, so a plain "card 4 of 20" is
+// untouched with no search running.
+//
+// `active` must be driven by whether a QUERY is set (state.search.query !==
+// ''), never by `count` or hits.size: a query that matches nothing at this
+// level is still an active search and must report "0 results", not silently
+// revert to looking like no search is running.
+//
+// Says "result", not "match": isLit lights a project/district card when
+// something INSIDE it matched, so the card itself is not a match -- it
+// contains one. "N matches" reads true at the memories level (the leaf,
+// where a lit card IS the match) and false everywhere above it, exactly the
+// "implies memory-level counts while standing at the wall" trap the issue
+// calls out. "result" is the one noun that stays honest about a card the
+// query surfaced, whether that card is the match or merely holds one.
+export function positionSearchSuffix(active, count) {
+  if (!active) return '';
+  return ` · ${count} result${count === 1 ? '' : 's'}`;
 }

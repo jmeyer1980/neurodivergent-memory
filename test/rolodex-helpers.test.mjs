@@ -14,7 +14,7 @@ import {
   hintFor,
   truncateNodeLabel, MINIMAP_COL,
   parseSearchResults,
-  isLit, nextLitIndex,
+  isLit, nextLitIndex, countLit, positionSearchSuffix,
 } from '../scripts/nd-mem-rolodex-helpers.mjs';
 
 // Fixture: alpha has 3 memories in 2 districts, beta has 2 (one custom district),
@@ -933,4 +933,145 @@ test('nextLitIndex falls back to ordinary stepping when hits exist but none land
   const hits = new Map([['mem_99', 0.9]]);
   assert.equal(nextLitIndex(items, hits, SNAP, WALL, 0, 1), 1);
   assert.equal(nextLitIndex(items, hits, SNAP, WALL, 0, -1), 2);
+});
+
+// ---------- countLit / positionSearchSuffix (issue #172) ----------
+// The #position readout ("card 4 of 20 · 3 results") that tells a user why an
+// arrow just went dead: with exactly one lit card, nextLitIndex correctly
+// resolves to the card you are already standing on, and the arrow is a
+// deliberate no-op -- but nothing said so. These cover the count these two
+// functions feed that readout.
+
+test('countLit counts projects that contain a hit, not memories', () => {
+  // alpha has 3 memories; only mem_1 and mem_3 match. countLit must still say
+  // 1 (one PROJECT card is lit), not 2 -- the count is over items at THIS
+  // level, never over how many memories matched underneath it.
+  const items = [
+    { id: 'alpha', kind: 'project' },
+    { id: 'beta', kind: 'project' },
+  ];
+  const hits = new Map([['mem_1', 0.9], ['mem_3', 0.4]]);
+  assert.equal(countLit(items, hits, SNAP, WALL), 1);
+});
+
+test('countLit counts every lit memory at the leaf level', () => {
+  const items = [
+    { id: 'mem_1', kind: 'memory' },
+    { id: 'mem_2', kind: 'memory' },
+    { id: 'mem_3', kind: 'memory' },
+  ];
+  const hits = new Map([['mem_1', 0.9], ['mem_3', 0.4]]);
+  assert.equal(countLit(items, hits, SNAP, WALL), 2);
+});
+
+test('countLit is 0 with no hits, and 0 when hits exist but none land at this level', () => {
+  const items = [{ id: 'mem_1', kind: 'memory' }, { id: 'mem_2', kind: 'memory' }];
+  assert.equal(countLit(items, new Map(), SNAP, WALL), 0);
+  assert.equal(countLit(items, new Map([['mem_99', 0.9]]), SNAP, WALL), 0);
+});
+
+test('countLit handles the single-hit case the user actually hit', () => {
+  // Exactly one lit card at this level -- the case where stepBy's early return
+  // (target === state.frontIndex) makes the arrow a correct, silent no-op.
+  const items = [
+    { id: 'mem_1', kind: 'memory' },
+    { id: 'mem_2', kind: 'memory' },
+    { id: 'mem_3', kind: 'memory' },
+  ];
+  assert.equal(countLit(items, new Map([['mem_2', 0.9]]), SNAP, WALL), 1);
+});
+
+// ---------- countLit / isLit equivalence (perf fix, PR #174 review) ----------
+// countLit used to call isLit per item, and isLit rebuilt Object.values(
+// snapshot.memories) on every call -- O(items * memories) per updateChrome()
+// during a spin. The fix routes both through one internal index built once
+// per countLit call. This block pins that countLit must stay EXACTLY
+// equivalent to counting isLit over the same items, across every level and
+// several hit-set shapes, so the fast path can never silently drift from the
+// per-item definition of "lit".
+function assertCountLitMatchesIsLit(items, hits, snapshot, view, label) {
+  const expected = items.filter(i => isLit(i, hits, snapshot, view)).length;
+  assert.equal(countLit(items, hits, snapshot, view), expected,
+    `${label}: countLit=${countLit(items, hits, snapshot, view)} expected=${expected}`);
+}
+
+test('countLit === isLit-per-item at the projects level', () => {
+  const items = [
+    { id: 'alpha', kind: 'project' },
+    { id: 'beta', kind: 'project' },
+    { id: UNASSIGNED, kind: 'project' },
+  ];
+  // Hits spanning alpha, beta, and neither.
+  assertCountLitMatchesIsLit(items,
+    new Map([['mem_1', 0.9], ['mem_4', 0.5]]), SNAP, WALL, 'projects, multi-hit');
+});
+
+test('countLit === isLit-per-item at the districts level, scoped to two different projects', () => {
+  // THE case the finding calls out: a hit in alpha's practical_execution must
+  // not light a same-named or differently-named district card while standing
+  // in beta, and countLit's batch index must respect that exactly as isLit
+  // does per item.
+  const itemsInAlpha = [
+    { id: 'practical_execution', kind: 'district' },
+    { id: 'vigilant_monitoring', kind: 'district' },
+  ];
+  const itemsInBeta = [
+    { id: 'practical_execution', kind: 'district' }, // beta has no such district for real, but the card shape is still checkable
+    { id: 'logical_analysis', kind: 'district' },
+    { id: 'weird_custom', kind: 'district' },
+  ];
+  // Hits: mem_1 (alpha/practical_execution) and mem_6 (beta/logical_analysis).
+  const hits = new Map([['mem_1', 0.9], ['mem_6', 0.4]]);
+  const IN_BETA = { level: 'districts', projectId: 'beta', districtId: null };
+  assertCountLitMatchesIsLit(itemsInAlpha, hits, SNAP, IN_ALPHA, 'districts, in alpha');
+  assertCountLitMatchesIsLit(itemsInBeta, hits, SNAP, IN_BETA, 'districts, in beta');
+  // Pin the actual scoped answer too, not just internal agreement: alpha's
+  // hit must not leak into beta's identically-named district card.
+  assert.equal(countLit(itemsInBeta, hits, SNAP, IN_BETA), 1);
+  assert.equal(isLit(itemsInBeta[0], hits, SNAP, IN_BETA), false);
+});
+
+test('countLit === isLit-per-item at the memories level', () => {
+  const items = [
+    { id: 'mem_1', kind: 'memory' },
+    { id: 'mem_2', kind: 'memory' },
+    { id: 'mem_3', kind: 'memory' },
+    { id: 'mem_4', kind: 'memory' },
+  ];
+  assertCountLitMatchesIsLit(items,
+    new Map([['mem_1', 0.9], ['mem_3', 0.4]]), SNAP, WALL, 'memories, multi-hit');
+});
+
+test('countLit === isLit-per-item with an empty hit set', () => {
+  const projectItems = [{ id: 'alpha', kind: 'project' }, { id: 'beta', kind: 'project' }];
+  const districtItems = [{ id: 'practical_execution', kind: 'district' }, { id: 'vigilant_monitoring', kind: 'district' }];
+  const memoryItems = [{ id: 'mem_1', kind: 'memory' }, { id: 'mem_2', kind: 'memory' }];
+  const none = new Map();
+  assertCountLitMatchesIsLit(projectItems, none, SNAP, WALL, 'projects, empty hits');
+  assertCountLitMatchesIsLit(districtItems, none, SNAP, IN_ALPHA, 'districts, empty hits');
+  assertCountLitMatchesIsLit(memoryItems, none, SNAP, WALL, 'memories, empty hits');
+});
+
+test('countLit === isLit-per-item with a hit set matching nothing at this level', () => {
+  const projectItems = [{ id: 'alpha', kind: 'project' }, { id: 'beta', kind: 'project' }];
+  const districtItems = [{ id: 'practical_execution', kind: 'district' }, { id: 'vigilant_monitoring', kind: 'district' }];
+  // mem_99 does not exist in SNAP at all -- hits non-empty, but nothing lands.
+  const hits = new Map([['mem_99', 0.9]]);
+  assertCountLitMatchesIsLit(projectItems, hits, SNAP, WALL, 'projects, no-match hits');
+  assertCountLitMatchesIsLit(districtItems, hits, SNAP, IN_ALPHA, 'districts, no-match hits');
+});
+
+test('positionSearchSuffix is blank when no search is active', () => {
+  assert.equal(positionSearchSuffix(false, 0), '');
+  // Even a nonzero count must not leak through if the caller says inactive --
+  // this is what keeps the suffix from a prior query surviving a clear.
+  assert.equal(positionSearchSuffix(false, 3), '');
+});
+
+test('positionSearchSuffix pluralizes correctly, singular vs plural vs zero', () => {
+  assert.equal(positionSearchSuffix(true, 1), ' · 1 result');
+  assert.equal(positionSearchSuffix(true, 3), ' · 3 results');
+  // A query that matches nothing AT THIS LEVEL is still an active search and
+  // must say so, not silently fall back to the unsearched reading.
+  assert.equal(positionSearchSuffix(true, 0), ' · 0 results');
 });
