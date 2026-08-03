@@ -6,6 +6,16 @@ Running locally on the development branch; not part of a release cut (version st
 
 ### Added
 
+- **`agent_clock_in` / `agent_clock_out`.** Identity has been bound automatically from the
+  MCP handshake's `clientInfo.name` since the per-connection sessions work, which covers the
+  common case but cannot serve two: several agents behind a single MCP client all report the
+  same `clientInfo.name` and are indistinguishable, and handing a session to a different role
+  mid-run previously meant reconnecting. `agent_clock_in` declares the identity explicitly and
+  `agent_clock_out` drops it; both sit on the same per-session `WeakMap` the auto-binding uses,
+  so one session can never affect another. The handshake now distinguishes a declared identity
+  (`clock_in`) from an inferred one (`client_info`). Clock-out is idempotent so it is safe in a
+  teardown path, and the existing auto-clock-out triggers — a `kind:handoff` write and
+  `close_task` — clear an explicitly clocked-in identity exactly as they clear an inferred one.
 - **Terminal keybinds for the bridge** (`S` stop, `R` restart, `O` open UI, `I` status,
   `?` help). `R` gives you a fresh process — the only way changed code is loaded — so
   `npm run bridge` now starts a small supervisor that owns the restart loop; a process
