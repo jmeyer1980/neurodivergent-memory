@@ -4,6 +4,27 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>ND-Mem Rolodex</title>
+  <!-- Theme resolution runs HERE, inline and render-blocking, before the first
+       paint. It cannot live with the rest of the app: that is a
+       <script type="module">, which is deferred by definition and therefore
+       always runs AFTER parsing — so the page would paint in the hardcoded
+       theme below and then flip, which is precisely the flash this whole
+       change exists to remove. The attribute on <html> stays as the no-JS
+       fallback; this overrides it before anything is drawn.
+       Kept deliberately tiny: every millisecond here delays first paint. -->
+  <script>
+    window.__ndmemTheme = (function () {
+      var KEY = 'ndmem.rolodex.theme';
+      function apply(t) {
+        document.documentElement.setAttribute('data-theme', t === 'light' ? 'light' : 'dark');
+      }
+      var stored = null;
+      try { stored = localStorage.getItem(KEY); } catch (e) { /* private mode */ }
+      if (stored === 'light' || stored === 'dark') apply(stored);
+      else apply(matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark');
+      return { key: KEY, apply: apply };
+    })();
+  </script>
   <link rel="preconnect" href="https://api.fontshare.com">
   <link href="https://api.fontshare.com/v2/css?f[]=satoshi@300,400,500,700,900&f[]=clash-display@400,500,600,700&display=swap" rel="stylesheet">
   <style>
@@ -1804,15 +1825,12 @@
     // The theme used to reset to dark on every load: data-theme is hardcoded in
     // the markup, the button only set the attribute, and nothing read it back.
     // Anyone who preferred the other one re-clicked it every single visit.
-    // Stored choice wins; failing that the OS preference; failing that dark.
-    const THEME_KEY = 'ndmem.rolodex.theme';
-    const applyTheme = (t) => document.documentElement.setAttribute('data-theme', t === 'light' ? 'light' : 'dark');
-    (() => {
-      let stored = null;
-      try { stored = localStorage.getItem(THEME_KEY); } catch { /* private mode */ }
-      if (stored === 'light' || stored === 'dark') { applyTheme(stored); return; }
-      applyTheme(matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark');
-    })();
+    //
+    // Resolution already happened in the render-blocking head script, before
+    // first paint — see the comment there for why it cannot live in this module.
+    // Its key and setter are reused rather than restated, so there is exactly
+    // one definition of where the choice is stored and what a valid value is.
+    const { key: THEME_KEY, apply: applyTheme } = window.__ndmemTheme;
     $('#themeBtn').addEventListener('click', () => {
       const next = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
       applyTheme(next);
