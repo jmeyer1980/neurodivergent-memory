@@ -149,6 +149,8 @@ Memories are organized by cognitive domain:
 - **`list_memories`** — Paginated listing with optional district/archetype/project_id/epistemic-status filters
 - **`memory_stats`** — Aggregate statistics (totals, per-district/per-project counts, most-accessed, orphans) with optional project scope
 - **`server_handshake`** — Return runtime server identity/version details for explicit client-side version confirmation
+- **`agent_clock_in`** — Declare the identity this session writes as; later calls that omit `agent_id` inherit it
+- **`agent_clock_out`** — Clear that identity, falling back to the unassigned default. Idempotent
 - **`storage_diagnostics`** — Show the resolved snapshot path, WAL path, and effective persistence source in one response
 - **`import_memories`** — Bulk-import from inline JSON entries or a snapshot `file_path`, with `dry_run`, dedupe policies, and explicit snapshot migration flags
 - **`prepare_memory_city_context`** — Tool mirror of `explore_memory_city` for clients that support tools but do not invoke MCP prompts

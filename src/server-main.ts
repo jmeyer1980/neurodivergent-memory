@@ -4661,7 +4661,10 @@ export interface ActiveAgentSession {
   agent_id: string;
   session_id: string;
   bound_at: string;
-  source: "client_info" | "override";
+  // "clock_in" is deliberately distinct from "override": a caller reading the
+  // handshake needs to know whether an agent DECLARED this identity or the
+  // server merely inferred it from the client program's name.
+  source: "client_info" | "override" | "clock_in";
 }
 
 // Keyed by the per-session Server instance (Task 1 gives each MCP session its
@@ -5560,6 +5563,23 @@ function buildRegisteredToolDescriptors(): ToolDescriptor[] {
         }
       },
       {
+        name: "agent_clock_in",
+        description: "Declare the identity this session writes as. Every later call that omits agent_id is attributed to it, until agent_clock_out, a kind:handoff write, or close_task. Use when several agents share one MCP client (clientInfo.name cannot tell them apart), or to hand a session to a different role mid-run.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            agent_id: { type: "string", description: "Required. The identity to write as, e.g. \"risk-reviewer\"." },
+            session_id: { type: "string", description: "Optional. Scopes this identity's memories to a named session. Defaults to the session already bound, then to the transport's own session id." },
+          },
+          required: ["agent_id"],
+        }
+      },
+      {
+        name: "agent_clock_out",
+        description: "Clear this session's bound identity. Later calls that omit agent_id fall back to the unassigned default. Idempotent — safe to call when nothing is bound, so it can sit in a teardown path unconditionally.",
+        inputSchema: { type: "object", properties: {} }
+      },
+      {
         name: "import_memories",
         description: "Bulk-import memories from inline entries or from a snapshot file. Supports dry-run validation, dedupe policies, and explicit snapshot migration flags.",
         inputSchema: {
@@ -5884,6 +5904,9 @@ function toolWhenToUseHint(toolName: string): string {
     case "list_sessions":
     case "kanban_view":
       return "Use for broad inventory, pagination, or aggregate status checks across the graph.";
+    case "agent_clock_in":
+    case "agent_clock_out":
+      return "Use to declare or drop the identity this session writes as, when clientInfo.name cannot distinguish the agents behind one client.";
     case "update_status":
       return "Use to transition a memory's kanban status and optionally set current_slice or why_now.";
     case "publish_task":
@@ -6636,6 +6659,83 @@ server.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
           ),
         );
       }
+    }
+
+    case "agent_clock_in": {
+      const { agent_id, session_id } = (request.params.arguments ?? {}) as any;
+      // normalizeOptionalAgentId rejects non-strings and blank strings, but
+      // returns undefined for a MISSING one — which is fine everywhere else
+      // (attribution falls back) and useless here, where declaring the identity
+      // is the entire operation.
+      const normalizedAgentId = normalizeOptionalAgentId(agent_id, "agent_id");
+      if (!normalizedAgentId) {
+        throw createNMError(
+          NM_ERRORS.INPUT_VALIDATION_FAILED,
+          "agent_clock_in requires an agent_id.",
+          "Pass the identity this session should write as, e.g. agent_id: \"risk-reviewer\".",
+        );
+      }
+      // Normalize FIRST, reject what normalizes to empty, then validate the
+      // canonical form — the same three steps store_memory uses. Validating the
+      // raw string instead refused ids that normalize cleanly (" Task-42 "
+      // fails the pattern on its leading space), and skipping the empty check
+      // let null and whitespace fall silently through to the fallback, binding
+      // the identity to a session the caller never asked for.
+      let explicitSessionId: string | undefined;
+      if (session_id !== undefined) {
+        explicitSessionId = normalizeSessionId(session_id);
+        if (!explicitSessionId) {
+          throw createNMError(
+            NM_ERRORS.INPUT_VALIDATION_FAILED,
+            `Invalid session_id after normalization: ${session_id}`,
+            "session_id must normalize to a non-empty canonical value.",
+          );
+        }
+        validateSessionId(explicitSessionId);
+      }
+
+      const previous = getActiveAgentSession(server);
+      const resolvedSessionId = explicitSessionId
+        ?? previous?.session_id
+        ?? extra.sessionId
+        ?? "unknown";
+      bindAgentSession(server, normalizedAgentId, resolvedSessionId, "clock_in");
+
+      const replaced = previous && previous.agent_id !== normalizedAgentId
+        ? `\nReplaced: ${previous.agent_id} (${previous.source})`
+        : "";
+      return {
+        content: [{
+          type: "text",
+          text: [
+            `🕐 Clocked in as ${normalizedAgentId}.`,
+            `session_id: ${resolvedSessionId}`,
+            "Calls that omit agent_id are attributed to this identity until you clock out,",
+            "store a kind:handoff memory, or close_task — whichever comes first.",
+          ].join("\n") + replaced,
+        }],
+      };
+    }
+
+    case "agent_clock_out": {
+      const existing = getActiveAgentSession(server);
+      if (!existing) {
+        // Idempotent by contract, so it is safe in a teardown path that cannot
+        // know whether anything was ever bound.
+        return {
+          content: [{ type: "text", text: "🕐 Already clocked out — no active session identity to clear." }],
+        };
+      }
+      clearAgentSession(server);
+      return {
+        content: [{
+          type: "text",
+          text: [
+            `🕐 Clocked out ${existing.agent_id} (bound ${existing.bound_at} via ${existing.source}).`,
+            "Calls that omit agent_id now fall back to the unassigned default.",
+          ].join("\n"),
+        }],
+      };
     }
 
     case "server_handshake": {
