@@ -921,9 +921,42 @@
       // must still report "0 results" rather than silently look unsearched.
       const searching = state.search.query !== '';
       const litCount = searching ? H.countLit(state.items, state.search.hits, state.snapshot, state.view) : 0;
-      els.position.textContent = state.items.length
-        ? `card ${state.frontIndex + 1} of ${state.items.length}${H.positionSearchSuffix(searching, litCount)}`
-        : '—';
+      const baseText = state.items.length ? `card ${state.frontIndex + 1} of ${state.items.length}` : '—';
+      // #crumb keeps its box (visibility:hidden, not display:none) while
+      // searching -- see that CSS rule's own comment -- so hiding the
+      // coordinate never shrinks #locus. But #crumb's box HEIGHT is driven by
+      // how many lines its content wraps to, which is sensitive to how much
+      // row width its sibling #position currently takes, and #position's
+      // search-match suffix widens it the instant a query lands.
+      //
+      // Pinning #crumb's height ONCE, at the moment a query starts, does not
+      // survive anything that can change how many lines #crumb's CURRENT
+      // content needs at the CURRENT width -- a resize/rotation (the same
+      // coordinate needs a different wrap at a different width) or a dive
+      // mid-search (a longer coordinate needs more lines at the same width).
+      // Both land here: buildDrum()/updateFrontCard() call this on every
+      // resize-rebuild and every dive, so recomputing the pin on EVERY call
+      // (rather than once, at search-start) keeps it correct through both,
+      // with no separate resize listener needed.
+      //
+      // The measurement is taken against `baseText` -- #position's content
+      // WITHOUT the suffix -- not the actual (wider, suffixed) text about to
+      // be written below. That is what makes the pinned height match what
+      // #crumb already had a moment before this search existed: measuring
+      // against the real, suffixed #position would let the suffix's own
+      // width keep squeezing #crumb, which is exactly the bug this exists to
+      // prevent, just reintroduced one line later.
+      if (searching) {
+        els.crumb.style.height = '';
+        els.crumb.style.overflow = '';
+        els.position.textContent = baseText; // measure at the UNSUFFIXED width
+        els.crumb.style.height = els.crumb.getBoundingClientRect().height + 'px';
+        els.crumb.style.overflow = 'hidden';
+      } else {
+        els.crumb.style.height = '';
+        els.crumb.style.overflow = '';
+      }
+      els.position.textContent = state.items.length ? `${baseText}${H.positionSearchSuffix(searching, litCount)}` : '—';
       els.hudHint.textContent = H.hintFor(level, POINTER_KIND);
       // One card cannot be stepped between, and a lone ◀ ▶ pair implies it can.
       els.spin.classList.toggle('hidden', state.items.length < 2);
@@ -1854,25 +1887,17 @@
       const q = els.searchInput.value.trim();
       const nowSearching = q !== '';
       const wasSearching = els.locus.classList.contains('searching');
-      if (nowSearching && !wasSearching) {
-        // #crumb keeps its box (visibility:hidden, not display:none) while
-        // searching, precisely so hiding the coordinate never shrinks #locus
-        // -- see that rule's own comment. But #crumb's box HEIGHT is driven
-        // by how many lines its content wraps to, and that wrap is sensitive
-        // to how much row width its sibling #position currently takes.
-        // #position's search-match suffix (issue #172) widens it the moment
-        // a query lands, leaving #crumb less room and pushing it onto an
-        // extra wrapped line WHILE HIDDEN -- silently growing #locus,
-        // #chrome, and therefore --chromeH, and shoving every card down
-        // (caught by "search dims... without moving a single card" on
-        // mobile-safari at a deep coordinate). Pinning #crumb's height for
-        // the duration of the search holds #chrome's height steady
-        // regardless of what #position or a mid-search dive later do to
-        // crumb's own wrap -- content can clip inside it, which is
-        // invisible, since crumb itself is.
-        els.crumb.style.height = els.crumb.getBoundingClientRect().height + 'px';
-        els.crumb.style.overflow = 'hidden';
-      } else if (!nowSearching && wasSearching) {
+      // #crumb's height-pin itself is applied/recomputed entirely inside
+      // updateChrome (see its own comment) -- it runs in the same
+      // synchronous call that widens #position with the search suffix, so
+      // there is no window where the squeeze exists but the pin hasn't
+      // caught up. Clearing it is handled here too, though, and
+      // synchronously: `.searching` (toggled below) makes #crumb VISIBLE
+      // again immediately, but updateChrome only runs 250ms later via the
+      // debounced runSearch(''). Without this, #crumb would render visible
+      // but still clipped to its last frozen height for that quarter
+      // second.
+      if (!nowSearching && wasSearching) {
         els.crumb.style.height = '';
         els.crumb.style.overflow = '';
       }
