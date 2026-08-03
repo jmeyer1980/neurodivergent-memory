@@ -461,9 +461,9 @@ function buildNow() {
   const { command, args, shell } = resolveBuildCommand();
   const built = spawnSync(command, args, { cwd: REPO_ROOT, stdio: 'inherit', shell });
   if (built.status === 0) return { ok: true };
-  // status is null when the spawn itself failed, which is a different problem
-  // from a compile error and must not be reported as one.
-  return { ok: false, reason: built.error?.message ?? `exit ${built.status}` };
+  if (built.error) return { ok: false, reason: built.error.message };
+  if (built.signal) return { ok: false, reason: `terminated by ${built.signal}` };
+  return { ok: false, reason: `exit ${built.status ?? 'unknown'}` };
 }
 
 function restartFromKey() {
