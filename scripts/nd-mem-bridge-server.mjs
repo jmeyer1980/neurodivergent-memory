@@ -121,7 +121,7 @@ app.get('/search', async (req, res) => {
     if (req.query.project_id) args.project_id = String(req.query.project_id);
     // Number('abc') is NaN, which serialises to null and reaches the tool as a
     // malformed argument; an unparseable threshold means "no threshold given".
-    if (req.query.min_score) {
+    if (req.query.min_score !== undefined && req.query.min_score !== '') {
       const minScore = Number(req.query.min_score);
       if (Number.isFinite(minScore)) args.min_score = minScore;
     }
