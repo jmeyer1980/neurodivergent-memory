@@ -72,6 +72,22 @@ Running locally on the development branch; not part of a release cut (version st
 
 ### Fixed
 
+- **The bridge no longer stays alive when it cannot bind its port.** It registered no
+  `listen` error handler, so a second bridge lost the bind, printed nothing, and kept
+  running — with no `SIGINT`/`SIGTERM` handlers either, and closing a terminal on Windows
+  orphaning the child rather than killing it, these accumulated. A five-day-old bridge
+  therefore still owned port 3737 and answered `/health` with `200` from code that predated
+  the `/search` route, so the page's search 404'd while every check said "running" and
+  restarting appeared not to help. The bridge now exits 1 and names the process holding the
+  port, tears down cleanly on `SIGINT`/`SIGTERM` (closing the server, clearing the poll
+  timer, and ending open SSE streams that would otherwise hold it open — the shared daemon
+  is deliberately left running), and ships `npm run bridge` / `npm run bridge:stop`, which
+  stops by port ownership rather than a remembered pid.
+- **The bridge announced success on a failed start.** On Windows the `listen` callback fires
+  even when the bind loses — the dual-stack IPv6 bind fails a tick later — so the startup
+  banner printed `{"ok":true,...}` and `--open` launched a browser onto the *old* bridge
+  holding the port, confirming the wrong conclusion. Success is now gated on
+  `server.address()`, which is `null` in that callback.
 - `scripts/nd-mem-bridge-server.mjs` resolved its HTML/helpers/daemon-entry paths off
   `process.cwd()` instead of its own file location, so launching it via absolute path
   from any directory other than the repo root 404'd with "Bridge UI not found". Now
