@@ -11,6 +11,7 @@ import {
   describeKeys,
   isBuildStale,
   resolveBuildCommand,
+  describeBuildFailure,
   runRestart,
   RESTART_EXIT_CODE,
 } from "../scripts/nd-mem-bridge-keys.mjs";
@@ -247,6 +248,62 @@ test("posix spawns npm without a shell", () => {
   const { command, shell } = resolveBuildCommand({}, "linux");
   assert.equal(command, "npm");
   assert.notEqual(shell, true);
+});
+
+// --- describeBuildFailure -------------------------------------------------
+// This mapping is what the user reads when R refuses to restart, and it is the
+// SAME function whose lack of coverage let the Windows EINVAL bug through a
+// fully green suite: the build branch was never entered, so nothing checked
+// what it said. Pinned here against real spawnSync result shapes, captured on
+// 2026-08-03.
+
+test("a build that exited cleanly is a success", () => {
+  assert.deepEqual(describeBuildFailure({ status: 0, signal: null }), { ok: true });
+});
+
+test("a build that could not be spawned reports the spawn error", () => {
+  // The EINVAL case: node refusing to launch a .cmd. Reporting this as a
+  // compile error sent the user hunting for a TypeScript mistake that was
+  // never there.
+  const built = { status: null, signal: null, error: new Error("spawnSync npm.cmd EINVAL") };
+  assert.deepEqual(describeBuildFailure(built), { ok: false, reason: "spawnSync npm.cmd EINVAL" });
+});
+
+test("a build killed by a signal says so instead of 'exit null'", () => {
+  const built = { status: null, signal: "SIGKILL", error: undefined };
+  const { ok, reason } = describeBuildFailure(built);
+  assert.equal(ok, false);
+  assert.match(reason, /SIGKILL/);
+});
+
+test("a timeout reports the error, which is more specific than the signal", () => {
+  // Measured: a spawnSync timeout sets BOTH error (ETIMEDOUT) and signal
+  // (SIGTERM). "timed out" tells you more than "terminated by SIGTERM", so the
+  // error has to be checked first — this pins that ordering.
+  const built = { status: null, signal: "SIGTERM", error: new Error("spawnSync ETIMEDOUT") };
+  assert.match(describeBuildFailure(built).reason, /ETIMEDOUT/);
+});
+
+test("an ordinary compile failure reports its exit code", () => {
+  assert.deepEqual(describeBuildFailure({ status: 2, signal: null }), { ok: false, reason: "exit 2" });
+});
+
+test("no failure is ever described as 'null'", () => {
+  // The property, not the cases: every shape spawnSync can return has to
+  // produce something a human can act on. "exit null" is the failure mode this
+  // whole function exists to prevent.
+  const shapes = [
+    { status: null, signal: null, error: undefined },
+    { status: null, signal: null, error: new Error("boom") },
+    { status: null, signal: "SIGTERM", error: undefined },
+    { status: 1, signal: null, error: undefined },
+    {},
+  ];
+  for (const built of shapes) {
+    const { reason } = describeBuildFailure(built);
+    assert.ok(reason, `no reason for ${JSON.stringify(built)}`);
+    assert.doesNotMatch(reason, /null|undefined/, `unusable reason "${reason}" for ${JSON.stringify(built)}`);
+  }
 });
 
 // --- runRestart -----------------------------------------------------------

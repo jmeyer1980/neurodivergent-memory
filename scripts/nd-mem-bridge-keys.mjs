@@ -108,6 +108,28 @@ export function resolveBuildCommand(env = process.env, platform = process.platfo
 }
 
 /**
+ * Turn a spawnSync result into something a human can act on.
+ *
+ * THE POINT: a spawn that never ran is a different problem from a compile that
+ * failed, and must not be reported as one. `status` is null in BOTH cases, so
+ * a naive `exit ${status}` prints "exit null" and sends the user hunting for a
+ * TypeScript error that does not exist — which is exactly what happened when
+ * node refused to launch npm.cmd and returned EINVAL.
+ *
+ * Order matters. A spawnSync TIMEOUT sets both `error` (ETIMEDOUT) and
+ * `signal` (SIGTERM); the error is the more specific of the two, so it wins.
+ * `signal` alone means something outside killed the compiler — an OOM killer,
+ * a stray taskkill — which "exit null" described uselessly.
+ */
+export function describeBuildFailure(built) {
+  if (built?.status === 0) return { ok: true };
+  if (built?.error) return { ok: false, reason: built.error.message };
+  if (built?.signal) return { ok: false, reason: `terminated by ${built.signal}` };
+  if (typeof built?.status === 'number') return { ok: false, reason: `exit ${built.status}` };
+  return { ok: false, reason: 'the build did not run, and reported no reason' };
+}
+
+/**
  * Decide what `R` does. Extracted so the build branch is reachable from a test
  * without shelling out — its absence of coverage is exactly how the .cmd bug
  * above survived a full green suite.

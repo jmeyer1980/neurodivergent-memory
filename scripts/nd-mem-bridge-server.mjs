@@ -10,7 +10,7 @@ import { ensureDaemon } from '../build/core/ensure-daemon.js';
 import { resolveDaemonPort } from '../build/core/run-mode.js';
 import { parseSearchResults } from './nd-mem-rolodex-helpers.mjs';
 import { findPortOwners, describePortConflict, installLifecycle, resolvePort } from './nd-mem-bridge-lifecycle.mjs';
-import { installKeybinds, describeKeys, isBuildStale, resolveBuildCommand, runRestart } from './nd-mem-bridge-keys.mjs';
+import { installKeybinds, describeKeys, isBuildStale, resolveBuildCommand, describeBuildFailure, runRestart } from './nd-mem-bridge-keys.mjs';
 
 // Resolved from this file's own location, not process.cwd() — the bridge must
 // find its assets the same way regardless of the directory it's launched from.
@@ -459,11 +459,10 @@ function stopFromKey() {
 // happens on a restart the user asked for.
 function buildNow() {
   const { command, args, shell } = resolveBuildCommand();
-  const built = spawnSync(command, args, { cwd: REPO_ROOT, stdio: 'inherit', shell });
-  if (built.status === 0) return { ok: true };
-  if (built.error) return { ok: false, reason: built.error.message };
-  if (built.signal) return { ok: false, reason: `terminated by ${built.signal}` };
-  return { ok: false, reason: `exit ${built.status ?? 'unknown'}` };
+  // describeBuildFailure, not an inline check: a spawn that never ran and a
+  // compile that failed both leave status null, and telling them apart is the
+  // whole reason this reporting exists. See its tests for every shape.
+  return describeBuildFailure(spawnSync(command, args, { cwd: REPO_ROOT, stdio: 'inherit', shell }));
 }
 
 function restartFromKey() {
