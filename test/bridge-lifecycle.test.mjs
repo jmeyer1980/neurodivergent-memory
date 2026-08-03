@@ -8,6 +8,7 @@ import {
   findPortOwners,
   describePortConflict,
   installLifecycle,
+  parseNetstat,
 } from "../scripts/nd-mem-bridge-lifecycle.mjs";
 
 function getFreePort() {
@@ -72,6 +73,72 @@ test("findPortOwners finds this process holding a port it is listening on", asyn
     assert.ok(
       owners.includes(process.pid),
       `expected ${process.pid} among owners of ${port}, got ${JSON.stringify(owners)}`,
+    );
+  } finally {
+    await new Promise((r) => server.close(r));
+  }
+});
+
+// The Windows parser only ever runs on Windows, and CI is ubuntu — so without
+// fixture tests it is verified by nobody. These rows are real `netstat -ano`
+// output, captured on 2026-08-03.
+test("parseNetstat finds an IPv6 listener", () => {
+  const rows = "  TCP    [::1]:13739            [::]:0                 LISTENING       33164";
+  assert.deepEqual(parseNetstat(rows, 13739), [33164]);
+});
+
+test("parseNetstat finds an IPv4 listener", () => {
+  const rows = "  TCP    0.0.0.0:3737           0.0.0.0:0              LISTENING       47640";
+  assert.deepEqual(parseNetstat(rows, 3737), [47640]);
+});
+
+test("parseNetstat ignores established connections on the same port", () => {
+  const rows = [
+    "  TCP    0.0.0.0:3737           0.0.0.0:0              LISTENING       47640",
+    "  TCP    127.0.0.1:3737         127.0.0.1:63724        ESTABLISHED     9001",
+    "  TCP    [::1]:3737             [::1]:63725            ESTABLISHED     9002",
+  ].join("\r\n");
+  // A client connected to the bridge is not the bridge. Killing 9001 would
+  // shoot the user's own browser.
+  assert.deepEqual(parseNetstat(rows, 3737), [47640]);
+});
+
+test("parseNetstat does not confuse a port with one that merely ends in it", () => {
+  const rows = [
+    "  TCP    0.0.0.0:13737          0.0.0.0:0              LISTENING       1111",
+    "  TCP    0.0.0.0:3737           0.0.0.0:0              LISTENING       2222",
+  ].join("\r\n");
+  assert.deepEqual(parseNetstat(rows, 3737), [2222]);
+});
+
+test("parseNetstat ignores UDP rows", () => {
+  const rows = "  UDP    0.0.0.0:3737           *:*                                    3333";
+  assert.deepEqual(parseNetstat(rows, 3737), []);
+});
+
+test("findPortOwners finds an IPv6-only listener", async (t) => {
+  // Node resolves `localhost` to ::1 first, so an IPv6-only listener is not
+  // exotic. `netstat -p TCP` shows the IPv4 table ONLY — an IPv6 listener is
+  // invisible to it, which made findPortOwners report an empty list and
+  // bridge:stop announce "nothing to stop" while a bridge held the port. That
+  // is the same false reassurance this whole issue is about.
+  const port = await getFreePort();
+  let server;
+  try {
+    server = await new Promise((resolve, reject) => {
+      const srv = net.createServer();
+      srv.once("error", reject);
+      srv.listen(port, "::1", () => resolve(srv));
+    });
+  } catch {
+    t.skip("no IPv6 loopback on this machine");
+    return;
+  }
+  try {
+    const owners = await findPortOwners(port);
+    assert.ok(
+      owners.includes(process.pid),
+      `IPv6 listener not found: expected ${process.pid}, got ${JSON.stringify(owners)}`,
     );
   } finally {
     await new Promise((r) => server.close(r));
@@ -296,6 +363,44 @@ test("bridge:stop kills whoever holds the port, without being told a pid", async
 
     const exit = await Promise.race([done, sleep(5000).then(() => "timeout")]);
     assert.notEqual(exit, "timeout", "port holder was still alive after bridge:stop");
+  } finally {
+    child.kill();
+  }
+});
+
+test("bridge:stop refuses to kill the shared daemon", async () => {
+  // The daemon's /health is {ok:true, pid, version, memoryPath, mode:"daemon",
+  // memoryCount} — it satisfies a naive "ok and memoryPath" probe exactly. The
+  // daemon and bridge ports are neighbours by convention and both env-driven,
+  // so a stale ND_MEM_BRIDGE_PORT pointing at the daemon is an ordinary
+  // mistake, and the daemon is the ONE process the architecture says must
+  // outlive the bridge.
+  const port = await getFreePort();
+  const source = `
+    const http = require('http');
+    http.createServer((req, res) => {
+      res.setHeader('content-type', 'application/json');
+      res.end(JSON.stringify({ ok: true, pid: process.pid, version: '0.3.9',
+        memoryPath: 'x', mode: 'daemon', memoryCount: 5 }));
+    }).listen(${port}, '127.0.0.1');
+  `;
+  const { child, done } = runNode(["-e", source]);
+
+  try {
+    const deadline = Date.now() + 8000;
+    let up = false;
+    while (Date.now() < deadline && !up) {
+      try { up = (await fetch(`http://127.0.0.1:${port}/health`)).ok; } catch { await sleep(100); }
+    }
+    assert.ok(up, "stand-in daemon never came up");
+
+    const stopped = await runNode(["scripts/nd-mem-bridge-stop.mjs"], {
+      ND_MEM_BRIDGE_PORT: String(port),
+    }).done;
+    assert.notEqual(stopped.code, 0, "should have refused");
+
+    const alive = await Promise.race([done, sleep(1500).then(() => "alive")]);
+    assert.equal(alive, "alive", "bridge:stop killed the shared daemon");
   } finally {
     child.kill();
   }

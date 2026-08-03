@@ -394,6 +394,12 @@ server.on('error', async (error) => {
   // the one message this whole issue exists to print would be a poor joke.
   clearInterval(pollTimer);
   process.exitCode = 1;
+  // Unconditional, not incidental: on the measured EADDRINUSE path address() is
+  // already null and there is no handle to release, but this handler fires for
+  // ANY listen error, and one that arrived with the handle still live would
+  // otherwise leave a process that reported failure and then ran forever. The
+  // callback keeps ERR_SERVER_NOT_RUNNING from surfacing as an 'error' event.
+  server.close(() => {});
 
   if (error.code !== 'EADDRINUSE') {
     console.error('Bridge: FATAL — listen failed:', error);

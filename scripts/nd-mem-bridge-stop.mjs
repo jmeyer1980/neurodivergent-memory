@@ -23,9 +23,14 @@ async function looksLikeBridge(port) {
     });
     if (!res.ok) return false;
     const body = await res.json();
-    // An older bridge is exactly what this script most needs to stop, so the
-    // probe checks only the fields /health has always had.
-    return body?.ok === true && typeof body?.memoryPath === 'string';
+    // The DAEMON also answers {ok:true, ..., memoryPath} — plus mode:"daemon" —
+    // and it is the one process the architecture says must outlive the bridge.
+    // Its port and the bridge's are both env-driven neighbours, so a stale
+    // ND_MEM_BRIDGE_PORT aimed at the daemon is an ordinary mistake. Refuse
+    // anything that calls itself the daemon, and require pollMs, which is the
+    // bridge's own /health field and nothing else's.
+    if (body?.mode === 'daemon') return false;
+    return body?.ok === true && typeof body?.memoryPath === 'string' && typeof body?.pollMs === 'number';
   } catch {
     return false;
   }

@@ -49,7 +49,7 @@ function run(execFileImpl, cmd, args) {
  * address ends in the port we asked about, and the foreign address is the
  * wildcard. That holds in every locale.
  */
-function parseNetstat(stdout, port) {
+export function parseNetstat(stdout, port) {
   const owners = [];
   for (const line of stdout.split(/\r?\n/)) {
     const cols = line.trim().split(/\s+/);
@@ -81,7 +81,12 @@ export async function findPortOwners(port, options = {}) {
   const { execFileImpl = nodeExecFile, platform = process.platform } = options;
 
   if (platform === 'win32') {
-    const stdout = await run(execFileImpl, 'netstat', ['-ano', '-p', 'TCP']);
+    // NOT `-p TCP`: that selects the IPv4 table only, and an IPv6 listener is
+    // then invisible — which made this return [] while a bridge held the port,
+    // and made bridge:stop announce "nothing to stop". Node resolves localhost
+    // to ::1 first, so IPv6-only listeners are ordinary, not exotic. Plain
+    // -ano lists every table; parseNetstat filters by row shape.
+    const stdout = await run(execFileImpl, 'netstat', ['-ano']);
     return [...new Set(parseNetstat(stdout, port))];
   }
 
@@ -94,8 +99,10 @@ export async function findPortOwners(port, options = {}) {
   const owners = [];
   for (const line of ss.split(/\r?\n/)) {
     if (!new RegExp(`[:.]${port}\\s`).test(line)) continue;
-    const match = line.match(/pid=(\d+)/);
-    if (match) owners.push(Number(match[1]));
+    // One row can name several pids — SO_REUSEPORT siblings appear as
+    // users:(("node",pid=123,fd=20),("node",pid=456,fd=21)). Taking only the
+    // first would leave a holder alive and the port still busy.
+    for (const match of line.matchAll(/pid=(\d+)/g)) owners.push(Number(match[1]));
   }
   return [...new Set(owners)];
 }
