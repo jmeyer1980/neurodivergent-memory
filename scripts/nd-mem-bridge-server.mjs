@@ -10,11 +10,7 @@ import { ensureDaemon } from '../build/core/ensure-daemon.js';
 import { resolveDaemonPort } from '../build/core/run-mode.js';
 import { parseSearchResults } from './nd-mem-rolodex-helpers.mjs';
 import { findPortOwners, describePortConflict, installLifecycle, resolvePort } from './nd-mem-bridge-lifecycle.mjs';
-import { installKeybinds, describeKeys, isBuildStale, RESTART_EXIT_CODE } from './nd-mem-bridge-keys.mjs';
-
-// npm is a .cmd shim on Windows, and spawnSync without a shell will not find a
-// bare `npm` there.
-const NPM_CMD = process.platform === 'win32' ? 'npm.cmd' : 'npm';
+import { installKeybinds, describeKeys, isBuildStale, resolveBuildCommand, runRestart } from './nd-mem-bridge-keys.mjs';
 
 // Resolved from this file's own location, not process.cwd() — the bridge must
 // find its assets the same way regardless of the directory it's launched from.
@@ -458,33 +454,35 @@ function stopFromKey() {
   lifecycle.shutdown('S');
 }
 
+// spawnSync blocks the event loop, so requests stall for the length of the
+// compile. That is the honest cost of building on this thread, and it only
+// happens on a restart the user asked for.
+function buildNow() {
+  const { command, args, shell } = resolveBuildCommand();
+  const built = spawnSync(command, args, { cwd: REPO_ROOT, stdio: 'inherit', shell });
+  if (built.status === 0) return { ok: true };
+  // status is null when the spawn itself failed, which is a different problem
+  // from a compile error and must not be reported as one.
+  return { ok: false, reason: built.error?.message ?? `exit ${built.status}` };
+}
+
 function restartFromKey() {
-  if (!SUPERVISED) {
-    console.error(
-      'Bridge: R needs the supervisor — a process cannot replace itself. '
-      + 'Start with `npm run bridge` (or `node scripts/nd-mem-bridge.mjs`) and R will work.',
-    );
-    return;
-  }
-  // BUILD BEFORE SHUTTING ANYTHING DOWN. If tsc fails, the bridge that is
-  // already up stays up — shutting down first and then discovering the build
-  // is broken leaves the user with nothing running and a compile error.
-  // spawnSync blocks the event loop, so requests stall for the length of the
-  // compile; that is the honest cost of doing it on this thread, and it only
-  // happens on a restart the user asked for.
-  if (isBuildStale(path.join(REPO_ROOT, 'src'), path.join(REPO_ROOT, 'build'))) {
-    console.error('Bridge: R — src/ is newer than build/, compiling first…');
-    const built = spawnSync(NPM_CMD, ['run', 'build'], { cwd: REPO_ROOT, stdio: 'inherit' });
-    if (built.status !== 0) {
-      console.error('Bridge: build FAILED — staying up on the code already running. Fix it and press R again.');
-      return;
-    }
-  }
-  console.error('Bridge: R — restarting.');
-  keys.dispose();
-  // The supervisor is watching for this code and will launch a fresh process,
-  // which is the only way new code gets loaded.
-  lifecycle.shutdown('R', RESTART_EXIT_CODE);
+  const restarting = runRestart({
+    supervised: SUPERVISED,
+    // ND_MEM_BRIDGE_NO_BUILD keeps the end-to-end restart test from running a
+    // real tsc into the repo's own build/ while other suites are importing
+    // from it — node --test runs files in parallel. The build branch itself is
+    // covered directly by runRestart's unit tests.
+    stale: process.env.ND_MEM_BRIDGE_NO_BUILD === '1'
+      ? false
+      : isBuildStale(path.join(REPO_ROOT, 'src'), path.join(REPO_ROOT, 'build')),
+    runBuild: buildNow,
+    // The supervisor is watching for this code and will launch a fresh
+    // process, which is the only way new code gets loaded.
+    shutdown: (signal, code) => { keys.dispose(); lifecycle.shutdown(signal, code); },
+    log: (message) => console.error(message),
+  });
+  if (!restarting) console.error(describeKeys());
 }
 
 function statusFromKey() {

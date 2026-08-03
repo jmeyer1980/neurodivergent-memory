@@ -10,6 +10,8 @@ import {
   installKeybinds,
   describeKeys,
   isBuildStale,
+  resolveBuildCommand,
+  runRestart,
   RESTART_EXIT_CODE,
 } from "../scripts/nd-mem-bridge-keys.mjs";
 
@@ -129,11 +131,16 @@ test("nothing is installed when stdin is not a TTY", async () => {
 });
 
 test("a key handler that throws does not kill the bridge", async () => {
-  const { input } = rig({ onStatus: () => { throw new Error("boom"); } });
+  const { input, written, calls } = rig({
+    onStatus: () => { throw new Error("boom"); },
+  });
   await press(input, "i");
-  // Reaching here at all is the assertion: an unhandled throw inside a stdin
-  // 'data' listener would take the process down.
-  assert.ok(true);
+  await press(input, "s");
+  // Surviving is not enough to assert — a test that only reaches its own last
+  // line would pass even if nothing dispatched at all. Prove the throw was
+  // caught AND reported, and that the next key still works.
+  assert.match(written.join(""), /boom/, "the failure was swallowed silently");
+  assert.deepEqual(calls, ["stop"], "dispatch died after one handler threw");
 });
 
 // --- describeKeys ---------------------------------------------------------
@@ -201,6 +208,94 @@ test("isBuildStale is false when there is no source tree to compare", () => {
   assert.equal(isBuildStale(path.join(dir, "nope"), build), false);
 });
 
+// --- resolveBuildCommand --------------------------------------------------
+// Since the CVE-2024-27980 fix, node REFUSES to spawn a .bat/.cmd without
+// shell:true — spawnSync('npm.cmd', …) returns status null and error EINVAL.
+// A caller checking `status !== 0` reads that as "the build failed" and tells
+// the user to fix a compile error that does not exist, so R could never
+// rebuild on Windows at all: it restarted only when the build was already
+// fresh, i.e. only when a restart was not needed.
+
+test("on Windows the build never spawns a bare .cmd", () => {
+  const { command, args, shell } = resolveBuildCommand({}, "win32");
+  // Spawning a .cmd without shell:true is refused outright (EINVAL), and
+  // spawning it WITH shell:true warns DEP0190 on every keypress. Neither is
+  // acceptable, so the command itself must not be a .cmd.
+  assert.doesNotMatch(command, /\.(cmd|bat)$/i, `refuses to spawn: ${command}`);
+  assert.notEqual(shell, true, "shell:true triggers DEP0190 on every R");
+  assert.deepEqual(args.slice(-2), ["run", "build"]);
+});
+
+test("the npm CLI is run through node when npm told us where it is", () => {
+  // Set for us whenever the bridge was started by an npm script. Running the
+  // .js directly needs no shell, so it dodges both the .cmd refusal and the
+  // shell-args deprecation warning.
+  const cli = "C:\\Program Files\\nodejs\\node_modules\\npm\\bin\\npm-cli.js";
+  const { command, args, shell } = resolveBuildCommand({ npm_execpath: cli }, "win32");
+  assert.equal(command, process.execPath);
+  assert.deepEqual(args, [cli, "run", "build"]);
+  assert.notEqual(shell, true);
+});
+
+test("a non-js npm_execpath is not run through node", () => {
+  // npm_execpath can point at the shim rather than the CLI script.
+  const { command } = resolveBuildCommand({ npm_execpath: "/usr/local/bin/npm" }, "linux");
+  assert.notEqual(command, process.execPath);
+});
+
+test("posix spawns npm without a shell", () => {
+  const { command, shell } = resolveBuildCommand({}, "linux");
+  assert.equal(command, "npm");
+  assert.notEqual(shell, true);
+});
+
+// --- runRestart -----------------------------------------------------------
+// This branch had NO direct coverage, which is exactly how the .cmd bug above
+// survived: the only test touching it ran after `npm test` had already built,
+// so the build path was never entered.
+
+function restartRig(overrides = {}) {
+  const logged = [];
+  const shutdowns = [];
+  const builds = [];
+  const result = runRestart({
+    supervised: true,
+    stale: true,
+    runBuild: () => { builds.push(true); return { ok: true }; },
+    shutdown: (...a) => shutdowns.push(a),
+    log: (m) => logged.push(String(m)),
+    ...overrides,
+  });
+  return { logged, shutdowns, builds, result };
+}
+
+test("a fresh build tree restarts without compiling", () => {
+  const { builds, shutdowns } = restartRig({ stale: false });
+  assert.deepEqual(builds, [], "should not have built");
+  assert.deepEqual(shutdowns, [["R", RESTART_EXIT_CODE]]);
+});
+
+test("a stale build tree compiles first, then restarts", () => {
+  const { builds, shutdowns } = restartRig();
+  assert.deepEqual(builds, [true]);
+  assert.deepEqual(shutdowns, [["R", RESTART_EXIT_CODE]]);
+});
+
+test("a failed build leaves the running bridge up", () => {
+  const { shutdowns, logged } = restartRig({
+    runBuild: () => ({ ok: false, reason: "spawnSync npm.cmd EINVAL" }),
+  });
+  // The entire point of building before shutting down.
+  assert.deepEqual(shutdowns, [], "shut down despite a failed build");
+  assert.match(logged.join("\n"), /EINVAL/, `did not report WHY the build failed:\n${logged.join("\n")}`);
+});
+
+test("an unsupervised restart explains itself and does not stop the bridge", () => {
+  const { shutdowns, logged } = restartRig({ supervised: false });
+  assert.deepEqual(shutdowns, [], "stopped a bridge that could not be relaunched");
+  assert.match(logged.join("\n"), /supervis/i);
+});
+
 // --- the supervisor -------------------------------------------------------
 
 function runNode(args, env = {}) {
@@ -264,7 +359,25 @@ test("the supervisor tells the child it is supervised", async () => {
   }).done;
 
   // Without this the bridge cannot tell the user why R did nothing.
-  assert.match(stdout, /1/);
+  assert.equal(stdout.trim(), "1");
+});
+
+test("the supervisor reports failure when its child is killed by a signal", async () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "ndm-sup-sig-"));
+  const fake = path.join(tempDir, "fake-server.mjs");
+  fs.writeFileSync(fake, "console.log('up'); setInterval(() => {}, 1000);");
+
+  const { child, done } = runNode(["scripts/nd-mem-bridge.mjs"], { ND_MEM_BRIDGE_ENTRY: fake });
+  const deadline = Date.now() + 8000;
+  while (Date.now() < deadline) {
+    try { if ((await fs.promises.stat(fake)).isFile()) break; } catch { /* retry */ }
+  }
+  await sleep(1500);
+  child.kill();
+  const { code } = await done;
+  // A bridge that was killed did not succeed, and `npm run bridge` reporting
+  // success would hide that from any script chaining off it.
+  assert.notEqual(code, 0);
 });
 
 // --- the real bridge ------------------------------------------------------
@@ -290,6 +403,9 @@ test("R restarts the real bridge under the real supervisor, and S stops it", asy
       ...process.env,
       ND_MEM_BRIDGE_PORT: String(port),
       ND_MEM_BRIDGE_KEYS: "1",
+      // Without this, pressing R here runs a real tsc into the repo's own
+      // build/ while parallel suites are importing from it.
+      ND_MEM_BRIDGE_NO_BUILD: "1",
     },
     stdio: ["pipe", "pipe", "pipe"],
   });

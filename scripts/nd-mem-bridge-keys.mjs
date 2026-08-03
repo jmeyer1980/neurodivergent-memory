@@ -76,6 +76,78 @@ export function isBuildStale(srcDir, buildDir) {
 }
 
 /**
+ * How to invoke `npm run build` from inside the bridge.
+ *
+ * NOT a bare `npm.cmd`. Since the CVE-2024-27980 fix (node 18.20.2 / 20.12 /
+ * 22+), spawning a .bat or .cmd WITHOUT shell:true is refused outright:
+ * spawnSync returns status null and error EINVAL. A caller testing
+ * `status !== 0` reads that as a failed compile and tells the user to fix an
+ * error that does not exist — so R could never rebuild on Windows at all. It
+ * restarted only when the build was already fresh, which is precisely when a
+ * restart was not needed.
+ *
+ * Preference order:
+ * 1. `npm_execpath`, set whenever npm launched us, pointing at npm-cli.js.
+ *    Running that with node needs no shell at all.
+ * 2. Windows without it: `cmd.exe /c npm run build`. Deliberately NOT
+ *    `shell: true` — that also works, but node then warns DEP0190 on every
+ *    press of R about unescaped arguments. Naming cmd.exe explicitly keeps the
+ *    arguments a real argv array, so there is nothing to escape and nothing to
+ *    warn about.
+ * 3. Everywhere else: plain npm, no shell.
+ */
+export function resolveBuildCommand(env = process.env, platform = process.platform) {
+  const cli = env.npm_execpath;
+  if (cli && /\.[cm]?js$/i.test(cli)) {
+    return { command: process.execPath, args: [cli, 'run', 'build'], shell: false };
+  }
+  if (platform === 'win32') {
+    return { command: 'cmd.exe', args: ['/c', 'npm', 'run', 'build'], shell: false };
+  }
+  return { command: 'npm', args: ['run', 'build'], shell: false };
+}
+
+/**
+ * Decide what `R` does. Extracted so the build branch is reachable from a test
+ * without shelling out — its absence of coverage is exactly how the .cmd bug
+ * above survived a full green suite.
+ *
+ * @param {object} o
+ * @param {boolean} o.supervised   can anything actually relaunch us?
+ * @param {boolean} o.stale        has src/ moved since the last compile?
+ * @param {() => {ok: boolean, reason?: string}} o.runBuild
+ * @param {(signal: string, code: number) => void} o.shutdown
+ */
+export function runRestart({ supervised, stale, runBuild, shutdown, log }) {
+  if (!supervised) {
+    log(
+      'Bridge: R needs the supervisor — a process cannot replace itself. '
+      + 'Start with `npm run bridge` (or `node scripts/nd-mem-bridge.mjs`) and R will work.',
+    );
+    return false;
+  }
+
+  // BUILD BEFORE SHUTTING ANYTHING DOWN. If the compile fails, the bridge that
+  // is already up stays up on the code that works; shutting down first and
+  // then discovering the build is broken leaves nothing running.
+  if (stale) {
+    log('Bridge: R — src/ is newer than build/, compiling first…');
+    const built = runBuild();
+    if (!built.ok) {
+      log(
+        `Bridge: build FAILED (${built.reason ?? 'unknown error'}) — staying up on the code `
+        + 'already running. Fix it and press R again.',
+      );
+      return false;
+    }
+  }
+
+  log('Bridge: R — restarting.');
+  shutdown('R', RESTART_EXIT_CODE);
+  return true;
+}
+
+/**
  * Attach single-key handlers to `input`.
  *
  * Returns `{ installed, dispose }`. `dispose` is not optional politeness: raw
@@ -108,7 +180,9 @@ export function installKeybinds(options) {
   // A pipe has no setRawMode, and calling it on one throws ERR_TTY_INIT_FAILED.
   const rawModeAvailable = typeof input?.setRawMode === 'function';
 
-  const actions = {
+  // Null-prototype: a piped chunk under `force` could otherwise name something
+  // off Object.prototype and reach a function that is not a key handler.
+  const actions = Object.assign(Object.create(null), {
     s: onStop,
     r: onRestart,
     o: onOpen,
@@ -119,7 +193,7 @@ export function installKeybinds(options) {
     // keybinds would silently remove the clean shutdown #171 landed and leave
     // the bridge deaf to the first key every user reaches for.
     '': onStop,
-  };
+  });
 
   function onData(chunk) {
     const key = String(chunk);
