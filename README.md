@@ -733,7 +733,30 @@ With no flag, an interactive terminal asks `Open bridge UI at http://localhost:3
 
 The web app polls the memory snapshot for external changes and pushes live updates over server-sent events, and supports renaming a project across all its memories, merging into an existing project on a name collision, and a "did you mean" prompt for near-miss project names.
 
-Stop it with `Ctrl+C`, or from anywhere:
+### Terminal keys
+
+While the bridge is running in an interactive terminal, single keypresses control it:
+
+| Key | Does |
+|---|---|
+| `S` | Stop cleanly — closes the server, clears timers, ends open SSE streams |
+| `R` | Restart, recompiling first if `src/` is newer than `build/` |
+| `O` | Open the UI in a browser |
+| `I` | Status — port, store path, connected SSE clients, uptime, pid |
+| `?` | Print this list |
+
+`Ctrl+C` still stops the bridge as always.
+
+`R` gives you a **fresh process**, which is the only way changed code is loaded —
+so `npm run bridge` starts a small supervisor that owns the restart loop. If
+`src/` has moved since the last compile, `R` runs `npm run build` **before**
+shutting anything down: when the build fails, the bridge you already have stays
+up on the code that works, and you can fix the error and press `R` again.
+
+Run `npm run bridge:server` to start the server directly without the supervisor.
+Every key still works except `R`, which needs the supervisor and says so.
+
+Stop it with `Ctrl+C` or `S`, or from anywhere:
 
 ```bash
 npm run bridge:stop

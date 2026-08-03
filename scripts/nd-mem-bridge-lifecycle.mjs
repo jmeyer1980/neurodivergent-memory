@@ -184,7 +184,12 @@ export function installLifecycle(options) {
 
   let shuttingDown = false;
 
-  function shutdown(signal) {
+  /**
+   * @param {string} signal what asked for the shutdown, for the log line
+   * @param {number} exitCode what to exit WITH — the restart path (#175) uses
+   *   this to tell the supervisor to relaunch instead of stopping.
+   */
+  function shutdown(signal, exitCode = 0) {
     // Ctrl+C twice, or a signal arriving mid-teardown, must not re-enter: the
     // second pass would close an already-closing server and exit twice.
     if (shuttingDown) return;
@@ -203,13 +208,16 @@ export function installLifecycle(options) {
 
     const deadline = setTimeout(() => {
       log('Bridge: connections did not close in time — exiting anyway.');
-      onExit(1);
+      // A restart that was asked for still has to happen even if close hangs,
+      // so a requested code wins; a plain stop that had to be forced is a
+      // failure and says so.
+      onExit(exitCode || 1);
     }, forceExitMs);
     deadline.unref?.();
 
     server.close(() => {
       clearTimeout(deadline);
-      onExit(0);
+      onExit(exitCode);
     });
   }
 

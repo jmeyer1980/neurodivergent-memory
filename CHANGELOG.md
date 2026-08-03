@@ -6,6 +6,17 @@ Running locally on the development branch; not part of a release cut (version st
 
 ### Added
 
+- **Terminal keybinds for the bridge** (`S` stop, `R` restart, `O` open UI, `I` status,
+  `?` help). `R` gives you a fresh process — the only way changed code is loaded — so
+  `npm run bridge` now starts a small supervisor that owns the restart loop; a process
+  cannot re-exec itself, and spawning a replacement then exiting would hand the terminal
+  back to the shell, so keypresses would stop reaching the bridge after the first restart.
+  When `src/` is newer than `build/`, `R` recompiles **before** shutting anything down, so
+  a failed build leaves the running bridge up rather than leaving you with nothing.
+  `npm run bridge:server` still starts the server directly, where every key works except
+  `R`. Raw mode means the terminal no longer turns `Ctrl+C` into `SIGINT`, so the bridge
+  handles it explicitly — `Ctrl+C` still stops it cleanly — and cooked mode is restored on
+  exit so the shell keeps echoing.
 - **Single-writer daemon architecture.** `build/index.js` now dispatches three modes:
   `--daemon` (sole process that opens `memories.json`, serving MCP over Streamable HTTP
   on `127.0.0.1:3838`, port overridable via `NEURODIVERGENT_MEMORY_DAEMON_PORT`),
