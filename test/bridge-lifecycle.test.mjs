@@ -406,6 +406,41 @@ test("bridge:stop refuses to kill the shared daemon", async () => {
   }
 });
 
+// A misconfigured port must not read as a clean machine. Number('abc') is NaN,
+// nothing can ever be listening on NaN, so the ownership lookup comes back
+// empty and the script would announce "nothing to stop" and exit 0 — reporting
+// success for a run that never checked anything. Same class as every other bug
+// in this issue: an absence taken as evidence when the instrument was blind.
+for (const [label, value] of [
+  ["non-numeric", "abc"],
+  ["out of range", "70000"],
+  ["zero", "0"],
+  ["fractional", "3737.5"],
+]) {
+  test(`bridge:stop rejects a ${label} port instead of reporting success`, async () => {
+    const { code, stdout, stderr } = await runNode(["scripts/nd-mem-bridge-stop.mjs"], {
+      ND_MEM_BRIDGE_PORT: value,
+    }).done;
+    const output = `${stdout}${stderr}`;
+    assert.notEqual(code, 0, `should have failed. output:\n${output}`);
+    assert.doesNotMatch(output, /nothing to stop/i, `claimed nothing to stop:\n${output}`);
+    assert.match(output, /ND_MEM_BRIDGE_PORT/, `did not name the setting at fault:\n${output}`);
+    assert.match(output, new RegExp(value.replace(".", "\\.")), `did not echo the bad value:\n${output}`);
+  });
+}
+
+test("the bridge names the setting at fault when its port is unusable", async () => {
+  // Left alone this is a raw ERR_SOCKET_BAD_PORT stack trace naming
+  // "options.port", which is not a thing the user set.
+  const { code, stdout, stderr } = await runNode(
+    ["scripts/nd-mem-bridge-server.mjs", "--no-open"],
+    { ND_MEM_BRIDGE_PORT: "abc" },
+  ).done;
+  const output = `${stdout}${stderr}`;
+  assert.notEqual(code, 0, `should have failed:\n${output}`);
+  assert.match(output, /ND_MEM_BRIDGE_PORT/, `did not name the setting at fault:\n${output}`);
+});
+
 test("bridge:stop reports plainly when nothing holds the port", async () => {
   const port = await getFreePort();
   const { done } = runNode(["scripts/nd-mem-bridge-stop.mjs"], { ND_MEM_BRIDGE_PORT: String(port) });

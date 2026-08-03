@@ -9,7 +9,7 @@ import * as readline from 'readline';
 import { ensureDaemon } from '../build/core/ensure-daemon.js';
 import { resolveDaemonPort } from '../build/core/run-mode.js';
 import { parseSearchResults } from './nd-mem-rolodex-helpers.mjs';
-import { findPortOwners, describePortConflict, installLifecycle } from './nd-mem-bridge-lifecycle.mjs';
+import { findPortOwners, describePortConflict, installLifecycle, resolvePort } from './nd-mem-bridge-lifecycle.mjs';
 
 // Resolved from this file's own location, not process.cwd() — the bridge must
 // find its assets the same way regardless of the directory it's launched from.
@@ -17,7 +17,16 @@ const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.join(SCRIPT_DIR, '..');
 
 const app = express();
-const PORT = Number(process.env.ND_MEM_BRIDGE_PORT || 3737);
+// Validated here rather than left to app.listen(), which throws
+// ERR_SOCKET_BAD_PORT complaining about "options.port" — not a thing anyone
+// set. Name the setting the user actually got wrong.
+let PORT;
+try {
+  PORT = resolvePort(process.env.ND_MEM_BRIDGE_PORT, 3737);
+} catch (error) {
+  console.error(`Bridge: FATAL — ${error.message}`);
+  process.exit(1);
+}
 const USER_HOME = os.homedir();
 const DEFAULT_MEMORY_PATH = path.join(USER_HOME, '.neurodivergent-memory', 'memories.json');
 const MEMORY_PATH = process.env.ND_MEM_FILE || DEFAULT_MEMORY_PATH;

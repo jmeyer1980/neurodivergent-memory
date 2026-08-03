@@ -20,6 +20,27 @@ import { execFile as nodeExecFile } from 'child_process';
 
 const LOOKUP_TIMEOUT_MS = 4000;
 
+/**
+ * Parse a port from configuration, or throw naming the setting at fault.
+ *
+ * Number('abc') is NaN, and NOTHING CAN EVER BE LISTENING ON NaN — so an
+ * unvalidated port turns every ownership lookup into an empty result, and
+ * bridge:stop would announce "nothing to stop" and exit 0 for a run that never
+ * checked anything. A misconfigured port must not read as a clean machine.
+ * Shared so both scripts fail the same way, and so neither reports a state it
+ * did not verify.
+ */
+export function resolvePort(raw, fallback, settingName = 'ND_MEM_BRIDGE_PORT') {
+  if (raw === undefined || raw === '') return fallback;
+  const port = Number(raw);
+  if (!Number.isInteger(port) || port < 1 || port > 65535) {
+    throw new Error(
+      `${settingName}=${raw} is not a usable port. Expected a whole number between 1 and 65535.`,
+    );
+  }
+  return port;
+}
+
 /** The command that answers "who holds this port", for a human to run. */
 export function portOwnerCommand(port, platform = process.platform) {
   return platform === 'win32'
