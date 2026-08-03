@@ -6675,10 +6675,27 @@ server.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
           "Pass the identity this session should write as, e.g. agent_id: \"risk-reviewer\".",
         );
       }
-      if (session_id !== undefined && session_id !== null) validateSessionId(session_id);
+      // Normalize FIRST, reject what normalizes to empty, then validate the
+      // canonical form — the same three steps store_memory uses. Validating the
+      // raw string instead refused ids that normalize cleanly (" Task-42 "
+      // fails the pattern on its leading space), and skipping the empty check
+      // let null and whitespace fall silently through to the fallback, binding
+      // the identity to a session the caller never asked for.
+      let explicitSessionId: string | undefined;
+      if (session_id !== undefined) {
+        explicitSessionId = normalizeSessionId(session_id);
+        if (!explicitSessionId) {
+          throw createNMError(
+            NM_ERRORS.INPUT_VALIDATION_FAILED,
+            `Invalid session_id after normalization: ${session_id}`,
+            "session_id must normalize to a non-empty canonical value.",
+          );
+        }
+        validateSessionId(explicitSessionId);
+      }
 
       const previous = getActiveAgentSession(server);
-      const resolvedSessionId = normalizeSessionId(session_id)
+      const resolvedSessionId = explicitSessionId
         ?? previous?.session_id
         ?? extra.sessionId
         ?? "unknown";

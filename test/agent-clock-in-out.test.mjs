@@ -154,6 +154,40 @@ test("clocking in accepts an explicit session_id", async () => {
   });
 });
 
+// `store_memory` normalizes session_id FIRST (NFKC, trim, lower-case), rejects
+// what normalizes to empty, and validates the normalized value. Clock-in has to
+// match that flow exactly, or the same string is accepted by one tool and
+// refused by the other — and a session_id that means one thing on write means
+// another on the identity that produced the write.
+
+test("clocking in normalizes session_id the way store_memory does", async () => {
+  await withDaemon(async (port) => {
+    const session = await initSession(port, "some-client");
+    // Validating BEFORE normalizing rejects this: the raw string fails the
+    // pattern on its leading space, though it trims to a perfectly good id.
+    const res = await postMcp(port, toolCall(2, "agent_clock_in", { agent_id: "a", session_id: "  Task-42  " }), session);
+    assert.equal(res.json?.error, undefined, `rejected a session_id that normalizes cleanly:\n${JSON.stringify(res.json)}`);
+    assert.notEqual(res.json?.result?.isError, true, `rejected a session_id that normalizes cleanly:\n${textOf(res)}`);
+
+    const shook = textOf(await postMcp(port, toolCall(3, "server_handshake", {}), session));
+    assert.match(shook, /session_id=task-42\b/, `session_id was not normalized to canonical form:\n${shook}`);
+  });
+});
+
+test("clocking in refuses a session_id that cannot normalize", async () => {
+  await withDaemon(async (port) => {
+    const session = await initSession(port, "some-client");
+    for (const bad of [null, "   ", " ", "not a valid id!", "-leading-dash"]) {
+      const res = await postMcp(port, toolCall(2, "agent_clock_in", { agent_id: "a", session_id: bad }), session);
+      const errored = Boolean(res.json?.error) || res.json?.result?.isError === true;
+      // Silently treating a bad session_id as "not provided" would bind the
+      // identity to a DIFFERENT session than the caller asked for, and say
+      // nothing — the caller's write then files under an id they never chose.
+      assert.ok(errored, `accepted session_id ${JSON.stringify(bad)}: ${JSON.stringify(res.json)}`);
+    }
+  });
+});
+
 test("clocking in without an agent_id is refused", async () => {
   await withDaemon(async (port) => {
     const session = await initSession(port, "some-client");
