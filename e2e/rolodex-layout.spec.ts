@@ -885,7 +885,14 @@ test('search dims non-matches without moving a single card', async ({ page }) =>
 
   // Query a word certain to appear in this store's own memories.
   await page.locator('#searchInput').fill('memory');
-  await page.waitForTimeout(1200); // 250ms debounce + daemon round trip
+  // Poll for the classification rather than waiting a flat 1200ms. That budget
+  // was sized against a smaller store: 'memory' now matches 761 memories and
+  // /search alone measures ~1.23s, so the old wait asserted BEFORE the results
+  // landed and the test began failing on data growth rather than on a defect.
+  // A broad query gets slower every time the store grows; a poll does not care.
+  await page.waitForFunction(() =>
+    document.querySelectorAll('#drum .card3d.search-hit, #drum .card3d.search-dim').length > 0,
+    null, { timeout: 20_000, polling: 200 });
 
   const after = await page.evaluate(() => [...document.querySelectorAll('#drum .card3d')]
     .map(c => { const r = c.getBoundingClientRect(); return { idx: (c as HTMLElement).dataset.idx, x: Math.round(r.x), y: Math.round(r.y) }; }));
