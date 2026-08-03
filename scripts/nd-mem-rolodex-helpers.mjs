@@ -747,3 +747,45 @@ export function nextLitIndex(items, hits, snapshot, view, from, direction) {
   }
   return plain;
 }
+
+// ---------- position readout (issue #172) ----------
+// With exactly one lit card, nextLitIndex above correctly resolves to the card
+// you're already standing on and stepBy is a deliberate, tested no-op -- but
+// the app never SAID "there is 1 match and you are on it", so a correct arrow
+// read as a broken one. These two feed the #position readout's search suffix
+// that fixes that.
+
+// How many items AT THE CURRENT LEVEL are lit. Always call with `items` from
+// state.items, never derive this by counting rendered .search-hit elements --
+// the drum only renders a windowed slice of the level (a scalability fix took
+// it from ~3.1k DOM nodes to ~710), so counting the DOM silently undercounts
+// any level bigger than that window.
+export function countLit(items, hits, snapshot, view = {}) {
+  if (!hits || hits.size === 0 || !items || !items.length) return 0;
+  let n = 0;
+  for (const item of items) {
+    if (isLit(item, hits, snapshot, view)) n++;
+  }
+  return n;
+}
+
+// The suffix appended to "card N of M" -- e.g. " · 3 results" or " · 1
+// result" -- or '' when `active` is false, so a plain "card 4 of 20" is
+// untouched with no search running.
+//
+// `active` must be driven by whether a QUERY is set (state.search.query !==
+// ''), never by `count` or hits.size: a query that matches nothing at this
+// level is still an active search and must report "0 results", not silently
+// revert to looking like no search is running.
+//
+// Says "result", not "match": isLit lights a project/district card when
+// something INSIDE it matched, so the card itself is not a match -- it
+// contains one. "N matches" reads true at the memories level (the leaf,
+// where a lit card IS the match) and false everywhere above it, exactly the
+// "implies memory-level counts while standing at the wall" trap the issue
+// calls out. "result" is the one noun that stays honest about a card the
+// query surfaced, whether that card is the match or merely holds one.
+export function positionSearchSuffix(active, count) {
+  if (!active) return '';
+  return ` · ${count} result${count === 1 ? '' : 's'}`;
+}

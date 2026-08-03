@@ -78,8 +78,11 @@ for (const vp of [
   test(`chrome bar keeps every control on screen: ${vp.name}`, async ({ page }) => {
     await page.setViewportSize({ width: vp.width, height: vp.height });
     // Worst realistic content, not whatever the root view happens to show.
+    // Issue #172 grew #position with a search-match suffix, which does not
+    // shrink (flex:0 0 auto; white-space:nowrap) -- so the worst case now
+    // includes it: a search matching every card at the biggest level.
     await page.evaluate(() => {
-      document.querySelector('#position')!.textContent = 'card 124 of 124';
+      document.querySelector('#position')!.textContent = 'card 124 of 124 · 124 results';
       document.querySelector('#connState')!.textContent = 'Bridge :3799';
     });
     const bar = await chromeBar(page);
@@ -1034,6 +1037,94 @@ test('stepping during a search lands on hits, the short way round', async ({ pag
   // alone.
   expect(advances.some(d => d > 1),
     `every step advanced by exactly one card (${advances.join(', ')}) — stepping did not skip the dark cards`).toBe(true);
+});
+
+// Issue #172: with exactly one lit card at a level, the step arrow is a
+// correct, deliberately-tested no-op (nextLitIndex resolves to the card you
+// are already standing on) -- but nothing on screen said so, so a working
+// control read as broken. The #position readout's search suffix is the fix.
+// This test is anchored on real data, verified against this store with a
+// probe script before being written here:
+//   'rolodex' lights exactly 2 of the 20 projects -- 'neurodivergent-memory'
+//   (index 0, the wall's default centered card on a cold load) and the
+//   '(no project)' bucket (index 19, its circular neighbor -- so one
+//   hit-to-hit step reaches it directly). Diving into '(no project)' lands on
+//   its districts level, where the SAME query lights exactly one district,
+//   'logical_analysis', which a fresh dive centers on by default (index 0)
+//   -- the single-hit case the issue is about.
+test('the position readout reports the match count, staying honest through a single-hit level', async ({ page }) => {
+  test.slow();
+  await settleLayout(page);
+
+  await page.locator('#searchInput').fill('rolodex');
+  await page.waitForTimeout(1200); // 250ms debounce + daemon round trip
+
+  const wallText = await page.locator('#position').textContent();
+  expect(wallText, 'the wall should report the 2-project match count')
+    .toMatch(/^card 1 of 20 · 2 results$/);
+
+  // Hit-to-hit stepping (pre-existing, unrelated behaviour) hops from index 0
+  // directly to its only other lit neighbor, index 19.
+  await page.locator('#spinPrev').click();
+  // Poll for the exact expected reading rather than a fixed wait: headless
+  // WebKit's rAF throttling can leave the drum mid-ease for several real
+  // seconds (the neighboring "stepping during a search" test above measured
+  // ~9s for one step), so a flat timeout races it on that engine.
+  await page.waitForFunction(() =>
+    document.querySelector('#position')?.textContent === 'card 20 of 20 · 2 results',
+    null, { timeout: 20_000, polling: 300 });
+  expect(await page.locator('#position').textContent(),
+    'stepping to the other lit project must not change the reported count')
+    .toBe('card 20 of 20 · 2 results');
+
+  // Dive via Enter rather than a centre click: state.frontIndex (and this
+  // readout) flips to the new card the instant the eased rotation crosses the
+  // card boundary, well before the CSS transform finishes visually easing to
+  // its target -- clicking in that window hit-tests against the still-mid-
+  // flight rotation and can land on a different card entirely (observed on
+  // WebKit). dive() reads the front card from state.frontIndex directly, so
+  // it is correct the moment the readout above is, with no such race.
+  // #spinPrev now holds focus, and Enter on a button activates IT instead of
+  // reaching the global dive handler, so focus must move off it first.
+  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+  await page.keyboard.press('Enter');
+  await page.waitForTimeout(1700); // two ~700ms zoom halves, plus slack
+  expect(await page.evaluate(() => (document.querySelector('#stage') as HTMLElement).dataset.level))
+    .toBe('districts');
+  expect(await page.locator('#searchInput').inputValue(), 'the query must survive the dive').toBe('rolodex');
+
+  const districtsText = await page.locator('#position').textContent();
+  expect(districtsText, 'a level with exactly one lit card must say so, singular, not "1 results"')
+    .toMatch(/^card 1 of \d+ · 1 result$/);
+
+  // THE property this test exists to pin: the arrow really is a no-op here,
+  // and the readout must keep explaining that rather than going stale or
+  // blank once the (silent, correct, out-of-scope) no-op fires.
+  const before = await page.evaluate(() => (document.querySelector('#drum') as HTMLElement).style.transform);
+  await page.locator('#spinNext').click();
+  await page.waitForTimeout(600);
+  const after = await page.evaluate(() => (document.querySelector('#drum') as HTMLElement).style.transform);
+  expect(after, 'the single lit card is a correct, deliberate no-op — not something this issue changes')
+    .toBe(before);
+  expect(await page.locator('#position').textContent(),
+    'the count must still read "1 result" after the dead-arrow press, not vanish')
+    .toMatch(/^card 1 of \d+ · 1 result$/);
+});
+
+test('the match count disappears the moment the query is cleared', async ({ page }) => {
+  test.slow();
+  await settleLayout(page);
+  await page.locator('#searchInput').fill('rolodex');
+  await page.waitForTimeout(1200);
+  expect(await page.locator('#position').textContent(), 'a precondition: the count must be showing first')
+    .toMatch(/ · 2 results$/);
+
+  await page.locator('#searchInput').fill('');
+  await page.waitForTimeout(600);
+  const cleared = await page.locator('#position').textContent();
+  expect(cleared, 'clearing the query must drop the suffix entirely, not freeze it or show "0 results"')
+    .not.toContain('result');
+  expect(cleared).toMatch(/^card \d+ of 20$/);
 });
 
 // window's contextmenu handler predates the search box and only exempted

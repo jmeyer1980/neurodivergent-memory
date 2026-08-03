@@ -916,7 +916,14 @@
       // lone depth badge and the band would read "⌂ 0^0" and nothing else.
       if (segs.length <= 1) els.crumb.innerHTML += '<span class="sep">·</span><span class="seg leaf">All projects</span>';
       els.crumb.dataset.segments = JSON.stringify(segs.map(s => s.target));
-      els.position.textContent = state.items.length ? `card ${state.frontIndex + 1} of ${state.items.length}` : '—';
+      // `state.search.query` (not hits.size) is the "is a search active" flag:
+      // a query that matches nothing AT ALL still leaves hits empty, and that
+      // must still report "0 results" rather than silently look unsearched.
+      const searching = state.search.query !== '';
+      const litCount = searching ? H.countLit(state.items, state.search.hits, state.snapshot, state.view) : 0;
+      els.position.textContent = state.items.length
+        ? `card ${state.frontIndex + 1} of ${state.items.length}${H.positionSearchSuffix(searching, litCount)}`
+        : '—';
       els.hudHint.textContent = H.hintFor(level, POINTER_KIND);
       // One card cannot be stepped between, and a lone ◀ ▶ pair implies it can.
       els.spin.classList.toggle('hidden', state.items.length < 2);
@@ -1794,7 +1801,7 @@
     let searchSeq = 0;
     async function runSearch(query){
       const seq = ++searchSeq;
-      if (!query) { state.search = { query: '', hits: new Map() }; renderSearchState(); return; }
+      if (!query) { state.search = { query: '', hits: new Map() }; renderSearchState(); updateChrome(); return; }
       // A failed search and a search that matched nothing both arrive as an
       // empty hit set, and both would render as "every card dimmed" if we let
       // them -- so a dead daemon, a stale bridge, or a store that refuses to
@@ -1841,10 +1848,35 @@
       if (!data.ok) { showToast('Search failed — the drum is unchanged.'); return; }
       state.search = { query, hits: new Map((data.hits || []).map(h => [h.id, h.score])) };
       renderSearchState();
+      updateChrome();
     }
     els.searchInput.addEventListener('input', () => {
       const q = els.searchInput.value.trim();
-      els.locus.classList.toggle('searching', q !== '');
+      const nowSearching = q !== '';
+      const wasSearching = els.locus.classList.contains('searching');
+      if (nowSearching && !wasSearching) {
+        // #crumb keeps its box (visibility:hidden, not display:none) while
+        // searching, precisely so hiding the coordinate never shrinks #locus
+        // -- see that rule's own comment. But #crumb's box HEIGHT is driven
+        // by how many lines its content wraps to, and that wrap is sensitive
+        // to how much row width its sibling #position currently takes.
+        // #position's search-match suffix (issue #172) widens it the moment
+        // a query lands, leaving #crumb less room and pushing it onto an
+        // extra wrapped line WHILE HIDDEN -- silently growing #locus,
+        // #chrome, and therefore --chromeH, and shoving every card down
+        // (caught by "search dims... without moving a single card" on
+        // mobile-safari at a deep coordinate). Pinning #crumb's height for
+        // the duration of the search holds #chrome's height steady
+        // regardless of what #position or a mid-search dive later do to
+        // crumb's own wrap -- content can clip inside it, which is
+        // invisible, since crumb itself is.
+        els.crumb.style.height = els.crumb.getBoundingClientRect().height + 'px';
+        els.crumb.style.overflow = 'hidden';
+      } else if (!nowSearching && wasSearching) {
+        els.crumb.style.height = '';
+        els.crumb.style.overflow = '';
+      }
+      els.locus.classList.toggle('searching', nowSearching);
       clearTimeout(searchTimer);
       searchTimer = setTimeout(() => runSearch(q), 250);
     });
