@@ -95,8 +95,9 @@ npx neurodivergent-memory --daemon &   # new process (MUST be --daemon; see abov
 ### Limitations
 
 - **Startup path is covered** (was a documented gap; no longer true): the startup
-  WAL-compaction write (`saveToDiskSync`) now acquires the lock synchronously via
-  `FileSystemCoordinationLock.acquireSync()`, which exists for exactly this case.
+  WAL-compaction write (`saveToDiskSync`) now acquires the lock synchronously —
+  it calls `this.coordinationLock.acquireSync()`, a public instance method on
+  `FileSystemCoordinationLock` added for exactly this case.
   Two processes booting against the same snapshot no longer race on the initial
   compaction write, and staggered restarts are no longer required for that reason.
 - Filesystem locking provides safety only on **local filesystems**. Network
