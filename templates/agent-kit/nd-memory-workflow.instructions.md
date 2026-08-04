@@ -14,18 +14,17 @@ Use neurodivergent-memory MCP as a persistent memory layer for development sessi
 
 ## Cadence
 
-- For every `store_memory` and `update_memory` call, set or preserve `agent_id` as the authorship field so memory ownership stays consistent across agents and sessions.
 - Store key decisions, constraints, and blockers during work.
 - Store the why behind decisions, not just the fact that a decision happened.
 - Store the task plan in MCP memory before implementation, even when the plan is simple or already present in the prompt.
 - Prefer `update_memory` when continuing an active slice instead of emitting duplicate high-similarity task logs.
 - Record progress, validation, and hand-off writes on the active task thread.
-- Require `connect_memories` whenever you create a new plan or task-thread node.
 - For substantial implementation work, pair `practical_execution` updates with a `logical_analysis` or `creative_synthesis` memory when the durable principle should outlive the task log.
 - If the source memory is noisy, distill it so the stable reasoning survives separately from the implementation detail.
 - Connect related memories to reduce future rediscovery.
-- `district` is optional — omit it and the server infers one from content; only pass it when you know the guess will be wrong.
-- Tags are optional enrichment, not a gate. A bare `store_memory` call with just `content` is a complete, valid write. Add canonical tags (`topic:X`, `scope:X`, `kind:X`, `layer:X`) only when they'll materially help future retrieval — don't spend a decision cycle constructing a full tag set for a one-line note.
+- Require `connect_memories` whenever you create a new plan or task-thread node, so a
+  later session can follow the thread instead of rediscovering it.
+- Tags are optional enrichment; when tagging, use canonical namespaces: `topic:X`, `scope:X`, `kind:X`, `layer:X`.
 - Do not treat repo memory files or local notes as substitutes for MCP memory writes.
 
 ## Sub-agent guidance

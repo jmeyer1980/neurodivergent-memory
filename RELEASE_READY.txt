@@ -1,3 +1,11 @@
+HISTORICAL RECORD — NOT CURRENT STATUS
+=====================================
+This file records the release-readiness check for v0.3.0, run 2026-04-03 at
+commit 016c2b2. The package is now well past that version, so nothing below
+describes the state of the repository today. It is kept as a record of what was
+verified for that release, not as a claim that the tree is ready to deploy.
+For current state see CHANGELOG.md and the GitHub releases page.
+
 ╔══════════════════════════════════════════════════════════════════════════════════════╗
 ║                      v0.3.0 RELEASE CANDIDATE — READY TO DEPLOY                      ║
 ╚══════════════════════════════════════════════════════════════════════════════════════╝

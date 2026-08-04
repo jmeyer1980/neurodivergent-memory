@@ -13,6 +13,8 @@ This directory is a reusable, project-agnostic customization pack for memory-dri
 | `templates/copilot-instructions.md` | Bootstrap reference for GitHub Copilot sessions — tag schema, district table, tool quick-reference, session checklist, and memory-quality guardrails for recording why. |
 | `templates/explore_memory_city.prompt.md` | Prompt for guided exploration of memory districts and graph structure. |
 | `templates/memory-driven-issue-execution.prompt.md` | Prompt for executing a tracked issue with full memory-driven context (pull → plan → act → update), including durable reasoning capture. |
+| `templates/memory-driven-address-pr-comments.prompt.md` | Prompt for working through review feedback on an open pull request, recording what was accepted or rejected and why. |
+| `templates/kanban-memory.instructions.md` | Instructions for the kanban/task-lifecycle tools — status transitions, `current_slice`, `why_now`, and the WIP guardrail. |
 
 ## Recommended Install Path
 

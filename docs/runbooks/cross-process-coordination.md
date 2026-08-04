@@ -29,7 +29,7 @@ snapshot at any time.
 
 ```bash
 # No coordination variables needed — defaults are safe for single-writer.
-NEURODIVERGENT_MEMORY_FILE=/data/shared/memories.json npx neurodivergent-memory
+NEURODIVERGENT_MEMORY_FILE=/data/shared/memories.json npx neurodivergent-memory --daemon
 ```
 
 ### Guarantees
@@ -65,7 +65,7 @@ export NEURODIVERGENT_COORDINATION_MODE=filesystem-lock
 export NEURODIVERGENT_MEMORY_FILE=/data/shared/memories.json
 
 # One process replaces another during a rolling restart.
-npx neurodivergent-memory &   # new process
+npx neurodivergent-memory --daemon &   # new process (MUST be --daemon; see above)
 # ... allow old process to drain and stop
 ```
 
@@ -94,11 +94,12 @@ npx neurodivergent-memory &   # new process
 
 ### Limitations
 
-- **Startup path not covered**: the startup WAL-compaction write (`saveToDiskSync`)
-  runs once at process boot without acquiring the lock. In practice this window
-  is sub-second and is safe for rolling-restart deployments, but it means two
-  processes simultaneously booting against the same snapshot could race on that
-  initial compaction write. Use staggered restarts to avoid this window.
+- **Startup path is covered** (was a documented gap; no longer true): the startup
+  WAL-compaction write (`saveToDiskSync`) now acquires the lock synchronously —
+  it calls `this.coordinationLock.acquireSync()`, a public instance method on
+  `FileSystemCoordinationLock` added for exactly this case.
+  Two processes booting against the same snapshot no longer race on the initial
+  compaction write, and staggered restarts are no longer required for that reason.
 - Filesystem locking provides safety only on **local filesystems**. Network
   filesystems (NFS, SMB, some FUSE mounts) may not respect `O_EXCL` atomicity.
   Use a local path or a volume driver that guarantees POSIX lock semantics.
@@ -136,7 +137,7 @@ regardless of what the raw value was:
 
 ---
 
-## v0.4.0 Orchestration Safety Validation Notes (Issue #114)
+## Orchestration Safety Validation Notes (Issue #114)
 
 This section captures release-readiness evidence for orchestration safety.
 
