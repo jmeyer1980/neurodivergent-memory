@@ -22,6 +22,8 @@ Use neurodivergent-memory MCP as a persistent memory layer for development sessi
 - For substantial implementation work, pair `practical_execution` updates with a `logical_analysis` or `creative_synthesis` memory when the durable principle should outlive the task log.
 - If the source memory is noisy, distill it so the stable reasoning survives separately from the implementation detail.
 - Connect related memories to reduce future rediscovery.
+- Require `connect_memories` whenever you create a new plan or task-thread node, so a
+  later session can follow the thread instead of rediscovering it.
 - Tags are optional enrichment; when tagging, use canonical namespaces: `topic:X`, `scope:X`, `kind:X`, `layer:X`.
 - Do not treat repo memory files or local notes as substitutes for MCP memory writes.
 

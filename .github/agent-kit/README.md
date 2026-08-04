@@ -28,7 +28,17 @@ This copies the packaged templates into the target repository's `.github/...` lo
 
 If you need the mirrored raw kit under a different repo-local import directory, pass `--import-dir auto|copilot|claude|cline|zendesk|<repo-relative-path>`. The native brand entrypoints still install in their standard locations; `--import-dir` only changes where the reusable source bundle is mirrored.
 
+To install into a Claude Code project layout instead, use:
+
+```bash
+npx neurodivergent-memory@latest init-agent-kit --brand claude
+```
+
+That writes Claude-native entrypoints such as `CLAUDE.md`, `.claude/rules/`, and `.claude/agents/`, while still mirroring the raw source templates under `.claude/agent-kit/templates/`.
+
 The authoring source in this repository stays under `.github/agent-kit/templates/`. The live destination `.github/agents/neurodivergent-agent.agent.md` should be treated as generated consumer state, not as a tracked source file.
+
+> **`templates/agent-kit/` is generated — do not edit it.** `scripts/prepare-agent-kit.cjs` deletes and re-copies that whole directory from this one on every `prepack`, so any edit made there is silently destroyed at the next publish. Edit the files here instead.
 
 ### Tool persistence troubleshooting
 

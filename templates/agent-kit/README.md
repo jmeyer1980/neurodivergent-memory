@@ -14,6 +14,7 @@ This directory is a reusable, project-agnostic customization pack for memory-dri
 | `templates/explore_memory_city.prompt.md` | Prompt for guided exploration of memory districts and graph structure. |
 | `templates/memory-driven-issue-execution.prompt.md` | Prompt for executing a tracked issue with full memory-driven context (pull → plan → act → update), including durable reasoning capture. |
 | `templates/memory-driven-address-pr-comments.prompt.md` | Prompt for resolving pull request review comments with mandatory memory cadence (plan/progress/validation/handoff), rationale capture, and thread-resolution discipline. |
+| `templates/kanban-memory.instructions.md` | Instruction file that binds Kanban board lifecycle events (card creation, column transitions, blockers, sprint planning, and retrospectives) to neurodivergent-memory MCP writes. Includes a column→district mapping, per-transition memory contracts, a canonical `kanban:X` tag namespace, and memory quality guardrails. |
 
 ## Recommended Install Path
 
@@ -37,6 +38,8 @@ That writes Claude-native entrypoints such as `CLAUDE.md`, `.claude/rules/`, and
 
 The authoring source in this repository stays under `.github/agent-kit/templates/`. The live destination `.github/agents/neurodivergent-agent.agent.md` should be treated as generated consumer state, not as a tracked source file.
 
+> **`templates/agent-kit/` is generated — do not edit it.** `scripts/prepare-agent-kit.cjs` deletes and re-copies that whole directory from this one on every `prepack`, so any edit made there is silently destroyed at the next publish. Edit the files here instead.
+
 ### Tool persistence troubleshooting
 
 If tools appear disabled after merge/pull, refresh the installed agent-kit using your repository's detected layout first:
@@ -56,9 +59,6 @@ Prefer running without `--force` first; use `--force` only when you intentionall
 - Shared instructions: `.github/instructions/nd-memory-workflow.instructions.md`
 - Prompts: `.github/prompts/<prompt-name>.prompt.md`
 - Copilot bootstrap: `.github/copilot-instructions.md`
-- Claude project instructions: `CLAUDE.md` or `.claude/CLAUDE.md`
-- Claude project rules: `.claude/rules/*.md`
-- Claude project subagents: `.claude/agents/*.md`
 - Optional mirrored kit bundle: `.github/agent-kit/templates/`, `.claude/agent-kit/templates/`, `.clinerules/agent-kit/templates/`, `.zendesk/agent-kit/templates/`, or another repo-local import path chosen during `init-agent-kit`
 
 ## Required Setup Handshake

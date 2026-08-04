@@ -30,7 +30,7 @@ Thanks for your interest in contributing.
 
 After each tagged release, verify these docs are updated to the released version:
 
-- `Roadmap_0_1_8_push_to_1_0_0.md`: Current Position header and Release History row
+- `plan/Roadmap_0_1_8_push_to_1_0_0.md`: Current Position header and Release History row
 - `SMOKE_TEST_REPORT.md`: Server Version and report date
 - `EXPERIMENT_REPORT.md`: Version under test and report date
 - `README.md`: any release-specific labels or migration notes

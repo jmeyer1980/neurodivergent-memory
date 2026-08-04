@@ -92,8 +92,9 @@ npx neurodivergent-memory@latest init-agent-kit
 
 ```mermaid
 flowchart LR
-  A[Client MCP Request] --> B[MCP Server Stdio Transport]
-  B --> C{Request Type}
+  A[Client MCP Request] --> B[Stdio Proxy<br/>the default]
+  B -->|JSON-RPC over HTTP| P[Shared Daemon<br/>127.0.0.1:3838]
+  P --> C{Request Type}
   C -->|Tools| D[Tool Handler]
   C -->|Resources| E[Resource Handler]
   C -->|Prompts| F[Prompt Handler]
@@ -104,19 +105,47 @@ flowchart LR
 
   G --> H[Memory Graph Store]
   G --> I[BM25 Index]
-  H --> J[Persisted JSON Snapshot]
+  H --> W[WAL append]
+  W --> J[Periodic JSON Snapshot]
 
   D --> K[MCP JSON Response]
   E --> K
   F --> K
-  K --> A
+  K --> B
+  B --> A
 ```
 
 Flow notes:
 
-- Memory operations update both graph state and BM25 index.
-- Persistence writes to the local snapshot file for restart continuity.
-- All MCP responses return through stdio transport.
+- **The daemon is the only process that opens the store.** `npx neurodivergent-memory`
+  starts a *stdio proxy*, which ensures a shared daemon is running and forwards
+  JSON-RPC to it. Every client — Claude Code, VS Code, the web app — talks to the
+  same daemon, which is what makes concurrent clients safe. Before this, several
+  clients each opened the store directly and the last writer won.
+- Each client connection gets its own MCP session, and its `agent_id` is bound
+  automatically from the handshake's `clientInfo.name`. See `agent_clock_in` to
+  override that deliberately.
+- Memory operations update both graph state and the BM25 index.
+- Writes append to a WAL first and are snapshotted periodically — not a full
+  snapshot rewrite per write.
+- Responses return to the client over stdio; the proxy is transparent to the client.
+
+Three run modes, dispatched in `src/index.ts`:
+
+| Mode | How you get it | Opens the store? |
+|---|---|---|
+| **proxy** | the default for `npx neurodivergent-memory` | No — forwards to the daemon |
+| **daemon** | `--daemon`, or `NEURODIVERGENT_MEMORY_MODE=daemon` | Yes — the sole writer |
+| **standalone** | `NEURODIVERGENT_MEMORY_MODE=standalone` | Yes — no daemon, for tests, CI, and `npm run inspector` |
+
+Relevant environment variables:
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `NEURODIVERGENT_MEMORY_DAEMON_PORT` | `3838` | Port the shared daemon listens on. **If you find an unexpected listener on 3838, this is it.** |
+| `NEURODIVERGENT_MEMORY_MODE` | unset (proxy) | Force `daemon` or `standalone` |
+| `NEURODIVERGENT_MEMORY_DAEMON_IDLE_EXIT_MS` | 30 min | How long an idle daemon lingers before exiting |
+| `NEURODIVERGENT_MEMORY_SESSION_IDLE_MS` | 30 min | How long a session's bound identity survives without calls |
 
 ## Features
 
@@ -156,6 +185,19 @@ Memories are organized by cognitive domain:
 - **`prepare_memory_city_context`** — Tool mirror of `explore_memory_city` for clients that support tools but do not invoke MCP prompts
 - **`prepare_synthesis_context`** — Tool mirror of `synthesize_memories` for prompt-limited clients
 - **`prepare_packetized_synthesis_context`** — Tool mirror of `synthesize_memory_packets` for prompt-limited or attachment-constrained clients
+- **`distill_memory`** — Translate an `emotional_processing` memory into a structured logical artifact (signals, triggers, constraints, next actions, risk flags) in `logical_analysis`, at reduced intensity and neutral valence
+- **`register_district`** — Register a custom district, validated against LUCA ancestry so it traces back to one of the five canonical districts and inherits that ancestor's archetype
+- **`share_memory`** — Raise a memory's visibility (default `shared`) for a target agent and record an auditable provenance trail
+- **`list_sessions`** — List every session id that has tagged memories, with counts per session
+- **`list_tools`** / **`mirror_list_tools`** — Callable mirrors of the tool catalog, for clients that cannot reason over native MCP tool discovery
+
+**Task lifecycle and kanban.** These track work across sessions rather than storing knowledge:
+
+- **`kanban_view`** — Board view of `practical_execution` memories grouped by status, for WIP checks
+- **`update_status`** — Move a memory's kanban status and optionally set `current_slice` / `why_now`; enforces the WIP guardrail on `in_progress`
+- **`publish_task`** — Advance a task's publication lifecycle and record the last completed step, so a partially-published task can be recovered. Idempotent
+- **`resume_task`** — Validate that a task is resumable and return a diagnostic payload (lifecycle state, last successful step, next allowed actions)
+- **`close_task`** — Transition a task to closed. Idempotent, and clears the session's bound agent identity
 
 ### Prompts
 
@@ -575,7 +617,7 @@ For Docker:
         "NEURODIVERGENT_MEMORY_DIR=/data",
         "-v",
         "neurodivergent-memory-data:/data",
-        "docker.io/twgbellok/neurodivergent-memory:0.3.0"
+        "docker.io/twgbellok/neurodivergent-memory:0.3.9"
       ]
     }
   }
@@ -605,7 +647,19 @@ Fully auto-approved tools:
         "prepare_memory_city_context",
         "prepare_synthesis_context",
         "prepare_packetized_synthesis_context",
-        "register_district"
+        "register_district",
+        "server_handshake",
+        "agent_clock_in",
+        "agent_clock_out",
+        "share_memory",
+        "list_sessions",
+        "kanban_view",
+        "update_status",
+        "publish_task",
+        "resume_task",
+        "close_task",
+        "list_tools",
+        "mirror_list_tools"
       ],
       "disabled": false,
       "timeout": 120,
@@ -619,7 +673,7 @@ Fully auto-approved tools:
         "NEURODIVERGENT_MEMORY_DIR=/data",
         "-v",
         "neurodivergent-memory-data:/data",
-        "docker.io/twgbellok/neurodivergent-memory:0.3.0"
+        "docker.io/twgbellok/neurodivergent-memory:0.3.9"
       ],
       "env": {}
     }
@@ -636,7 +690,7 @@ If you want to use the mcp server in Github Copilot Agent Workflows (github spin
       "type": "stdio",
       "command": "npx",
       "args": [
-        "neurodivergent-memory@0.3.0"
+        "neurodivergent-memory@latest"
       ],
       "env": {
         "NEURODIVERGENT_MEMORY_DIR": ".neurodivergent-memory"
@@ -658,7 +712,19 @@ If you want to use the mcp server in Github Copilot Agent Workflows (github spin
         "list_memories",
         "store_memory",
         "search_memories",
-        "memory_stats"
+        "memory_stats",
+        "server_handshake",
+        "agent_clock_in",
+        "agent_clock_out",
+        "share_memory",
+        "list_sessions",
+        "kanban_view",
+        "update_status",
+        "publish_task",
+        "resume_task",
+        "close_task",
+        "list_tools",
+        "mirror_list_tools"
       ]
     }
   }
@@ -683,7 +749,7 @@ If you want per-project isolation instead of a shared global memory file, mount 
         "NEURODIVERGENT_MEMORY_DIR=/data",
         "-v",
         "${workspaceFolder}/.neurodivergent-memory:/data",
-        "docker.io/twgbellok/neurodivergent-memory:0.3.0"
+        "docker.io/twgbellok/neurodivergent-memory:0.3.9"
       ]
     }
   }
@@ -699,7 +765,7 @@ Use an explicit version tag. The published Docker images intentionally do not ma
 You can also run the packaged server image directly:
 
 ```bash
-docker run --rm -i twgbellok/neurodivergent-memory:0.3.0
+docker run --rm -i twgbellok/neurodivergent-memory:0.3.9
 ```
 
 ### Debugging
@@ -716,7 +782,13 @@ The Inspector will provide a URL to access debugging tools in your browser.
 
 For visually browsing, creating, editing, and reorganizing memories outside of an MCP client, `scripts/nd-mem-bridge-server.mjs` serves a local browser UI (`scripts/nd-mem-mcp-app-bridge.html`) backed by the same single-writer daemon your MCP clients use — reads and writes go through the identical store, so the web app and your AI agent always see the same live data.
 
-Start it (works from any directory once dependencies are installed):
+> **Requires a clone of this repository.** The bridge and both web UIs live in
+> `scripts/`, which is deliberately **not** part of the published npm package —
+> `npm install -g neurodivergent-memory` gives you the MCP server and nothing
+> here. To use the web app, clone the repo and run `npm install` in it. The MCP
+> server itself needs none of this; the web app is a companion, not a dependency.
+
+Start it (from a clone of this repo, from any working directory):
 
 ```bash
 npm run bridge
@@ -797,7 +869,11 @@ to project selection; zooming out (right-click, Esc/Backspace, the ⤺ button,
 Ctrl+scroll-down, or pinch in) walks back through the exact views you came
 from, and bounces off the wall when you reach the first view of the session.
 Editing the front card routes through the same bridge `/update` endpoint as
-the classic app; creating memories stays in the classic view.
+the classic app, and creating goes through `/save` — either from the **+**
+button in the chrome bar, or by long-pressing empty space to create in the
+context you are standing in. Typing in the search box ranks through the daemon's
+own BM25, so the rolodex lights the same matches an agent would see, dims the
+misses, and leaves every card exactly where it was.
 
 Navigation aids:
 
@@ -848,6 +924,8 @@ Use the packaged installer to materialize those templates into a consumer reposi
 | `templates/copilot-instructions.md` | Bootstrap reference for GitHub Copilot sessions — tag schema, district table, tool quick-reference, and session checklist in one file. |
 | `templates/explore_memory_city.prompt.md` | Prompt for guided exploration of memory districts and graph structure. |
 | `templates/memory-driven-issue-execution.prompt.md` | Prompt for executing a tracked issue with full memory-driven context (pull → plan → act → update). |
+| `templates/memory-driven-address-pr-comments.prompt.md` | Prompt for working through review feedback on an open pull request, recording what was accepted or rejected and why. |
+| `templates/kanban-memory.instructions.md` | Instructions for the kanban/task-lifecycle tools — status transitions, `current_slice`, `why_now`, and the WIP guardrail. |
 
 ### Install the kit into a project
 
@@ -860,7 +938,7 @@ npx neurodivergent-memory@latest init-agent-kit
 Useful options:
 
 - `--target <path>` installs into a different repository root.
-- `--brand auto|copilot|claude` chooses the target platform layout. `auto` detects an existing Claude project (`CLAUDE.md` or `.claude/`) and otherwise defaults to Copilot-compatible `.github/...` installation.
+- `--brand auto|copilot|claude|cline` chooses the target platform layout. `auto` detects an existing Claude project (`CLAUDE.md` or `.claude/`) and otherwise defaults to Copilot-compatible `.github/...` installation.
 - `--import-dir auto|copilot|claude|cline|zendesk|<repo-relative-path>` chooses where the mirrored raw agent-kit bundle is written inside the target repo. `auto` keeps the brand-native default.
 - `--dry-run` shows what would be copied without writing files.
 - `--force` overwrites existing destination files.
@@ -1007,7 +1085,9 @@ When storing execution-heavy memories, include the reasoning behind the action a
 
 ## Persistence
 
-Memories are automatically saved to `~/.neurodivergent-memory/memories.json` on every write.
+Memories are persisted to `~/.neurodivergent-memory/` — appended to a write-ahead
+log on every write, and compacted into the `memories.json` snapshot periodically.
+See [Multi-Tier Memory Persistence](#multi-tier-memory-persistence) for the full model.
 The graph is restored on server startup — no data is lost between restarts.
 
 ---
