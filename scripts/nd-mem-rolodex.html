@@ -4,6 +4,27 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>ND-Mem Rolodex</title>
+  <!-- Theme resolution runs HERE, inline and render-blocking, before the first
+       paint. It cannot live with the rest of the app: that is a
+       <script type="module">, which is deferred by definition and therefore
+       always runs AFTER parsing — so the page would paint in the hardcoded
+       theme below and then flip, which is precisely the flash this whole
+       change exists to remove. The attribute on <html> stays as the no-JS
+       fallback; this overrides it before anything is drawn.
+       Kept deliberately tiny: every millisecond here delays first paint. -->
+  <script>
+    window.__ndmemTheme = (function () {
+      var KEY = 'ndmem.rolodex.theme';
+      function apply(t) {
+        document.documentElement.setAttribute('data-theme', t === 'light' ? 'light' : 'dark');
+      }
+      var stored = null;
+      try { stored = localStorage.getItem(KEY); } catch (e) { /* private mode */ }
+      if (stored === 'light' || stored === 'dark') apply(stored);
+      else apply(matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark');
+      return { key: KEY, apply: apply };
+    })();
+  </script>
   <link rel="preconnect" href="https://api.fontshare.com">
   <link href="https://api.fontshare.com/v2/css?f[]=satoshi@300,400,500,700,900&f[]=clash-display@400,500,600,700&display=swap" rel="stylesheet">
   <style>
@@ -24,8 +45,27 @@
        it was a dark shade of that same cyan; now it's a dark shade of the new
        brown, so depth badge / map cursor / focus accents stay one hue family
        with the wash instead of reverting to cyan. */
-    :root,[data-theme="light"]{--bg:#c1ae8c;--border:#b8ab95;--text:#2b2419;--muted:#474035;--faint:#575043;--primary:#5c3a1a;--tint:150,95,45;--cardW:340px;--cardH:230px;--font-display:'Clash Display','Inter',sans-serif;--font-body:'Satoshi','Inter',sans-serif;--surface:rgba(243,236,224,.8);--surfaceBorder:rgba(64,52,36,.22);--bgEnd:#b49f7b;--overlayBg:rgba(232,223,206,.97);--cardWash:linear-gradient(180deg,rgba(255,250,240,.18),rgba(90,74,50,.04));--optionBg:#f6f1e6;--optionText:#2b2419;--wash:rgba(64,52,36,.06);--washStrong:rgba(64,52,36,.11);--cardBase:#ebe2d1}
-    [data-theme="dark"]{--bg:#111318;--border:#37404b;--text:#edf2f4;--muted:#a3b0b8;--faint:#6e7a84;--primary:#60d7d2;--tint:96,215,210;--surface:rgba(16,20,24,.72);--surfaceBorder:rgba(255,255,255,.1);--bgEnd:#0d0f13;--overlayBg:rgba(20,24,29,.96);--cardWash:linear-gradient(180deg,rgba(255,255,255,.08),rgba(255,255,255,.03));--optionBg:#1b1f24;--optionText:#edf2f4;--wash:rgba(255,255,255,.05);--washStrong:rgba(255,255,255,.12);--cardBase:rgba(16,20,24,.72)}
+    /* STRUCTURE IS NEUTRAL, CONTENT IS WARM. --surfaceBorder is the hairline on
+       every card, pill, chrome bar and the minimap frame (11 uses). It was a
+       warm dark at .22 alpha, which composited to 1.40:1 against a card — so
+       faint that card edges relied almost entirely on the drop shadow to exist.
+       It is now drawn from the neutral end of the Desert Sands ramp (#8C8B8B,
+       0% saturation), which reads as structure rather than as another warm
+       accent competing with the sepia, and lands at 1.94:1 against a card.
+
+       Neutral is also the one choice no colour vision deficiency can lose: at
+       0% saturation there is no hue carrying information, so the structure
+       survives every form of CVD intact. That is a property worth spending on
+       borders specifically, where the line IS the information.
+
+       The rest of that palette was measured and deliberately NOT used: as a
+       text tier its lightest usable tone reaches only 2.64:1 on a card against
+       the >=3 a label needs, and #F5F5DC is 91% lightness — BRIGHTER than the
+       cards it would sit on, which would have made the too-bright complaint
+       worse. Dark keeps its own neutral (white at low alpha); it is a cool
+       palette and a warm-neutral hairline would fight it. */
+    :root,[data-theme="light"]{--bg:#c1ae8c;--text:#2b2419;--muted:#474035;--faint:#575043;--primary:#5c3a1a;--tint:150,95,45;--cardW:340px;--cardH:230px;--font-display:'Clash Display','Inter',sans-serif;--font-body:'Satoshi','Inter',sans-serif;--surface:rgba(243,236,224,.8);--surfaceBorder:rgba(140,139,139,.72);--bgEnd:#b49f7b;--overlayBg:rgba(232,223,206,.97);--cardWash:linear-gradient(180deg,rgba(255,250,240,.18),rgba(90,74,50,.04));--optionBg:#f6f1e6;--optionText:#2b2419;--wash:rgba(64,52,36,.06);--washStrong:rgba(64,52,36,.11);--cardBase:#ebe2d1;--cardShadow:0 18px 42px rgba(0,0,0,.44);--cardShadowFront:0 24px 62px rgba(0,0,0,.6)}
+    [data-theme="dark"]{--bg:#111318;--text:#edf2f4;--muted:#a3b0b8;--faint:#6e7a84;--primary:#60d7d2;--tint:96,215,210;--surface:rgba(16,20,24,.72);--surfaceBorder:rgba(255,255,255,.1);--bgEnd:#0d0f13;--overlayBg:rgba(20,24,29,.96);--cardWash:linear-gradient(180deg,rgba(255,255,255,.08),rgba(255,255,255,.03));--optionBg:#1b1f24;--optionText:#edf2f4;--wash:rgba(255,255,255,.05);--washStrong:rgba(255,255,255,.12);--cardBase:rgba(16,20,24,.72);--cardShadow:0 20px 44px rgba(0,0,0,.55);--cardShadowFront:0 26px 66px rgba(0,0,0,.72)}
     *{box-sizing:border-box;margin:0;padding:0}
     html,body{height:100%;overflow:hidden;overscroll-behavior:none}
     body{font-family:var(--font-body);color:var(--text);background:radial-gradient(circle at top left,rgba(var(--tint),.1),transparent 24%),linear-gradient(180deg,var(--bg),var(--bgEnd));user-select:none}
@@ -132,8 +172,8 @@
        #scene is inset:0 in #stage, so the percentage resolves against the space
        actually available. */
     #stage[data-level="memories"]{--cardH:min(500px, 88%)}
-    .card3d{position:absolute;inset:0;display:flex;flex-direction:column;gap:10px;padding:18px;border-radius:24px;border:1px solid var(--surfaceBorder);background:var(--cardWash),radial-gradient(circle at top right,rgba(var(--tint),.16),transparent 38%),var(--cardBase);box-shadow:0 18px 40px rgba(0,0,0,.35);backface-visibility:hidden;transition:opacity .3s,box-shadow .3s,border-color .3s,transform .25s ease;opacity:.55}
-    .card3d.front{opacity:1;border-color:rgba(var(--tint),.4);box-shadow:0 24px 60px rgba(0,0,0,.5),0 0 30px rgba(var(--tint),.12)}
+    .card3d{position:absolute;inset:0;display:flex;flex-direction:column;gap:10px;padding:18px;border-radius:24px;border:1px solid var(--surfaceBorder);background:var(--cardWash),radial-gradient(circle at top right,rgba(var(--tint),.16),transparent 38%),var(--cardBase);box-shadow:var(--cardShadow);backface-visibility:hidden;transition:opacity .3s,box-shadow .3s,border-color .3s,transform .25s ease;opacity:.55}
+    .card3d.front{opacity:1;border-color:rgba(var(--tint),.4);box-shadow:var(--cardShadowFront),0 0 30px rgba(var(--tint),.12)}
     /* Dim the misses; light the hits. Composes with the existing card states
        rather than replacing them -- .flipped and the ::after affordance below
        are untouched. Declared AFTER .card3d.front on purpose: equal
@@ -1782,7 +1822,20 @@
       e.preventDefault();
       if (!state.transitioning) zoomOut();
     });
-    $('#themeBtn').addEventListener('click', () => document.documentElement.setAttribute('data-theme', document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark'));
+    // The theme used to reset to dark on every load: data-theme is hardcoded in
+    // the markup, the button only set the attribute, and nothing read it back.
+    // Anyone who preferred the other one re-clicked it every single visit.
+    //
+    // Resolution already happened in the render-blocking head script, before
+    // first paint — see the comment there for why it cannot live in this module.
+    // Its key and setter are reused rather than restated, so there is exactly
+    // one definition of where the choice is stored and what a valid value is.
+    const { key: THEME_KEY, apply: applyTheme } = window.__ndmemTheme;
+    $('#themeBtn').addEventListener('click', () => {
+      const next = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+      applyTheme(next);
+      try { localStorage.setItem(THEME_KEY, next); } catch { /* choice lasts the session only */ }
+    });
     window.addEventListener('keydown', (e) => {
       // A text field owns every key it receives. A focused link or button only
       // owns its activation keys — bailing on all of them meant that once the

@@ -885,7 +885,14 @@ test('search dims non-matches without moving a single card', async ({ page }) =>
 
   // Query a word certain to appear in this store's own memories.
   await page.locator('#searchInput').fill('memory');
-  await page.waitForTimeout(1200); // 250ms debounce + daemon round trip
+  // Poll for the classification rather than waiting a flat 1200ms. That budget
+  // was sized against a smaller store: 'memory' now matches 761 memories and
+  // /search alone measures ~1.23s, so the old wait asserted BEFORE the results
+  // landed and the test began failing on data growth rather than on a defect.
+  // A broad query gets slower every time the store grows; a poll does not care.
+  await page.waitForFunction(() =>
+    document.querySelectorAll('#drum .card3d.search-hit, #drum .card3d.search-dim').length > 0,
+    null, { timeout: 20_000, polling: 200 });
 
   const after = await page.evaluate(() => [...document.querySelectorAll('#drum .card3d')]
     .map(c => { const r = c.getBoundingClientRect(); return { idx: (c as HTMLElement).dataset.idx, x: Math.round(r.x), y: Math.round(r.y) }; }));
@@ -1361,4 +1368,57 @@ test('a search with no bridge listening says it could not reach it', async ({ pa
   expect(await page.locator('#toast').textContent()).toMatch(/could not reach the bridge/i);
   expect(await page.evaluate(() => document.querySelectorAll('#drum .card3d.search-dim').length),
     'an unreachable bridge must not dim the whole drum as though nothing matched').toBe(0);
+});
+
+// The theme used to reset on every load, which is what made a light theme in a
+// dark room read as "the theme is too bright" rather than "the app does not
+// know what room it is in".
+
+test('a stored theme choice survives a reload', async ({ page }) => {
+  await page.goto('/rolodex');
+  await page.evaluate(() => localStorage.setItem('ndmem.rolodex.theme', 'light'));
+  await page.reload();
+  expect(await page.evaluate(() => document.documentElement.getAttribute('data-theme'))).toBe('light');
+});
+
+test('with nothing stored, the OS preference decides', async ({ page }) => {
+  await page.emulateMedia({ colorScheme: 'light' });
+  await page.goto('/rolodex');
+  await page.evaluate(() => localStorage.removeItem('ndmem.rolodex.theme'));
+  await page.reload();
+  expect(await page.evaluate(() => document.documentElement.getAttribute('data-theme')),
+    'a light-mode machine should not be handed the dark theme').toBe('light');
+
+  await page.emulateMedia({ colorScheme: 'dark' });
+  await page.reload();
+  expect(await page.evaluate(() => document.documentElement.getAttribute('data-theme'))).toBe('dark');
+});
+
+test('an explicit choice outranks the OS preference', async ({ page }) => {
+  await page.emulateMedia({ colorScheme: 'dark' });
+  await page.goto('/rolodex');
+  await page.evaluate(() => localStorage.setItem('ndmem.rolodex.theme', 'light'));
+  await page.reload();
+  expect(await page.evaluate(() => document.documentElement.getAttribute('data-theme')),
+    'the user asked for light; the OS does not get to overrule that').toBe('light');
+});
+
+test('the theme is resolved before first paint, not by the deferred module', async ({ page }) => {
+  // Structural, and the point of the whole change: <script type="module"> is
+  // DEFERRED BY DEFINITION, so resolving there paints the hardcoded theme first
+  // and flips afterwards. This asserts the resolution sits in a plain,
+  // render-blocking script inside <head> — so that moving it back into the
+  // module later fails here instead of silently reintroducing the flash.
+  const html = await (await page.request.get('/rolodex')).text();
+  // Strip comments first: the comment ABOVE that script quotes the literal
+  // text "<script type=module>" to explain why the resolver cannot live there,
+  // and without this the scan matches the explanation instead of the code.
+  const head = html.slice(0, html.indexOf('</head>')).replace(/<!--[\s\S]*?-->/g, '');
+  const scripts = [...head.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script>/g)];
+  const resolver = scripts.find(([, , body]) => body.includes('data-theme'));
+  expect(resolver, 'no script in <head> sets data-theme').toBeTruthy();
+  const attrs = resolver![1];
+  expect(attrs, 'the resolver must not be a module — modules are deferred').not.toMatch(/type\s*=\s*["']module["']/);
+  expect(attrs, 'the resolver must not be deferred').not.toMatch(/\bdefer\b/);
+  expect(attrs, 'the resolver must not be async').not.toMatch(/\basync\b/);
 });
