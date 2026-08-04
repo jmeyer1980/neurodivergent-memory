@@ -117,11 +117,11 @@ flowchart LR
 
 Flow notes:
 
-- **The daemon is the only process that opens the store.** `npx neurodivergent-memory`
+- **In the default proxy → daemon topology, the daemon is the only process that opens the store.** `npx neurodivergent-memory`
   starts a *stdio proxy*, which ensures a shared daemon is running and forwards
   JSON-RPC to it. Every client — Claude Code, VS Code, the web app — talks to the
-  same daemon, which is what makes concurrent clients safe. Before this, several
-  clients each opened the store directly and the last writer won.
+  same daemon, which is what makes concurrent clients safe. (In `standalone` mode,
+  the standalone process opens the store directly.)
 - Each client connection gets its own MCP session, and its `agent_id` is bound
   automatically from the handshake's `clientInfo.name`. See `agent_clock_in` to
   override that deliberately.
