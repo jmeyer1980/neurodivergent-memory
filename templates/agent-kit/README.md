@@ -38,7 +38,7 @@ That writes Claude-native entrypoints such as `CLAUDE.md`, `.claude/rules/`, and
 
 The authoring source in this repository stays under `.github/agent-kit/templates/`. The live destination `.github/agents/neurodivergent-agent.agent.md` should be treated as generated consumer state, not as a tracked source file.
 
-> **`templates/agent-kit/` is generated — do not edit it.** `scripts/prepare-agent-kit.cjs` deletes and re-copies that whole directory from this one on every `prepack`, so any edit made there is silently destroyed at the next publish. Edit the files here instead.
+> **`templates/agent-kit/` is generated — do not edit it.** `scripts/prepare-agent-kit.cjs` deletes and re-copies it from `.github/agent-kit/templates/` on every `prepack`, so any edit made under `templates/agent-kit/` is silently destroyed at the next publish. Edit `.github/agent-kit/templates/` instead.
 
 ### Tool persistence troubleshooting
 
